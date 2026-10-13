@@ -32,6 +32,7 @@ from pydantic import BaseModel
 from . import registry
 from .draft import CAPCUT_PROJECTS_DIR
 from .pipeline import read_script, run_pipeline
+from .template import template_kit
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +186,59 @@ def templates(projects_dir: str | None = None) -> dict:
                 items.append({"name": d.name})
     default = next((t["name"] for t in items if t["name"].upper() == "CASA RIFUGIO"), None)
     return {"projects_dir": str(base), "default": default, "templates": items}
+
+
+@app.get("/api/template-kit")
+def template_kit_summary(name: str, projects_dir: str | None = None) -> dict:
+    """What a template offers, as a checklist for the app: which reusable
+    pieces it has and what to add to make it a complete kit for a client.
+    (A quick read of the draft; what each text block is *for* is decided by the
+    AI at generation time.)"""
+    base = Path(projects_dir) if projects_dir else CAPCUT_PROJECTS_DIR
+    try:
+        kit = template_kit(name, base)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+
+    def words(group: dict) -> str:
+        return " · ".join(s["text"] for s in group["slots"])
+
+    groups = kit["groups"]
+    title = groups[0] if groups and groups[0]["start"] < 1.0 else None
+    rest = [g for g in groups if g is not title]
+    lists = [g for g in rest if len({round(s["after"], 1) for s in g["slots"]}) >= 3]
+    labels = [g for g in rest if g not in lists]
+    checks = [
+        {"key": "title", "label": "Titolo d'apertura", "ok": bool(title),
+         "detail": words(title) if title else "",
+         "hint": "Metti all'inizio del progetto i testi del titolo come li vuoi sempre: "
+                 "anche su più righe, con la riga grande e un'emoji."},
+        {"key": "labels", "label": "Titoletti", "ok": bool(labels),
+         "detail": "  |  ".join(words(g) for g in labels[:3]),
+         "hint": "Aggiungi dopo il titolo un titoletto di esempio, a una o due righe: "
+                 "servirà per i capitoli e per i dati da far leggere."},
+        {"key": "list", "label": "Elenco puntato", "ok": bool(lists),
+         "detail": words(lists[0]) if lists else "",
+         "hint": "Aggiungi un elenco: tre o più testi uno sotto l'altro che entrano "
+                 "uno dopo l'altro. Verrà usato quando chi parla elenca più cose."},
+        {"key": "captions", "label": "Sottotitoli", "ok": kit["captions"] > 0,
+         "detail": f"{kit['captions']} di esempio" if kit["captions"] else "",
+         "hint": "Aggiungi almeno un sottotitolo con lo stile del cliente (meglio tre o "
+                 "più: l'app impara anche quanto farli lunghi)."},
+        {"key": "sounds", "label": "Suoni", "ok": bool(kit["sounds"]),
+         "detail": ", ".join(kit["sounds"][:6]) + ("…" if len(kit["sounds"]) > 6 else ""),
+         "hint": "Metti sulla timeline i suoni che usi sempre, vicino ai testi con cui li "
+                 "fai partire: l'AI impara l'abbinamento."},
+        {"key": "music", "label": "Musica", "ok": bool(kit["music"]),
+         "detail": ", ".join(kit["music"][:2]),
+         "hint": "Aggiungi la base musicale che usi di solito per questo cliente."},
+        {"key": "looks", "label": "Colore ed effetti", "ok": bool(kit["looks"]),
+         "detail": ", ".join(kit["looks"][:4]),
+         "hint": "Aggiungi dall'inizio la regolazione colore o i filtri del cliente: "
+                 "vengono estesi a tutto il video."},
+    ]
+    return {"ok": True, "name": name, "checks": checks,
+            "found": sum(c["ok"] for c in checks), "total": len(checks)}
 
 
 def _do_generate(req: GenerateRequest, log) -> tuple[str, str]:

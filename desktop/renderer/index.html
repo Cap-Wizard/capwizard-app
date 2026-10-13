@@ -108,7 +108,12 @@
           <div class="row">
             <label class="field-label">Template CapCut</label>
             <select id="template"></select>
-            <div class="hint">Musica, SFX e stile sottotitoli vengono ereditati dal template.</div>
+            <div class="hint">Il template è il kit del cliente: l'AI ne riusa titoli, titoletti, elenchi, sottotitoli, suoni, musica e colore.
+              <button class="btn-link" id="btn-kit-guide">Come si prepara un template</button></div>
+            <div class="kit-panel" id="kit-panel" hidden>
+              <div class="kit-head" id="kit-head"></div>
+              <div id="kit-checks"></div>
+            </div>
           </div>
           <div class="row">
             <label class="field-label">Titolo iniziale (opzionale)</label>
@@ -303,6 +308,43 @@
         <div class="spacer"></div>
         <button class="btn-primary-sm" id="wizard-next">Avanti</button>
         <button class="btn-primary-sm" id="wizard-done" hidden>Fine</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="kit-guide" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Un template per ogni cliente</h2>
+        <button class="modal-close" id="kit-guide-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="wizard-text">Un template è un normale progetto CapCut che contiene <strong>tutto ciò che per quel
+          cliente usi sempre</strong>. Lo prepari una volta; a ogni video l'AI lo studia e lo riusa.
+          Non servono clip video: bastano i pezzi qui sotto, anche con testi di esempio.</p>
+        <ol class="guide-steps">
+          <li><strong>Crea il progetto</strong> in CapCut e dagli il nome del cliente, per esempio «TEMPLATE MARIO ROSSI».</li>
+          <li><strong>Titolo d'apertura.</strong> All'inizio metti i testi del titolo come li vuoi sempre: più righe,
+            la riga grande, un'emoji, le animazioni.</li>
+          <li><strong>Titoletti.</strong> Subito dopo, un titoletto di esempio a una o due righe: l'AI lo userà
+            per i capitoli e per i dati da far leggere.</li>
+          <li><strong>Elenco.</strong> Tre o più testi uno sotto l'altro che entrano uno dopo l'altro: verrà usato
+            quando chi parla elenca più cose, una voce alla volta.</li>
+          <li><strong>Sottotitoli.</strong> Qualche sottotitolo con lo stile del cliente (meglio tre o più).</li>
+          <li><strong>Suoni.</strong> Metti sulla timeline quelli che usi sempre, <em>vicino ai testi con cui li fai
+            partire</em>: l'AI impara l'abbinamento e lo ripete.</li>
+          <li><strong>Musica.</strong> La base che usi di solito.</li>
+          <li><strong>Colore ed effetti.</strong> Regolazione, filtri o effetti dall'inizio del progetto: vengono
+            estesi a tutta la durata di ogni video.</li>
+          <li><strong>Chiudi il progetto in CapCut</strong> e sceglilo qui: sotto il menu vedi subito cosa l'app ha
+            trovato e cosa manca.</li>
+        </ol>
+        <p class="wizard-hint">Le parole che scrivi nel template sono solo modelli: l'AI le riscrive per ogni video
+          mantenendo font, colori, posizione e animazioni.</p>
+      </div>
+      <div class="modal-foot">
+        <div class="spacer"></div>
+        <button class="btn-primary-sm" id="kit-guide-done">Ho capito</button>
       </div>
     </div>
   </div>

@@ -31,6 +31,13 @@ Whisper trascrive, poi l'AI sceglie ogni cosa e spiega perché.
 - **testi** — titolo iniziale e testi di enfasi solo dove servono
 - **suoni** — dai suoni del template, l'AI decide dove e se usarli (transizioni solo
   sui cambi di scena reali, enfasi solo sui momenti chiave) e se tenere la musica
+- **kit del template** — i testi del template che non sono sottotitoli vengono letti a
+  blocchi (titolo d'apertura, titoletto, elenco che entra voce per voce) insieme ai
+  suoni che il template fa partire con ciascuno. A ogni video l'AI dice a cosa serve
+  ogni blocco e lo riscrive, mantenendo font, colori, posizione e animazioni; colore
+  ed effetti del template vengono estesi a tutto il video. Nell'app, sotto il menu
+  del template, un riquadro mostra cosa contiene il kit e cosa manca, con la guida
+  «Come si prepara un template»
 - **zoom** (opzionale, `--ai-zoom` o l'interruttore nell'app) — zoom in / zoom out
   leggeri (6–18%) sulle frasi chiave, scelti dall'AI; nel draft sono keyframe di
   scala come quelli fatti a mano in CapCut, e continuano attraverso i tagli dei silenzi

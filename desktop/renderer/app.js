@@ -177,6 +177,43 @@ async function loadTemplates() {
       sel.appendChild(o);
     }
   } catch (e) { console.error("templates", e); }
+  loadKit();
+}
+
+// What the chosen template offers, and what to add to make it a full kit.
+async function loadKit() {
+  const name = $("template").value;
+  const panel = $("kit-panel");
+  if (!name) { panel.hidden = true; return; }
+  try {
+    const kit = await (await fetch(`${BACKEND}/api/template-kit?name=${encodeURIComponent(name)}`)).json();
+    if ($("template").value !== name) return;          // the user picked another one meanwhile
+    const head = $("kit-head");
+    const box = $("kit-checks");
+    box.innerHTML = "";
+    panel.hidden = false;
+    if (!kit.ok) { head.textContent = kit.error || "Template non leggibile."; return; }
+    head.innerHTML = "";
+    const count = document.createElement("strong");
+    count.textContent = `${kit.found} su ${kit.total}`;
+    head.append("In questo template l'app ha trovato ", count,
+      kit.found === kit.total ? " pezzi: è un kit completo." : " pezzi del kit.");
+    for (const c of kit.checks) {
+      const row = document.createElement("div");
+      row.className = `kit-row ${c.ok ? "ok" : "missing"}`;
+      const mark = document.createElement("span");
+      mark.className = "kit-mark"; mark.textContent = c.ok ? "✓" : "○";
+      const body = document.createElement("div");
+      const label = document.createElement("span");
+      label.className = "kit-label"; label.textContent = c.label;
+      const detail = document.createElement("span");
+      detail.className = "kit-detail";
+      detail.textContent = c.ok ? (c.detail ? ` — ${c.detail}` : "") : ` — manca. ${c.hint}`;
+      body.append(label, detail);
+      row.append(mark, body);
+      box.appendChild(row);
+    }
+  } catch (e) { panel.hidden = true; console.error("kit", e); }
 }
 
 async function loadProjects() {
@@ -237,6 +274,7 @@ function newProject() {
   applySettings(DEFAULTS);
   // keep the loaded default template selected
   if (state.defaultTemplate) $("template").value = state.defaultTemplate;
+  loadKit();
   resetBatch();
   $("editor-title").textContent = "Nuovo progetto";
   resetConsole();
@@ -264,6 +302,7 @@ function applySettings(s) {
   $("input-path").value = s.input_path || "";
   $("name").value = s.name || "";
   $("template").value = s.template || "";
+  loadKit();
   $("script-path").value = s.script_path || "";
   $("intro-title").value = s.intro_title || "";
   $("model").value = s.model || "large-v3";
@@ -589,7 +628,7 @@ function classify(line) {
   if (t.startsWith("✂")) return "cut";
   if (t.startsWith("✓")) return "ok";
   if (t.includes("⚠") || t.startsWith("☐")) return "warn";
-  if (/^(👁|🎞|🔍|🔊|🔇|♪|✚|✎|Titolo iniziale|Argomento|Come l|Soglia|Regia|Formato|Tono|Struttura|Indicazioni|Consegne|Ritmo dal copione|Musica chiesta|Didascalia|🎬|Sottotitoli:|📄)/u.test(t)) return "ai";
+  if (/^(👁|🎞|🔍|🧩|🔊|🔇|♪|✚|✎|Titolo iniziale|Argomento|Come l|Soglia|Regia|Formato|Tono|Struttura|Indicazioni|Consegne|Ritmo dal copione|Musica chiesta|Didascalia|🎬|Sottotitoli:|📄)/u.test(t)) return "ai";
   return "";
 }
 
@@ -659,6 +698,9 @@ function showBatchResult(results) {
 function wireWizard() {
   $("btn-config-ai").onclick = openWizard;
   $("btn-ai-wizard-inline").onclick = openWizard;
+  $("template").onchange = loadKit;
+  $("btn-kit-guide").onclick = () => { $("kit-guide").hidden = false; };
+  $("kit-guide-close").onclick = $("kit-guide-done").onclick = () => { $("kit-guide").hidden = true; };
   $("wizard-close").onclick = closeWizard;
   $("wizard-next").onclick = () => gotoStep(state.wizardStep + 1);
   $("wizard-prev").onclick = () => gotoStep(state.wizardStep - 1);

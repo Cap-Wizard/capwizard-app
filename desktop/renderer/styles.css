@@ -393,3 +393,21 @@ input[type="range"]::-webkit-slider-thumb {
   padding: 14px 20px; border-top: 1px solid var(--border);
 }
 .modal-foot .spacer { flex: 1; }
+
+/* ---- what the chosen template offers ---- */
+.kit-panel {
+  margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--bg-input);
+}
+.kit-head { font-size: 12.5px; color: var(--text-dim); margin-bottom: 6px; }
+.kit-head strong { color: var(--text); }
+.kit-row { display: flex; gap: 9px; padding: 4px 0; font-size: 12.5px; line-height: 1.4; }
+.kit-mark { flex: 0 0 14px; font-weight: 700; }
+.kit-row.ok .kit-mark { color: var(--ok); }
+.kit-row.missing .kit-mark { color: var(--warn); }
+.kit-label { color: var(--text); }
+.kit-detail { color: var(--text-faint); overflow-wrap: anywhere; }
+.kit-row.missing .kit-detail { color: var(--text-dim); }
+.guide-steps { margin: 10px 0 0 18px; display: flex; flex-direction: column; gap: 8px; }
+.guide-steps li { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+.guide-steps strong { color: var(--text); }
