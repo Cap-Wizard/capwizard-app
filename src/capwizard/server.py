@@ -10,8 +10,8 @@ Design
   us plain filesystem paths.
 
 Run standalone for development:
-    capwiz-server            # binds 127.0.0.1:8765
-    capwiz-server --port 9000
+    capwizard-server            # binds 127.0.0.1:8765
+    capwizard-server --port 9000
 """
 from __future__ import annotations
 
@@ -108,6 +108,7 @@ class GenerateRequest(BaseModel):
     subtitle_max_words: int = 4
     subtitle_max_duration: float = 1.4
     subtitle_like_template: bool = True
+    ai_zoom: bool = False
     fmt: str = "vertical"
     projects_dir: str | None = None
 
@@ -125,7 +126,7 @@ class BatchRequest(GenerateRequest):
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="CapWiz API", version="0.1.0")
+app = FastAPI(title="CapWizard API", version="0.1.0")
 
 # The Electron renderer runs from a file:// or localhost origin; allow all in
 # this local-only server (it binds 127.0.0.1, never exposed to the network).
@@ -178,7 +179,9 @@ def templates(projects_dir: str | None = None) -> dict:
     items: list[dict] = []
     if base.exists():
         for d in sorted(base.iterdir()):
-            if d.is_dir() and (d / "draft_info.json").exists():
+            # (a project open in CapCut keeps its draft under another name for a while)
+            if d.is_dir() and any((d / f).exists() for f in
+                                  ("draft_info.json", "draft_info.json.bak", "template-2.tmp")):
                 items.append({"name": d.name})
     default = next((t["name"] for t in items if t["name"].upper() == "CASA RIFUGIO"), None)
     return {"projects_dir": str(base), "default": default, "templates": items}
@@ -210,6 +213,7 @@ def _do_generate(req: GenerateRequest, log) -> tuple[str, str]:
         subtitle_max_words=req.subtitle_max_words,
         subtitle_max_duration=req.subtitle_max_duration,
         subtitle_like_template=req.subtitle_like_template,
+        ai_zoom=req.ai_zoom,
         fmt=req.fmt,
         projects_dir=Path(req.projects_dir) if req.projects_dir else None,
         log=log,
@@ -363,7 +367,7 @@ async def job_logs(websocket: WebSocket, job_id: str) -> None:
             # flush any new log lines
             snapshot_logs = job.logs  # atomic read of the list reference
             while sent < len(snapshot_logs):
-                await websocket.send_json({"type": "log", "line": snapshot_logs[sent]})
+                await websocket.send_json({"type": "log", "i": sent, "line": snapshot_logs[sent]})
                 sent += 1
             if job.status in ("done", "error"):
                 await websocket.send_json({
@@ -389,7 +393,7 @@ async def job_logs(websocket: WebSocket, job_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def run() -> None:
-    parser = argparse.ArgumentParser(description="CapWiz backend server")
+    parser = argparse.ArgumentParser(description="CapWizard backend server")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()

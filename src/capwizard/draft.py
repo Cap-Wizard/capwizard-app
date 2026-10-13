@@ -160,7 +160,24 @@ def _video_material(clip) -> dict:
     }
 
 
+def _scale_keyframes(seg: TimelineSegment) -> list[dict]:
+    """A zoom, the way CapCut stores one: a single uniform-scale track
+    (`KFTypeScaleX`) of linear keyframes placed on the source clip's own time."""
+    if not seg.scale_keys:
+        return []
+    return [{
+        "id": _uid(), "material_id": "", "property_type": "KFTypeScaleX",
+        "keyframe_list": [{
+            "id": _uid(), "curveType": "Line", "time_offset": _us(t),
+            "left_control": {"x": 0.0, "y": 0.0}, "right_control": {"x": 0.0, "y": 0.0},
+            "values": [scale], "string_value": "", "graphID": "",
+        } for t, scale in seg.scale_keys],
+    }]
+
+
 def _video_segment(seg: TimelineSegment, material_id: str, extra_refs: list[str]) -> dict:
+    # like CapCut, the segment's own scale holds the value of the last keyframe
+    scale = seg.scale_keys[-1][1] if seg.scale_keys else 1.0
     return {
         "id": _uid(),
         "material_id": material_id,
@@ -173,7 +190,7 @@ def _video_segment(seg: TimelineSegment, material_id: str, extra_refs: list[str]
         "intensifies_audio": False, "cartoon": False,
         "volume": 0.0 if seg.keep.muted else 1.0, "last_nonzero_volume": 1.0,
         "clip": {
-            "scale": {"x": 1.0, "y": 1.0}, "rotation": 0.0,
+            "scale": {"x": scale, "y": scale}, "rotation": 0.0,
             "transform": {"x": 0.0, "y": 0.0},
             "flip": {"vertical": False, "horizontal": False}, "alpha": 1.0,
         },
@@ -186,7 +203,7 @@ def _video_segment(seg: TimelineSegment, material_id: str, extra_refs: list[str]
         "enable_color_wheels": True, "track_attribute": 0,
         "is_placeholder": False, "template_id": "",
         "enable_smart_color_adjust": False, "template_scene": "default",
-        "common_keyframes": [], "caption_info": None,
+        "common_keyframes": _scale_keyframes(seg), "caption_info": None,
         "responsive_layout": {
             "enable": False, "target_follow": "",
             "size_layout": 0, "horizontal_pos_layout": 0, "vertical_pos_layout": 0,

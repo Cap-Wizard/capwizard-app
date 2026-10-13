@@ -10,8 +10,8 @@ const BACKEND_PORT = 8765;
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 
 // Cloud licensing backend (accounts + Stripe subscription check).
-// Override with CAPWIZ_CLOUD_URL; defaults to local dev server.
-const CLOUD_URL = process.env.CAPWIZ_CLOUD_URL || "http://127.0.0.1:8799";
+// Override with CAPWIZARD_CLOUD_URL; defaults to local dev server.
+const CLOUD_URL = process.env.CAPWIZARD_CLOUD_URL || "http://127.0.0.1:8799";
 
 let pyProc = null;
 let mainWindow = null;
@@ -55,13 +55,13 @@ function devPythonPath() {
 function startBackend() {
   if (app.isPackaged) {
     // Packaged sidecar (PyInstaller onefile) lives in resources/backend/
-    const exe = process.platform === "win32" ? "capwiz-server.exe" : "capwiz-server";
+    const exe = process.platform === "win32" ? "capwizard-server.exe" : "capwizard-server";
     const bin = path.join(process.resourcesPath, "backend", exe);
     pyProc = spawn(bin, ["--port", String(BACKEND_PORT)], { env: { ...process.env } });
   } else {
     pyProc = spawn(
       devPythonPath(),
-      ["-m", "capwiz.server", "--port", String(BACKEND_PORT)],
+      ["-m", "capwizard.server", "--port", String(BACKEND_PORT)],
       { cwd: repoRoot(), env: { ...process.env } }
     );
   }
@@ -77,7 +77,7 @@ function startBackend() {
       "Il motore dell'app si è fermato",
       `Il backend Python non è in esecuzione (codice ${code}).\n\n` +
         `Di solito succede quando la porta ${BACKEND_PORT} è occupata da un'altra copia ` +
-        "dell'app rimasta aperta. Chiudi tutte le finestre di CapWiz e riavvia.\n\n" +
+        "dell'app rimasta aperta. Chiudi tutte le finestre di CapWizard e riavvia.\n\n" +
         "I dettagli sono nel terminale da cui hai lanciato l'app."
     );
   });

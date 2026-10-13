@@ -1,7 +1,7 @@
 {
-  "name": "capwiz-desktop",
+  "name": "capwizard-desktop",
   "version": "0.1.0",
-  "description": "CapWiz — desktop app (Electron shell + Python sidecar)",
+  "description": "CapWizard — desktop app (Electron shell + Python sidecar)",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
@@ -14,8 +14,8 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "it.predanicola.capwiz",
-    "productName": "CapWiz",
+    "appId": "it.predanicola.capwizard",
+    "productName": "CapWizard",
     "files": [
       "electron/**/*",
       "renderer/**/*"

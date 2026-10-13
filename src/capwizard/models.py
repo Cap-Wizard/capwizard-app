@@ -46,6 +46,8 @@ class TimelineSegment:
     keep: KeepInterval
     timeline_start: float     # seconds, position in final video
     timeline_end: float
+    # zoom: (second in the SOURCE clip, scale) pairs — CapCut keys scale on source time
+    scale_keys: list[tuple[float, float]] = field(default_factory=list)
 
 
 @dataclass

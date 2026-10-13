@@ -1,6 +1,6 @@
-<p align="center"><img src="assets/logo.png" alt="CapWiz" width="220"></p>
+<p align="center"><img src="assets/logo.png" alt="CapWizard" width="220"></p>
 
-# CapWiz
+# CapWizard
 
 Generatore automatico di progetti CapCut per video social brevi.
 Da una cartella di video genera un draft già pronto. **Il montaggio lo decide Claude**:
@@ -31,6 +31,9 @@ Whisper trascrive, poi l'AI sceglie ogni cosa e spiega perché.
 - **testi** — titolo iniziale e testi di enfasi solo dove servono
 - **suoni** — dai suoni del template, l'AI decide dove e se usarli (transizioni solo
   sui cambi di scena reali, enfasi solo sui momenti chiave) e se tenere la musica
+- **zoom** (opzionale, `--ai-zoom` o l'interruttore nell'app) — zoom in / zoom out
+  leggeri (6–18%) sulle frasi chiave, scelti dall'AI; nel draft sono keyframe di
+  scala come quelli fatti a mano in CapCut, e continuano attraverso i tagli dei silenzi
 - **recensione finale** del montato con voto e suggerimento
 - **sottotitoli identici al template** — ogni sottotitolo è una copia completa di
   uno vero del template (modello di testo, animazione, effetto, font, posizione),
@@ -42,7 +45,7 @@ Whisper trascrive, poi l'AI sceglie ogni cosa e spiega perché.
 Serve il CLI `claude` loggato (`claude` → `/login`) oppure `ANTHROPIC_API_KEY`.
 
 Ogni scelta viene scritta nel log con il motivo e salvata in un **report Markdown**
-(con la trascrizione annotata) in `~/Library/Application Support/CapWiz/reports/`.
+(con la trascrizione annotata) in `~/Library/Application Support/CapWizard/reports/`.
 
 ## Setup
 
@@ -58,7 +61,7 @@ altrimenti il software usa il filtro `deshake` integrato.
 ## GUI
 
 ```bash
-.venv/bin/capwiz-gui
+.venv/bin/capwizard-gui
 ```
 
 Finestra a 4 tab:
@@ -74,14 +77,14 @@ Finestra a 4 tab:
 
 ```bash
 # minimo
-.venv/bin/capwiz /path/cartella --name "Reel 23"
+.venv/bin/capwizard /path/cartella --name "Reel 23"
 
 # con template + ritmo serrato + durata target
-.venv/bin/capwiz /path/cartella --name "Reel 23" \
+.venv/bin/capwizard /path/cartella --name "Reel 23" \
   --template "COSA COMPRO CON 200K" --pacing fast --ai-target-duration 30
 
 # modello Claude più accurato, copione di riferimento
-.venv/bin/capwiz /path/cartella --name "Reel 23" \
+.venv/bin/capwizard /path/cartella --name "Reel 23" \
   --template "COSA COMPRO CON 200K" --ai-model opus --script copione.docx
 ```
 
@@ -123,7 +126,7 @@ desktop/                    # guscio Electron
     └── app.js              # parla col backend via REST + WebSocket
 ```
 
-Il backend è un server **FastAPI** ([server.py](src/capwiz/server.py)) che avvolge
+Il backend è un server **FastAPI** ([server.py](src/capwizard/server.py)) che avvolge
 il pipeline esistente ed espone:
 - `GET /api/health` · `GET /api/system` · `GET /api/templates`
 - `POST /api/generate` → avvia un job, ritorna `job_id`
@@ -149,7 +152,7 @@ nome della sottocartella (con un prefisso opzionale). Endpoint:
 ### Schermate
 
 - **Home** — griglia dei progetti creati dal programma (registro in
-  [registry.py](src/capwiz/registry.py), salvato in app-data). Ogni card ha
+  [registry.py](src/capwizard/registry.py), salvato in app-data). Ogni card ha
   *Apri* (in Finder/Explorer) e *Duplica*.
 - **Duplica** — riapre l'editor pre-riempito con tutte le impostazioni del
   progetto: basta cambiare le clip / qualche preferenza e rigenerare.
@@ -185,7 +188,7 @@ impacchettata userà un sidecar PyInstaller in `resources/backend/` (da fare).
 ## Architettura Python
 
 ```
-src/capwiz/
+src/capwizard/
 ├── cli.py          # entry point CLI (click)
 ├── gui.py          # entry point GUI (customtkinter)
 ├── pipeline.py     # orchestrator: AI check → transcribe → AI looks at clips → AI brief → AI edit / b-roll → subtitles → AI texts/sounds → draft → AI review

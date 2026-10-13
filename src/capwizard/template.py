@@ -39,6 +39,39 @@ from .models import CoverShot, SubtitleChunk, TimelineSegment
 
 
 # ---------------------------------------------------------------------------
+# Reading a template
+# ---------------------------------------------------------------------------
+
+# While CapCut has a project open, or is saving it, `draft_info.json` can be
+# missing or half-written for a moment: CapCut works on `template-2.tmp` and
+# keeps the last saved copy in `draft_info.json.bak`.
+_DRAFT_FILES = ("draft_info.json", "draft_info.json.bak", "template-2.tmp")
+
+
+def template_exists(template_name: str, projects_dir: Path = CAPCUT_PROJECTS_DIR) -> bool:
+    return any((projects_dir / template_name / f).exists() for f in _DRAFT_FILES)
+
+
+def load_template(template_name: str, projects_dir: Path = CAPCUT_PROJECTS_DIR) -> dict:
+    """The template's draft as a dict. Rides out CapCut touching the file:
+    retries for a few seconds and falls back on CapCut's own copies."""
+    folder = projects_dir / template_name
+    for attempt in range(8):
+        for name in _DRAFT_FILES:
+            try:
+                return json.loads((folder / name).read_text())
+            except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
+                continue
+        time.sleep(0.4)
+    if folder.is_dir():
+        raise ValueError(f"Non riesco a leggere il template «{template_name}»: CapCut lo sta "
+                         f"usando o salvando in questo momento. Chiudi quel progetto in CapCut "
+                         f"e rilancia la generazione.")
+    raise ValueError(f"Il template «{template_name}» non esiste più nella cartella progetti di "
+                     f"CapCut ({projects_dir}). Scegline un altro.")
+
+
+# ---------------------------------------------------------------------------
 # Audio classification — for SFX redistribution
 # ---------------------------------------------------------------------------
 
@@ -85,7 +118,7 @@ _CATEGORY_LABEL = {"transition": "transizione", "emphasis": "enfasi / effetto"}
 def template_sound_inventory(template_name: str,
                              projects_dir: Path = CAPCUT_PROJECTS_DIR) -> dict:
     """Sounds and music available in a template, for the AI to choose from."""
-    info = json.loads((projects_dir / template_name / "draft_info.json").read_text())
+    info = load_template(template_name, projects_dir)
     audios_by_id = {a["id"]: a for a in info.get("materials", {}).get("audios", [])}
     sounds: dict[str, dict] = {}
     music: dict[str, dict] = {}
@@ -429,11 +462,20 @@ class _SubtitleStyle:
 
 
 def _find_main_video_track(info: dict) -> dict:
-    """Track containing the speech footage: video type, attribute 0, most segments."""
-    candidates = [t for t in info["tracks"] if t["type"] == "video" and t.get("attribute", 0) == 0]
-    if not candidates:
-        raise ValueError("Template has no main video track (type=video, attribute=0).")
-    return max(candidates, key=lambda t: len(t["segments"]))
+    """Track that holds the footage: the main video track with most segments.
+    A template kit has none of its own footage — its main track may be muted,
+    hidden or missing: any base video track will do, and one is made if needed."""
+    videos = [t for t in info["tracks"] if t["type"] == "video"]
+    for pool in ([t for t in videos if t.get("attribute", 0) == 0 and t.get("flag", 0) == 0],
+                 [t for t in videos if t.get("flag", 0) == 0], videos):
+        if pool:
+            track = max(pool, key=lambda t: len(t["segments"]))
+            track["attribute"] = 0            # footage must be visible and audible
+            return track
+    track = {"id": _uid(), "type": "video", "attribute": 0, "flag": 0,
+             "segments": [], "is_default_name": True, "name": ""}
+    info["tracks"].insert(0, track)
+    return track
 
 
 def _extract_subtitle_style(info: dict, sub_track: dict) -> _SubtitleStyle:
@@ -591,27 +633,37 @@ def _shown_text(inner: dict) -> str:
         return inner.get("recognize_text") or ""
 
 
+def _is_caption_seg(index: dict, seg: dict) -> bool:
+    """A subtitle is a text CapCut made from speech: built on a subtitle text
+    template, or carrying per-word timing. (The track's flag doesn't tell: a
+    title typed on what used to be a caption track is still a title.)"""
+    wrapper, inner = _text_of(index, seg)
+    if wrapper is not None and "subtitle" in (wrapper.get("type") or ""):
+        return True
+    return bool(inner and any(t.strip() for t in (inner.get("words") or {}).get("text") or []))
+
+
 def _caption_tracks(info: dict, index: dict) -> list[dict]:
     """The template's subtitle tracks, the one with most subtitles first.
 
-    CapCut marks caption tracks with flag 1 and builds captions on
-    `text_template_subtitle` materials. Drafts captioned some other way (this
-    tool's own output, for one) are recognised by shape: a run of short texts.
+    A track counts when at least half of its texts are subtitles. Drafts
+    captioned some other way (this tool's old output, for one) are recognised
+    by shape: a long, dense run of short texts on one track.
     """
-    def is_caption(tr: dict) -> bool:
-        if tr["type"] != "text" or not tr["segments"]:
-            return False
-        if tr.get("flag") == 1:
-            return True
-        return any("subtitle" in (index.get(s.get("material_id"), (None, {}))[1].get("type") or "")
-                   for s in tr["segments"])
+    def captions(tr: dict) -> int:
+        return sum(_is_caption_seg(index, s) for s in tr["segments"])
 
-    tracks = [t for t in info["tracks"] if is_caption(t)]
+    texts = [t for t in info["tracks"] if t["type"] == "text" and t["segments"]]
+    tracks = [t for t in texts if captions(t) * 2 >= len(t["segments"])]
     if not tracks:
-        for t in info["tracks"]:
-            if t["type"] == "text" and len(t["segments"]) >= 4:
-                if statistics.median(_seg_seconds(s) for s in t["segments"]) <= 3.5:
-                    tracks.append(t)
+        for t in texts:
+            durs = [_seg_seconds(s) for s in t["segments"]]
+            first = min(s["target_timerange"]["start"] for s in t["segments"]) / 1e6
+            last = max(s["target_timerange"]["start"] + s["target_timerange"]["duration"]
+                       for s in t["segments"]) / 1e6
+            if (len(durs) >= 6 and statistics.median(durs) <= 3.0
+                    and sum(durs) >= 0.5 * (last - first)):
+                tracks.append(t)
     return sorted(tracks, key=lambda t: -len(t["segments"]))
 
 
@@ -881,8 +933,10 @@ class SubtitleLook:
 
 def template_subtitle_look(template_name: str,
                            projects_dir: Path = CAPCUT_PROJECTS_DIR) -> SubtitleLook | None:
-    """Measure the template's own subtitles (None when it has too few to learn from)."""
-    info = json.loads((projects_dir / template_name / "draft_info.json").read_text())
+    """Measure the template's own subtitles (None when it has none). With just
+    a sample or two — a template kit — letter case and punctuation are taken
+    from them and the block size stays at one comfortable line."""
+    info = load_template(template_name, projects_dir)
     index = _materials_index(info)
     rows = []
     for tr in _caption_tracks(info, index):
@@ -891,7 +945,7 @@ def template_subtitle_look(template_name: str,
             text = _shown_text(inner).strip() if inner else ""
             if text:
                 rows.append((text, _seg_seconds(s)))
-    if len(rows) < 3:
+    if not rows:
         return None
     texts = [t for t, _ in rows]
     letters = [c for t in texts for c in t if c.isalpha()]
@@ -901,22 +955,274 @@ def template_subtitle_look(template_name: str,
     punct = "".join(
         p for p in _SUB_PUNCT
         if sum(p in t for t in texts) >= (1 if p in "?!" else max(2, round(len(texts) * 0.15))))
+    few = len(rows) < 3
     return SubtitleLook(
         count=len(rows),
-        max_chars=max(len(t) for t in texts),
+        max_chars=max(28, max(len(t) for t in texts) + 6) if few else max(len(t) for t in texts),
         typical_chars=round(statistics.median(len(t) for t in texts)),
         max_words=max(len(t.split()) for t in texts),
-        max_duration=min(6.0, max(1.0, max(d for _, d in rows))),
+        max_duration=2.5 if few else min(6.0, max(1.0, max(d for _, d in rows))),
         case="upper" if upper >= 0.97 else "lower" if upper <= 0.03 else "asis",
-        punctuation=punct,
+        punctuation="".join(p for p in _SUB_PUNCT if any(p in t for t in texts)) if few else punct,
     )
+
+
+# ---------------------------------------------------------------------------
+# The template's text kit — ready-made titles, labels and lists to reuse
+# ---------------------------------------------------------------------------
+#
+# Besides subtitles, a template carries text blocks its author styled once and
+# wants on every video: an opening title made of several lines, a two-line
+# label, a bullet list whose items pop up one after the other. Their words
+# belong to another video; their look, place, animation and timing are the kit.
+# Texts on screen together form a block; the AI decides what each block is for
+# and rewrites its lines for the video at hand.
+
+@dataclass
+class KitSlot:
+    """One text of the template, reusable as a styled line."""
+    id: str                 # "T1", "T2"…
+    text: str
+    start: float            # seconds in the template
+    duration: float
+    y: float                # CapCut vertical position: +1 top … -1 bottom
+    size: float             # how big it reads: font size × scale
+    track_id: str
+    seg: dict
+    room: int = 0           # characters that fit: the longest line among same-size siblings
+
+
+@dataclass
+class KitGroup:
+    """Texts that are on screen together: a title, a label, a list."""
+    id: str                 # "G1", "G2"…
+    slots: list[KitSlot]    # top line first
+
+    @property
+    def start(self) -> float:
+        return min(s.start for s in self.slots)
+
+    @property
+    def end(self) -> float:
+        return max(s.start + s.duration for s in self.slots)
+
+
+def _kit_groups(info: dict, index: dict) -> list[KitGroup]:
+    """Every non-subtitle text of the draft, grouped by being on screen together."""
+    found: list[KitSlot] = []
+    for tr in info["tracks"]:
+        if tr["type"] != "text":
+            continue
+        for s in tr["segments"]:
+            if _is_caption_seg(index, s):
+                continue
+            _, inner = _text_of(index, s)
+            text = _shown_text(inner).strip() if inner else ""
+            if not text:
+                continue
+            clip = s.get("clip") or {}
+            try:
+                font_size = float(json.loads(inner["content"])["styles"][0].get("size") or 10)
+            except (KeyError, TypeError, IndexError, ValueError, json.JSONDecodeError):
+                font_size = 10.0
+            tt = s.get("target_timerange") or {}
+            found.append(KitSlot(
+                id="", text=text, start=(tt.get("start", 0) or 0) / 1e6, duration=_seg_seconds(s),
+                y=float((clip.get("transform") or {}).get("y", 0.0)),
+                size=font_size * float((clip.get("scale") or {}).get("x", 1.0)),
+                track_id=tr["id"], seg=s))
+    found.sort(key=lambda k: (k.start, -k.y))
+    groups: list[list[KitSlot]] = []
+    group_end = 0.0
+    for slot in found:
+        if groups and slot.start < group_end - 0.3:
+            groups[-1].append(slot)
+            group_end = max(group_end, slot.start + slot.duration)
+        else:
+            groups.append([slot])
+            group_end = slot.start + slot.duration
+    out, n = [], 0
+    for g, slots in enumerate(groups, 1):
+        slots.sort(key=lambda k: (-k.y, k.start))            # top line first
+        for slot in slots:
+            n += 1
+            slot.id = f"T{n}"
+            slot.room = max(len(line) for k in slots if abs(k.size - slot.size) <= 0.05 * slot.size
+                            for line in k.text.splitlines() or [""])
+        out.append(KitGroup(id=f"G{g}", slots=slots))
+    return out
+
+
+def _sounds_with_times(info: dict, index: dict) -> list[tuple[float, float, str, str]]:
+    """(start, seconds, name, kind) of every usable sound of the draft."""
+    out = []
+    for tr in info["tracks"]:
+        if tr["type"] != "audio":
+            continue
+        for s in tr["segments"]:
+            bucket, mat = index.get(s.get("material_id"), (None, None))
+            if bucket != "audios":
+                continue
+            cat = _classify_audio(mat, _seg_seconds(s))
+            if cat != "leftover":
+                start = ((s.get("target_timerange") or {}).get("start", 0) or 0) / 1e6
+                out.append((start, _seg_seconds(s), mat.get("name") or "suono",
+                            "musica" if cat == "music" else _CATEGORY_LABEL.get(cat, cat)))
+    return sorted(out)
+
+
+_LOOK_TRACKS = ("adjust", "filter", "effect")
+
+
+def template_kit(template_name: str, projects_dir: Path = CAPCUT_PROJECTS_DIR) -> dict:
+    """Everything reusable a template offers, described for the AI and for the
+    app's checklist: text blocks (with the sounds the template starts along
+    with them), subtitle samples, sounds, music, colour and effect layers."""
+    info = load_template(template_name, projects_dir)
+    index = _materials_index(info)
+    sounds = _sounds_with_times(info, index)
+    effects = [(t, n) for t, _, n, kind in sounds if kind != "musica"]
+    biggest = max((s.size for g in _kit_groups(info, index) for s in g.slots), default=1.0)
+    groups = []
+    for g in _kit_groups(info, index):
+        along = []
+        for slot in g.slots:
+            for t, name in effects:
+                if -0.6 <= t - slot.start <= 0.5 and name not in along:
+                    along.append(name)
+        groups.append({
+            "id": g.id, "start": g.start, "duration": g.end - g.start, "sounds": along,
+            "slots": [{
+                "id": s.id, "text": " ".join(s.text.split()), "after": s.start - g.start,
+                "duration": s.duration, "ends_with_group": g.end - (s.start + s.duration) < 0.3,
+                "from_top": round((1 - s.y) * 50), "size": round(100 * s.size / biggest),
+                "chars": s.room,
+                "emoji": _is_emoji_like(s.text),
+            } for s in g.slots],
+        })
+    looks = []
+    for tr in info["tracks"]:
+        if tr["type"] in _LOOK_TRACKS:
+            for s in tr["segments"]:
+                mat = index.get(s.get("material_id"), (None, {}))[1]
+                name = mat.get("name") or mat.get("type") or tr["type"]
+                if name not in looks:
+                    looks.append(name)
+    captions = sum(1 for t in info["tracks"] if t["type"] == "text"
+                   for s in t["segments"] if _is_caption_seg(index, s))
+    return {
+        "name": template_name, "groups": groups, "captions": captions,
+        "sounds": sorted({n for _, _, n, kind in sounds if kind != "musica"}),
+        "music": sorted({n for _, _, n, kind in sounds if kind == "musica"}),
+        "looks": looks,
+    }
+
+
+def _clone_kit_text(info: dict, index: dict, slot: KitSlot, text: str,
+                    start_us: int, dur_us: int) -> dict:
+    """A new text with the slot's whole look — font, colours, place, in/out
+    animations, effect — and its own words and timing. A text longer than the
+    original is scaled down so it takes the same width."""
+    mats = info["materials"]
+    old_dur = (slot.seg.get("target_timerange") or {}).get("duration", 0) or 0
+    new_ids: dict[str, str] = {}
+
+    def clone_ref(ref: str) -> str:
+        if ref not in new_ids:
+            bucket, mat = index.get(ref, (None, None))
+            if mat is None:
+                return ref
+            new = copy.deepcopy(mat)
+            new["id"] = _uid()
+            for anim in new.get("animations") or []:
+                _fit_animation(anim, old_dur, dur_us)
+            mats[bucket].append(new)
+            new_ids[ref] = new["id"]
+        return new_ids[ref]
+
+    wrapper0, inner0 = _text_of(index, slot.seg)
+    inner = copy.deepcopy(inner0)
+    inner["id"] = _uid()
+    _set_text(inner, text)
+    if inner.get("recognize_text"):
+        inner["recognize_text"] = text
+    mats["texts"].append(inner)
+
+    seg = copy.deepcopy(slot.seg)
+    seg["id"] = _uid()
+    seg["material_id"] = inner["id"]
+    seg["target_timerange"] = {"start": start_us, "duration": dur_us}
+    seg["extra_material_refs"] = [clone_ref(r) for r in slot.seg.get("extra_material_refs") or []]
+    seg["keyframe_refs"], seg["common_keyframes"] = [], []
+    was = slot.room or 1
+    now = max((len(line) for line in text.splitlines()), default=1) or 1
+    if now > was and not _is_emoji_like(text):
+        factor = max(0.55, was / now)
+        scale = seg.setdefault("clip", {}).setdefault("scale", {"x": 1.0, "y": 1.0})
+        scale["x"], scale["y"] = scale.get("x", 1.0) * factor, scale.get("y", 1.0) * factor
+
+    if wrapper0 is not None:
+        wrapper = copy.deepcopy(wrapper0)
+        wrapper["id"] = _uid()
+        for i, tir in enumerate(wrapper.get("text_info_resources") or []):
+            tir["id"] = _uid()
+            if i == 0:
+                tir["text_material_id"] = inner["id"]
+            tir["extra_material_refs"] = [clone_ref(r) for r in tir.get("extra_material_refs") or []]
+            if isinstance(tir.get("attach_info"), dict):
+                tir["attach_info"]["start_time"], tir["attach_info"]["duration"] = 0, dur_us
+        mats["text_templates"].append(wrapper)
+        seg["material_id"] = wrapper["id"]
+    return seg
+
+
+def _place_kit_texts(info: dict, index: dict, lines: list[tuple[str, str, float, float]],
+                     total_us: int) -> tuple[int, int, set[str]]:
+    """Swap the kit's sample texts for the new ones. `lines` are (slot id,
+    text, start, end) in timeline seconds. Returns (texts placed, sample texts
+    removed, ids of the materials the samples owned)."""
+    groups = _kit_groups(info, index)
+    slots = {s.id: s for g in groups for s in g.slots}
+    tracks = {t["id"]: t for t in info["tracks"]}
+    owned: set[str] = set()
+    sample_ids = {id(s.seg) for s in slots.values()}
+    for slot in slots.values():
+        owned.add(slot.seg.get("material_id"))
+        owned.update(slot.seg.get("extra_material_refs") or [])
+        wrapper, inner = _text_of(index, slot.seg)
+        if inner is not None:
+            owned.add(inner["id"])
+        for tir in (wrapper or {}).get("text_info_resources") or []:
+            owned.update(tir.get("extra_material_refs") or [])
+    for tr in info["tracks"]:
+        if tr["type"] == "text":
+            tr["segments"] = [s for s in tr["segments"] if id(s) not in sample_ids]
+
+    placed, spare = 0, []
+    for slot_id, text, start, end in sorted(lines, key=lambda l: l[2]):
+        slot = slots.get(slot_id)
+        start_us, end_us = _us(max(0.0, start)), min(_us(end), total_us)
+        if slot is None or not text.strip() or end_us - start_us < 200_000:
+            continue
+        seg = _clone_kit_text(info, index, slot, text.strip(), start_us, end_us - start_us)
+        home = tracks.get(slot.track_id)
+        target = next((t for t in [home, *spare] if t is not None
+                       and not _overlaps(t, start_us, end_us - start_us)), None)
+        if target is None:
+            target = _emphasis_track()
+            spare.append(target)
+            info["tracks"].append(target)
+        target["segments"].append(seg)
+        target["segments"].sort(key=lambda s: s["target_timerange"]["start"])
+        placed += 1
+    return placed, len(slots), owned
 
 
 def template_blueprint(template_name: str, projects_dir: Path = CAPCUT_PROJECTS_DIR) -> dict:
     """What the template's own video is like, for the AI's brief: what was said
     (its subtitles), which texts appear on screen and when, how sounds are
     used, how fast it cuts."""
-    info = json.loads((projects_dir / template_name / "draft_info.json").read_text())
+    info = load_template(template_name, projects_dir)
     index = _materials_index(info)
     caps = _caption_tracks(info, index)
     cap_ids = {t["id"] for t in caps}
@@ -975,14 +1281,15 @@ def build_from_template(
     clear_template_texts_enabled: bool = False,
     sound_plan=None,
     covers: list[CoverShot] | None = None,
+    kit_texts: list[tuple[str, str, float, float]] | None = None,
     projects_dir: Path = CAPCUT_PROJECTS_DIR,
     log=lambda _line: None,
 ) -> Path:
+    """`kit_texts` = (slot id, text, start, end): the template's text kit as
+    rewritten by the AI. When given, it replaces every sample text of the
+    template and the older title / emphasis handling is skipped."""
     src = projects_dir / template_name
-    if not (src / "draft_info.json").exists():
-        raise FileNotFoundError(f"Template draft not found: {src}")
-
-    info = json.loads((src / "draft_info.json").read_text())
+    info = load_template(template_name, projects_dir)
 
     main_video = _find_main_video_track(info)
     index = _materials_index(info)
@@ -1092,6 +1399,15 @@ def build_from_template(
         log(f"Tolti i {old_count} sottotitoli del vecchio video (in questo reel non c'è parlato).")
     _drop_unused(info, old_caption_mats)
 
+    # ---- the template's text kit, rewritten for this video ----
+    if kit_texts is not None:
+        total_us = _us(timeline[-1].timeline_end) if timeline else 0
+        placed, samples, owned = _place_kit_texts(info, index, kit_texts, total_us)
+        _drop_unused(info, owned)
+        log(f"Testi: {placed} testi scritti con gli stili del kit del template (font, colori, "
+            f"posizione e animazioni identici); tolti i {samples} testi di esempio.")
+        emphasis, intro_title, clear_template_texts_enabled = None, None, False
+
     # ---- emphasis text overlays (on a fresh text track, clean clip) ----
     emphasis_track_id: str | None = None
     if emphasis and overlay_style is not None:
@@ -1176,6 +1492,23 @@ def build_from_template(
     # ---- sounds: rebuilt from the AI's plan (None = keep template audio as-is) ----
     if sound_plan is not None and timeline:
         apply_sound_plan(info, sound_plan, _us(timeline[-1].timeline_end), log)
+
+    # ---- the template's look (colour adjustment, filters, effects) covers the whole video ----
+    full_us = _us(timeline[-1].timeline_end) if timeline else 0
+    stretched: list[str] = []
+    for tr in info["tracks"]:
+        if tr["type"] not in _LOOK_TRACKS:
+            continue
+        for s in tr["segments"]:
+            tt = s.get("target_timerange") or {}
+            if (tt.get("start", 0) or 0) <= 500_000 and full_us:
+                tt["start"], tt["duration"] = 0, full_us
+                mat = index.get(s.get("material_id"), (None, {}))[1]
+                name = mat.get("name") or mat.get("type") or tr["type"]
+                if name not in stretched:
+                    stretched.append(name)
+    if stretched:
+        log(f"Colore ed effetti del template estesi a tutto il video: {', '.join(stretched)}")
 
     # ---- trim everything past the new total duration ----
     # The video timeline (T0) defines the *real* video length. Any template

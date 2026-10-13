@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 
-CACHE_DIR = Path.home() / ".cache/capwiz/stabilized"
+CACHE_DIR = Path.home() / ".cache/capwizard/stabilized"
 
 
 @lru_cache(maxsize=1)

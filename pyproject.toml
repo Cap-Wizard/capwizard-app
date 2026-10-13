@@ -1,5 +1,5 @@
 [project]
-name = "capwiz"
+name = "capwizard"
 version = "0.1.0"
 description = "Auto-generate CapCut drafts (vertical 9:16) from videos: silence-cut + subtitles + optional script-driven cuts."
 requires-python = ">=3.10"
@@ -16,9 +16,9 @@ ai = ["anthropic>=0.39.0"]
 gui = ["customtkinter>=5.2.0"]
 
 [project.scripts]
-capwiz = "capwiz.cli:main"
-capwiz-gui = "capwiz.gui:main"
-capwiz-server = "capwiz.server:run"
+capwizard = "capwizard.cli:main"
+capwizard-gui = "capwizard.gui:main"
+capwizard-server = "capwizard.server:run"
 
 [build-system]
 requires = ["setuptools>=68"]

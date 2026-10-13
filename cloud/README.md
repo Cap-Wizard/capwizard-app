@@ -1,4 +1,4 @@
-# CapWiz — Cloud (licensing backend)
+# CapWizard — Cloud (licensing backend)
 
 Backend separato per **account + abbonamenti Stripe + validazione licenza**.
 L'app desktop lo interroga per il login e per sapere se l'abbonamento è attivo.
@@ -45,7 +45,7 @@ JWT_SECRET=dev .venv/bin/uvicorn app.main:app --reload --port 8799
 
 - `DATABASE_URL` → Postgres in produzione (sqlite va bene solo per test locale).
 - Metti tutte le variabili di `.env.example` come secret dell'hosting.
-- L'app desktop punta qui via `CAPWIZ_CLOUD_URL` (vedi `desktop/electron/main.js`).
+- L'app desktop punta qui via `CAPWIZARD_CLOUD_URL` (vedi `desktop/electron/main.js`).
 
 ## Sicurezza / note
 

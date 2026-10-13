@@ -22,7 +22,7 @@ from typing import Callable
 
 from .ai import (BRIEF_SOURCE, DEFAULT_MODEL, KIND_LABEL, AIUnavailable, BRoll, SoundPlan,
                  look_at_clips, plan_brief, plan_covers, plan_edit, plan_montage,
-                 plan_sounds, plan_texts, require_ai, review)
+                 plan_kit_texts, plan_sounds, plan_texts, plan_zooms, require_ai, review)
 from .cuts import PACING_BY_NAME, PACING_FAST, Pacing
 from .draft import CAPCUT_PROJECTS_DIR, build_draft
 from .edit import annotated_transcript, build_global_words, materialize, normalize_plan
@@ -32,8 +32,8 @@ from .probe import probe
 from .report import Report
 from .stabilize import stabilize
 from .subtitles import build_subtitles
-from .template import (build_from_template, template_blueprint, template_sound_inventory,
-                       template_subtitle_look)
+from .template import (build_from_template, template_blueprint, template_exists,
+                       template_kit, template_sound_inventory, template_subtitle_look)
 from .transcribe import transcribe
 from .vision import light_changes, make_strip
 
@@ -149,6 +149,53 @@ def weave_inserts(timeline: list[TimelineSegment], inserts: list[tuple]
     return out, shift
 
 
+def apply_zooms(timeline: list[TimelineSegment], zooms: list[tuple], hidden: list[tuple[float, float]]
+                ) -> list[tuple[float, float, str, float, str, str]]:
+    """Turn the AI's zooms into scale keyframes on the talking segments.
+
+    Each zoom is snapped to word edges, dropped if the speaker is mostly hidden
+    there, and written on every segment it crosses (a sentence often spans a
+    silence cut), so the movement carries on across the cut. One zoom per
+    segment, and at least 2.5 seconds between one zoom and the next. Returns
+    what was applied: (from, to, kind, amount, why, words).
+    """
+    talking = [ts for ts in timeline if ts.keep.words and not ts.keep.muted]
+    edges = [(w.start - ts.keep.src_start + ts.timeline_start,
+              w.end - ts.keep.src_start + ts.timeline_start, w.text)
+             for ts in talking for w in ts.keep.words]
+    done = []
+    if not edges:
+        return done
+    for start, end, kind, amount, why in zooms:
+        a = min((e[0] for e in edges), key=lambda t: abs(t - start))
+        b = min((e[1] for e in edges if e[1] > a), key=lambda t: abs(t - end), default=None)
+        if b is None or not 0.4 <= b - a <= 6.0:
+            continue
+        if done and a - done[-1][1] < 2.5:           # never two zooms back to back
+            continue
+        covered = sum(max(0.0, min(b, hb) - max(a, ha)) for ha, hb in hidden)
+        segs = [ts for ts in talking if ts.timeline_end > a + 0.05 and ts.timeline_start < b - 0.05]
+        # a zoom that barely spills into the next (or previous) segment would
+        # leave that whole segment zoomed: stop it at the cut instead
+        while len(segs) > 1 and b - segs[-1].timeline_start < 0.35:
+            segs.pop()
+            b = segs[-1].timeline_end
+        while len(segs) > 1 and segs[0].timeline_end - a < 0.35:
+            segs.pop(0)
+            a = segs[0].timeline_start
+        if covered > 0.4 * (b - a) or not segs or any(ts.scale_keys for ts in segs):
+            continue
+        first, last = (1.0, amount) if kind == "in" else (amount, 1.0)
+        for ts in segs:
+            t0, t1 = max(a, ts.timeline_start), min(b, ts.timeline_end)
+            at = lambda t: first + (last - first) * (t - a) / (b - a)
+            src = lambda t: ts.keep.src_start + (t - ts.timeline_start)
+            ts.scale_keys = [(src(t0), at(t0)), (src(t1), at(t1))]
+        words = " ".join(text for ws, we, text in edges if ws >= a - 0.01 and we <= b + 0.01)
+        done.append((a, b, kind, amount, why, words))
+    return done
+
+
 @dataclass
 class PipelineResult:
     draft_path: Path
@@ -177,6 +224,7 @@ def run_pipeline(
     subtitle_max_words: int = 4,
     subtitle_max_duration: float = 1.4,
     subtitle_like_template: bool = True,
+    ai_zoom: bool = False,
     fmt: str = "vertical",
     projects_dir: Path | None = None,
     log: Callable[[str], None] = print,
@@ -185,7 +233,8 @@ def run_pipeline(
     the template's sounds (off keeps the template audio untouched).
     `subtitle_like_template` = write the subtitles the way the template's own
     are written (block length, letter case, punctuation); off uses
-    `subtitle_max_words` / `subtitle_max_duration`."""
+    `subtitle_max_words` / `subtitle_max_duration`.
+    `ai_zoom` = let the AI add light zoom-ins / zoom-outs on the key lines."""
     rep = Report(name, log)
     try:
         out = _run(rep, input_path, name, template, script, model, language,
@@ -193,7 +242,7 @@ def run_pipeline(
                    add_emphasis, emphasis_count, drop_fillers, aggressive_fillers,
                    intro_title, clear_template_texts, ai_model, use_ai_review,
                    ai_target_duration, subtitle_max_words, subtitle_max_duration,
-                   subtitle_like_template, fmt, projects_dir or CAPCUT_PROJECTS_DIR)
+                   subtitle_like_template, ai_zoom, fmt, projects_dir or CAPCUT_PROJECTS_DIR)
     except Exception as e:
         rep("")
         rep(f"✘ INTERROTTO: {e}")
@@ -210,9 +259,10 @@ def _run(rep: Report, input_path, name, template, script, model, language,
          pacing: Pacing, stabilize_clips, ai_sounds, add_emphasis, emphasis_count,
          drop_fillers, aggressive_fillers, intro_title, clear_template_texts,
          ai_model, use_ai_review, target_duration, subtitle_max_words,
-         subtitle_max_duration, subtitle_like_template, fmt, projects_dir: Path) -> Path:
+         subtitle_max_duration, subtitle_like_template, ai_zoom, fmt,
+         projects_dir: Path) -> Path:
     inputs = gather_inputs(input_path)
-    if template and not (projects_dir / template / "draft_info.json").exists():
+    if template and not template_exists(template, projects_dir):
         raise ValueError(f"Il template «{template}» non esiste più nella cartella progetti di "
                          f"CapCut ({projects_dir}). Scegline un altro.")
 
@@ -235,14 +285,17 @@ def _run(rep: Report, input_path, name, template, script, model, language,
         path = stabilize(p, log=rep) if stabilize_clips else p
         c = probe(path)
         rep(f"• [{idx}/{len(inputs)}] {path.name} ({c.duration:.1f}s)…")
-        transcribe(c, model_name=model, language=language)
+        trimmed = transcribe(c, model_name=model, language=language)
         rep(f"    → {len(c.words)} parole, da {c.words[0].start:.1f}s a {c.words[-1].end:.1f}s"
             if c.words else "    → nessun parlato")
+        if trimmed >= 0.5:
+            rep(f"    → parole riallineate all'audio: Whisper le allungava sui silenzi per "
+                f"{trimmed:.1f}s in tutto (ora i tagli cadono dove la voce finisce davvero)")
         clips.append(c)
 
     # 2 — the AI looks at every clip: talking take, b-roll or unusable?
     rep.section("2 · L'AI GUARDA LE CLIP")
-    strip_dir = Path(tempfile.mkdtemp(prefix="capwiz_frames_"))
+    strip_dir = Path(tempfile.mkdtemp(prefix="capwizard_frames_"))
     try:
         strips = [make_strip(c, strip_dir, f"clip{i:02d}") for i, c in enumerate(clips, 1)]
         lights = [light_changes(c) for c in clips]
@@ -417,6 +470,26 @@ def _run(rep: Report, input_path, name, template, script, model, language,
         raise ValueError("Nel girato non c'è né parlato rivolto al pubblico né riprese "
                          "utilizzabili: non c'è niente da montare.")
 
+    # 5b — light zooms on the lines that matter (optional)
+    if ai_zoom and any(ts.keep.words and not ts.keep.muted for ts in timeline):
+        rep.section("5b · ZOOM SULLE FRASI CHIAVE (AI)")
+        hidden = ([(ts.timeline_start, ts.timeline_end) for ts in timeline if ts.keep.muted]
+                  + [(c.timeline_start, c.timeline_start + c.duration) for c in covers])
+        zp = plan_zooms(timeline, sorted(hidden), topic=topic, model=ai_model, log=rep, brief=brief)
+        rep(f"Come li ha usati: {zp.summary or '—'}")
+        applied = apply_zooms(timeline, zp.zooms, hidden)
+        for a, b, kind, amount, why, words in applied:
+            move = (f"ZOOM IN 100% → {amount * 100:.0f}%" if kind == "in"
+                    else f"ZOOM OUT {amount * 100:.0f}% → 100%")
+            rep(f"🔍 {move} @ {a:.2f}–{b:.2f}s ({b - a:.1f}s) su «{words}»")
+            rep(f"      perché: {why or '—'}")
+            extras.append(f"zoom {'in' if kind == 'in' else 'out'} leggero @ {a:.1f}–{b:.1f}s")
+        if len(applied) < len(zp.zooms):
+            rep(f"ⓘ {len(zp.zooms) - len(applied)} zoom non applicati: cadevano dove il volto "
+                f"è coperto, fuori dalle parole o troppo vicini a un altro zoom.")
+        if not zp.zooms:
+            rep("Nessuno zoom: l'AI non ha trovato frasi che lo meritino.")
+
     # 6 — subtitles
     rep.section("6 · SOTTOTITOLI")
     look = template_subtitle_look(template, projects_dir) if template else None
@@ -455,24 +528,56 @@ def _run(rep: Report, input_path, name, template, script, model, language,
 
     emphasis: list[Emphasis] = []
     final_intro = intro_title
+    kit_texts: list[tuple[str, str, float, float]] | None = None
+    text_notes: list[str] = []        # the texts decided, told to the sounds step
+    sound_habits: list[str] = []      # which sounds the template starts with which text block
     sound_plan = None
     if template:
-        # 7 — on-screen texts
+        # 7 — on-screen texts: the template's kit when it has one
         rep.section("7 · TESTI A SCHERMO (AI)")
-        tp = plan_texts(timeline, name=name, topic=topic, want_intro=not intro_title,
-                        count=emphasis_count if add_emphasis else 0, model=ai_model, log=rep,
-                        brief=brief)
-        if intro_title:
-            rep(f"Titolo iniziale: «{intro_title}» — scelto da te")
-        elif tp.intro_title:
-            final_intro = tp.intro_title
-            rep(f"Titolo iniziale: «{tp.intro_title}» — perché: {tp.intro_why or '—'}")
-        for phrase, start, end, why in tp.emphasis:
-            rep(f"✚ testo «{phrase}» @ {start:.1f}s — perché: {why or '—'}")
-            extras.append(f"testo a schermo «{phrase}» @ {start:.1f}s")
-            emphasis.append(Emphasis(text=phrase, timeline_start=start, timeline_end=end, score=99))
-        if not tp.emphasis:
-            rep("Nessun testo di enfasi: l'AI non ha trovato momenti che lo meritino.")
+        kit = template_kit(template, projects_dir)
+        if kit["groups"]:
+            rep(f"Kit di testi del template «{template}»: {len(kit['groups'])} blocchi, "
+                f"{sum(len(g['slots']) for g in kit['groups'])} testi di esempio.")
+            kp = plan_kit_texts(timeline, kit, name=name, topic=topic, intro_title=intro_title,
+                                count=emphasis_count if add_emphasis else 0, model=ai_model,
+                                log=rep, brief=brief)
+            for gid, role, how in kp.roles:
+                rep(f"🧩 {gid} = {role or '—'} — come funziona: {how or '—'}")
+            kit_texts = []
+            for use in kp.uses:
+                rep(f"✚ blocco {use.group} @ {use.start:.2f}–{use.end:.2f}s — perché: {use.why or '—'}")
+                for slot, was, text, start, end in use.lines:
+                    rep(f"      {slot} «{was}» → «{text}»"
+                        + (f"  (compare a {start:.2f}s)" if start - use.start > 0.05 else ""))
+                    kit_texts.append((slot, text, start, end))
+                    text_notes.append(f"@ {start:.2f}s «{text}» (blocco {use.group})")
+                    extras.append(f"testo a schermo «{text}» @ {start:.1f}s")
+            for gid, why in kp.not_used:
+                rep(f"✘ blocco {gid} non usato — perché: {why or '—'}")
+            if not kp.uses:
+                rep("Nessun testo a schermo: l'AI non ha trovato dove usare il kit.")
+            # the sounds the template starts along with each block, for the next step
+            roles = {gid: role for gid, role, _ in kp.roles}
+            sound_habits = [f"quando compare il blocco {g['id']} ({roles.get(g['id'], 'testo')}): "
+                            + ", ".join(f"«{n}»" for n in g["sounds"])
+                            for g in kit["groups"] if g["sounds"]]
+        else:
+            tp = plan_texts(timeline, name=name, topic=topic, want_intro=not intro_title,
+                            count=emphasis_count if add_emphasis else 0, model=ai_model, log=rep,
+                            brief=brief)
+            if intro_title:
+                rep(f"Titolo iniziale: «{intro_title}» — scelto da te")
+            elif tp.intro_title:
+                final_intro = tp.intro_title
+                rep(f"Titolo iniziale: «{tp.intro_title}» — perché: {tp.intro_why or '—'}")
+            for phrase, start, end, why in tp.emphasis:
+                rep(f"✚ testo «{phrase}» @ {start:.1f}s — perché: {why or '—'}")
+                extras.append(f"testo a schermo «{phrase}» @ {start:.1f}s")
+                text_notes.append(f"@ {start:.2f}s «{phrase}»")
+                emphasis.append(Emphasis(text=phrase, timeline_start=start, timeline_end=end, score=99))
+            if not tp.emphasis:
+                rep("Nessun testo di enfasi: l'AI non ha trovato momenti che lo meritino.")
 
         # 8 — sounds
         rep.section("8 · SUONI (AI)")
@@ -480,7 +585,8 @@ def _run(rep: Report, input_path, name, template, script, model, language,
             inventory = template_sound_inventory(template, projects_dir)
             if inventory["sounds"] or inventory["music"]:
                 sound_plan = plan_sounds(timeline, inventory, topic=topic,
-                                         model=ai_model, log=rep, brief=brief)
+                                         model=ai_model, log=rep, brief=brief,
+                                         texts=text_notes, habits=sound_habits)
                 rep(f"Come li ha usati: {sound_plan.summary or '—'}")
                 for mname, keep, why in sound_plan.music:
                     rep(f"♪ musica «{mname}»: {'tenuta come sottofondo' if keep else 'rimossa'}"
@@ -516,9 +622,10 @@ def _run(rep: Report, input_path, name, template, script, model, language,
             template_name=template, out_name=name, timeline=timeline, subtitles=subs,
             emphasis=emphasis or None, intro_title=final_intro,
             clear_template_texts_enabled=clear_template_texts,
-            sound_plan=sound_plan, covers=covers, projects_dir=projects_dir, log=rep,
+            sound_plan=sound_plan, covers=covers, kit_texts=kit_texts,
+            projects_dir=projects_dir, log=rep,
         )
-        if clear_template_texts:
+        if clear_template_texts and kit_texts is None:
             rep("Testi residui del template rimossi (restano solo le emoji decorative).")
     else:
         canvas = (1080, 1920) if fmt == "vertical" else (1920, 1080)

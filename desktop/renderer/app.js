@@ -8,9 +8,9 @@ const WS_BACKEND = "ws://127.0.0.1:8765";
 const LOCAL_MODE = true;
 
 const PACING_HINTS = {
-  normal: "silenzi ≥ 0.45s tagliati · pad finale 0.22s",
-  fast: "silenzi ≥ 0.25s tagliati · pad finale 0.18s",
-  aggressive: "silenzi ≥ 0.12s tagliati · nessun pad finale",
+  normal: "frasi che respirano · la soglia dei silenzi la decide l'AI (di solito intorno a 0,45s)",
+  fast: "ritmo da reel · la soglia dei silenzi la decide l'AI (di solito intorno a 0,30s)",
+  aggressive: "massima densità, zero respiri · soglia dei silenzi decisa dall'AI (intorno a 0,18s)",
 };
 
 const DEFAULTS = {
@@ -19,7 +19,7 @@ const DEFAULTS = {
   subtitle_max_words: 4, subtitle_max_duration: 1.4, subtitle_like_template: true,
   drop_fillers: true, aggressive_fillers: false,
   clear_template_texts: true, redistribute_sfx_enabled: true, stabilize_clips: false,
-  ai_model: "sonnet", use_ai_review: true,
+  ai_model: "sonnet", use_ai_review: true, ai_zoom: false,
   ai_target_duration: null,
 };
 
@@ -286,6 +286,7 @@ function applySettings(s) {
   setSwitch("sw-sfx", s.redistribute_sfx_enabled);
   setSwitch("sw-stab", s.stabilize_clips);
   setSwitch("sw-ai-review", s.use_ai_review ?? true);
+  setSwitch("sw-zoom", s.ai_zoom ?? false);
 
   $("ai-model").value = s.ai_model || "sonnet";
   $("ai-target").value = s.ai_target_duration == null ? "auto" : String(Math.round(s.ai_target_duration));
@@ -479,6 +480,7 @@ function buildRequest() {
     stabilize_clips: isOn("sw-stab"),
     ai_model: $("ai-model").value,
     use_ai_review: isOn("sw-ai-review"),
+    ai_zoom: isOn("sw-zoom"),
     ai_target_duration: aiTarget === "auto" ? null : parseFloat(aiTarget),
   };
 }
@@ -514,37 +516,61 @@ async function onGenerate() {
     jobId = (await r.json()).job_id;
   } catch (e) {
     appendLine(`ERRORE: il motore dell'app non risponde (${e}). Chiudi tutte le finestre `
-      + "di CapWiz e riavvia l'app: di solito ne erano aperte due.", "err");
+      + "di CapWizard e riavvia l'app: di solito ne erano aperte due.", "err");
     finishRun();
     return;
   }
+
+  // The log arrives live over a WebSocket. If that stream stalls or drops, the
+  // job must not look "still working" forever: a slow poll of the job's status
+  // fills in whatever lines are missing and closes the run when it has ended.
+  let shown = 0;                      // log lines already on screen
+  let ended = false;
+  const showLines = (lines, from) => {
+    for (let i = Math.max(from, shown); i < from + lines.length; i++) {
+      appendLine(lines[i - from], classify(lines[i - from]));
+    }
+    shown = Math.max(shown, from + lines.length);
+  };
+  const end = (msg) => {
+    if (ended) return;
+    ended = true;
+    clearInterval(poll);
+    if (msg.status === "done") {
+      setStatus("completato");
+      if (msg.results && msg.results.length) showBatchResult(msg.results);
+      else showResult(msg.result_path, msg.report_path);
+      loadProjects();               // refresh home in the background
+    } else {
+      setStatus("errore");
+      appendLine(msg.error || "errore sconosciuto", "err");
+    }
+    try { ws.close(); } catch (_) { /* already closed */ }
+    finishRun();
+  };
+  const check = async () => {
+    try {
+      const job = await (await fetch(`${BACKEND}/api/jobs/${jobId}`)).json();
+      if (job.error && !job.status) return end({ status: "error", error: job.error });
+      showLines(job.logs || [], 0);
+      if (job.status === "done" || job.status === "error") end(job);
+    } catch (_) { /* backend busy: try again at the next tick */ }
+  };
+  const poll = setInterval(check, 4000);
 
   const ws = new WebSocket(`${WS_BACKEND}/api/ws/jobs/${jobId}`);
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === "log") {
-      appendLine(msg.line, classify(msg.line));
+      showLines([msg.line], msg.i ?? shown);
     } else if (msg.type === "status") {
-      if (msg.status === "done") {
-        setStatus("completato");
-        if (msg.results && msg.results.length) showBatchResult(msg.results);
-        else showResult(msg.result_path, msg.report_path);
-        loadProjects();               // refresh home in the background
-      } else {
-        setStatus("errore");
-        appendLine(msg.error || "errore sconosciuto", "err");
-      }
-      ws.close();
-      finishRun();
+      end(msg);
     } else if (msg.type === "error") {
-      appendLine(msg.message, "err");
-      finishRun();
+      end({ status: "error", error: msg.message });
     }
   };
-  ws.onerror = () => {
-    appendLine("ERRORE: connessione WebSocket interrotta", "err");
-    finishRun();
-  };
+  ws.onerror = () => check();
+  ws.onclose = () => check();
 }
 
 function finishRun() {
@@ -563,7 +589,7 @@ function classify(line) {
   if (t.startsWith("✂")) return "cut";
   if (t.startsWith("✓")) return "ok";
   if (t.includes("⚠") || t.startsWith("☐")) return "warn";
-  if (/^(👁|🎞|🔊|🔇|♪|✚|✎|Titolo iniziale|Argomento|Come l|Soglia|Regia|Formato|Tono|Struttura|Indicazioni|Consegne|Ritmo dal copione|Musica chiesta|Didascalia|🎬|Sottotitoli:|📄)/u.test(t)) return "ai";
+  if (/^(👁|🎞|🔍|🔊|🔇|♪|✚|✎|Titolo iniziale|Argomento|Come l|Soglia|Regia|Formato|Tono|Struttura|Indicazioni|Consegne|Ritmo dal copione|Musica chiesta|Didascalia|🎬|Sottotitoli:|📄)/u.test(t)) return "ai";
   return "";
 }
 
@@ -708,25 +734,25 @@ async function runAiTest() {
 
 async function getToken() {
   if (window.api && window.api.getToken) return window.api.getToken();
-  return localStorage.getItem("capwiz_token");
+  return localStorage.getItem("capwizard_token");
 }
 async function setToken(t) {
   state.authToken = t;
   if (window.api && window.api.setToken) return window.api.setToken(t);
-  localStorage.setItem("capwiz_token", t);
+  localStorage.setItem("capwizard_token", t);
 }
 async function clearToken() {
   state.authToken = null;
   if (window.api && window.api.clearToken) return window.api.clearToken();
-  localStorage.removeItem("capwiz_token");
+  localStorage.removeItem("capwizard_token");
 }
 
 function cacheActive(active) {
-  localStorage.setItem("capwiz_sub", JSON.stringify({ active, ts: Date.now() }));
+  localStorage.setItem("capwizard_sub", JSON.stringify({ active, ts: Date.now() }));
 }
 function cachedGraceOk() {
   try {
-    const c = JSON.parse(localStorage.getItem("capwiz_sub") || "{}");
+    const c = JSON.parse(localStorage.getItem("capwizard_sub") || "{}");
     if (!c.active) return false;
     return (Date.now() - c.ts) < OFFLINE_GRACE_DAYS * 86400 * 1000;
   } catch (_) { return false; }
@@ -859,7 +885,7 @@ async function doManageBilling() {
 async function doLogout() {
   await clearToken();
   state.email = null;
-  localStorage.removeItem("capwiz_sub");
+  localStorage.removeItem("capwizard_sub");
   showView("auth");
 }
 

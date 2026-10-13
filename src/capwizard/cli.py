@@ -37,6 +37,8 @@ from .pipeline import read_script, run_pipeline
               help="Modello Claude che fa il montaggio (default: sonnet).")
 @click.option("--no-ai-review", "use_ai_review", flag_value=False, default=True,
               help="Salta la recensione finale del montato.")
+@click.option("--ai-zoom", is_flag=True,
+              help="Fai aggiungere all'AI zoom leggeri (in/out) sulle frasi chiave.")
 @click.option("--ai-target-duration", type=float, default=None,
               help="Durata target in secondi che l'AI deve cercare di ottenere con i tagli.")
 @click.option("--model", "-m", default="large-v3",
@@ -54,7 +56,7 @@ from .pipeline import read_script, run_pipeline
 def main(input_path, name, template, script, pacing, stabilize_clips,
          redistribute_sfx_enabled, add_emphasis, emphasis_count,
          drop_fillers, aggressive_fillers, intro_title, clear_template_texts,
-         ai_model, use_ai_review, ai_target_duration,
+         ai_model, use_ai_review, ai_zoom, ai_target_duration,
          model, language, subtitle_like_template, subtitle_max_words,
          subtitle_max_duration, fmt, projects_dir):
     """Genera un draft CapCut da INPUT_PATH (file video o cartella di video).
@@ -70,7 +72,7 @@ def main(input_path, name, template, script, pacing, stabilize_clips,
             drop_fillers=drop_fillers, aggressive_fillers=aggressive_fillers,
             intro_title=intro_title, clear_template_texts=clear_template_texts,
             ai_model=ai_model, use_ai_review=use_ai_review,
-            ai_target_duration=ai_target_duration,
+            ai_target_duration=ai_target_duration, ai_zoom=ai_zoom,
             model=model, language=language,
             subtitle_max_words=subtitle_max_words,
             subtitle_max_duration=subtitle_max_duration,

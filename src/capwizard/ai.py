@@ -136,9 +136,13 @@ def _call_claude_cli(prompt: str, system: str, model: str, cli: str,
         lines = [ln for ln in f"{e.stdout or ''}\n{e.stderr or ''}".splitlines()
                  if ln.strip() and not ln.lstrip().lower().startswith("warning")]
         detail = " · ".join(lines) or "errore sconosciuto"
-        if "logged in" in detail.lower() or "/login" in detail.lower():
+        low = detail.lower()
+        if "logged in" in low or "/login" in low:
             detail = ("Claude CLI non autenticato: apri un terminale, lancia `claude` "
                       "ed esegui `/login` una volta (oppure imposta ANTHROPIC_API_KEY).")
+        elif "authenticate" in low or "oauth" in low or "expired" in low:
+            detail = ("L'accesso a Claude è scaduto: apri un terminale, lancia `claude`, "
+                      "scrivi `/login` e rifai l'accesso. Poi torna qui e premi Configura → Test.")
         raise AIUnavailable(detail[:300]) from e
 
 
@@ -1002,6 +1006,203 @@ def plan_texts(timeline: list[TimelineSegment], *, name: str, topic: str, want_i
 
 
 # ===========================================================================
+# 2a. KIT — the template's ready-made text blocks, reused for this video
+# ===========================================================================
+
+_KIT_PROMPT = """Questo è il reel già montato (tempi in secondi sulla timeline finale, \\
+durata {total:.1f}s). Progetto: «{name}». Argomento: {topic}
+
+{timeline}
+{brief}
+IL KIT DI TESTI DEL TEMPLATE. Chi monta ha preparato nel template dei blocchi di testo \\
+già pronti: ognuno ha il suo stile, la sua posizione, la sua animazione. Sono MODELLI: le \\
+parole che contengono appartengono a un altro video. Di ogni blocco vedi le righe \\
+dall'alto in basso, quando compare ciascuna rispetto all'inizio del blocco, quanto è \\
+grande (100 = la più grande del kit) e quali suoni il template fa partire insieme.
+
+{kit}
+
+1. CAPISCI IL KIT (`kit`). Per ogni blocco di' che cos'è (`role`: titolo d'apertura, \\
+titoletto, elenco puntato, etichetta, decorazione…) e come funziona (`how`): quale riga \\
+porta il messaggio e quale fa da contorno, se le righe compaiono insieme o una dopo \\
+l'altra, per che tipo di momento è stato pensato.
+
+2. USA IL KIT IN QUESTO VIDEO (`texts`). Decidi quali blocchi usare, quando e con quali \\
+parole, sfruttando ogni blocco per ciò per cui è nato:
+- il titolo d'apertura va all'inizio del video. {intro_rule}
+- titoletti ed etichette: quando si apre un capitolo o si nomina un dato che merita di \\
+essere letto (un luogo, un numero, un nome);
+- elenchi: quando chi parla elenca più cose. Una riga per voce, e ogni riga compare nel \\
+momento in cui quella voce viene detta (`at`);
+- ogni riga riscrive una riga del blocco (`slot`) mantenendone la funzione: stessa \\
+lunghezza o meno (un testo più lungo dell'originale viene rimpicciolito), stesso uso \\
+delle maiuscole, la riga grande resta quella che conta di più. Puoi lasciare fuori le \\
+righe che non servono (usare 3 voci di un elenco da 5), non aggiungerne;
+- un'emoji del kit si può sostituire con un'altra adatta al tema, o lasciare fuori;
+- `from` / `to` = quando il blocco compare e scompare. Dura più o meno come nel template, \\
+o quanto la frase che accompagna. Due blocchi non stanno mai a schermo insieme. Lo stesso \\
+blocco si può usare più volte in momenti diversi;
+- oltre al titolo, al massimo {count} blocchi: solo dove servono davvero. Un blocco che \\
+non c'entra con questo video non va usato (`not_used`, con il motivo);
+- tutto ciò che viene detto ha già i sottotitoli: i testi del kit non ripetono le frasi, \\
+le condensano in parole chiave. Se il copione indica dei testi a schermo, usa quelli.
+
+Rispondi con questo JSON:
+{{
+  "kit": [{{"group": "G1", "role": "titolo d'apertura", "how": "..."}}],
+  "texts": [{{"group": "G1", "from": 0.0, "to": 4.0,
+             "lines": [{{"slot": "T1", "text": "...", "at": 0.0}}], "why": "..."}}],
+  "not_used": [{{"group": "G3", "why": "..."}}]
+}}"""
+
+
+@dataclass
+class KitUse:
+    """One block of the kit placed in the video."""
+    group: str
+    start: float
+    end: float
+    lines: list[tuple[str, str, str, float, float]]      # slot, original text, new text, start, end
+    why: str = ""
+
+
+@dataclass
+class KitPlan:
+    roles: list[tuple[str, str, str]] = field(default_factory=list)      # group, role, how
+    uses: list[KitUse] = field(default_factory=list)
+    not_used: list[tuple[str, str]] = field(default_factory=list)
+
+
+def _kit_text(kit: dict) -> str:
+    out = []
+    for g in kit["groups"]:
+        out.append(f"BLOCCO {g['id']} · dura {g['duration']:.1f}s · suoni insieme: "
+                   + (", ".join(f"«{s}»" for s in g["sounds"]) or "nessuno"))
+        for s in g["slots"]:
+            out.append(f"  {s['id']} «{s['text']}»" + (" (emoji)" if s["emoji"] else "")
+                       + f" · compare a +{s['after']:.1f}s · {s['from_top']}% dall'alto · "
+                         f"grandezza {s['size']} · {s['chars']} caratteri")
+    return "\n".join(out)
+
+
+def plan_kit_texts(timeline: list[TimelineSegment], kit: dict, *, name: str, topic: str,
+                   intro_title: str | None, count: int, model: str,
+                   log: Callable[[str], None], brief: Brief | None = None) -> KitPlan:
+    """Have the AI read the template's text blocks, say what each is for, and
+    rewrite them for this video."""
+    total = timeline[-1].timeline_end if timeline else 0.0
+    intro_rule = (f"Il titolo l'ha scelto l'utente: «{intro_title}». Distribuiscilo sulle righe "
+                  f"del blocco titolo così com'è." if intro_title
+                  else "Scrivilo tu: un hook che si capisce da solo, distribuito sulle righe "
+                       "del blocco come nel modello.")
+    prompt = _KIT_PROMPT.format(total=total, name=name, topic=topic or "—",
+                                timeline=_timeline_text(timeline), kit=_kit_text(kit),
+                                intro_rule=intro_rule, count=max(0, count),
+                                brief="\n" + brief.for_step("texts") if brief else "")
+    data = _ask_json(prompt, model, log, "kit di testi")
+
+    groups = {g["id"]: g for g in kit["groups"]}
+    plan = KitPlan()
+    for it in data.get("kit") or []:
+        if isinstance(it, dict) and _str(it.get("group")).upper() in groups:
+            plan.roles.append((_str(it.get("group")).upper(), _str(it.get("role")), _str(it.get("how"))))
+    for it in data.get("not_used") or []:
+        if isinstance(it, dict) and _str(it.get("group")):
+            plan.not_used.append((_str(it.get("group")).upper(), _str(it.get("why"))))
+
+    busy_until = 0.0
+    for it in sorted((t for t in data.get("texts") or [] if isinstance(t, dict)),
+                     key=lambda t: _float(t.get("from"), 0.0)):
+        g = groups.get(_str(it.get("group")).upper())
+        if g is None:
+            continue
+        start = max(busy_until, min(_float(it.get("from"), 0.0), max(0.0, total - 0.5)))
+        end = min(total, max(_float(it.get("to"), start + g["duration"]), start + 0.6))
+        if end - start < 0.5:
+            continue
+        slots = {s["id"]: s for s in g["slots"]}
+        lines = []
+        for ln in it.get("lines") or []:
+            s = slots.get(_str(ln.get("slot")).upper()) if isinstance(ln, dict) else None
+            text = _str(ln.get("text")) if isinstance(ln, dict) else ""
+            if s is None or not text:
+                continue
+            at = _float(ln.get("at"), start + s["after"])
+            at = max(start, min(at, end - 0.4))
+            # like in the template: a line stays until its block goes, unless it left earlier there
+            out = end if s["ends_with_group"] else min(end, at + s["duration"])
+            lines.append((s["id"], s["text"], text, at, out))
+        if lines:
+            plan.uses.append(KitUse(group=g["id"], start=start, end=end, lines=lines,
+                                    why=_str(it.get("why"))))
+            busy_until = end
+    return plan
+
+
+# ===========================================================================
+# 2b. ZOOM — light push-ins and pull-outs on the lines that matter
+# ===========================================================================
+
+_ZOOMS_PROMPT = """Questo è il reel montato (tempi in secondi sulla timeline finale, \
+durata {total:.1f}s). Argomento: {topic}
+
+{timeline}
+
+Tratti in cui il volto NON si vede (immagini da sole o b-roll sopra il parlato):
+{hidden}
+{brief}
+Decidi gli ZOOM leggeri sull'inquadratura di chi parla, per sottolineare le frasi che \
+contano:
+- "in": l'inquadratura si stringe piano mentre la frase viene detta (dal 100% a `amount`). \
+Per un'affermazione chiave, un numero, una rivelazione, la call to action. Funziona bene \
+sulle ultime parole della frase (l'ultimo secondo circa), o su tutta la frase se è breve;
+- "out": parte già stretta (`amount`) e si allarga fino al 100%. Per un respiro dopo un \
+punto forte, l'inizio di una spiegazione, la chiusura;
+- pochi: al massimo uno ogni 8-10 secondi e mai due di fila; mai nei primi 2 secondi; \
+mai dove il volto non si vede;
+- leggeri: `amount` tra 1.06 e 1.18 (1.10 = inquadratura più stretta del 10%);
+- `from` / `to` = secondi della timeline in cui il movimento inizia e finisce: devono \
+cadere all'inizio e alla fine di parole di una stessa frase (durata tra 0.6 e 5 secondi);
+- se nessuna frase lo merita, lista vuota: uno zoom senza motivo distrae.
+
+Rispondi con questo JSON:
+{{
+  "summary": "come hai usato gli zoom, in 1-2 frasi",
+  "zooms": [{{"from": 12.3, "to": 14.8, "kind": "in", "amount": 1.12, "why": "..."}}]
+}}"""
+
+
+@dataclass
+class ZoomPlan:
+    summary: str = ""
+    zooms: list[tuple[float, float, str, float, str]] = field(default_factory=list)  # from, to, kind, amount, why
+
+
+def plan_zooms(timeline: list[TimelineSegment], hidden: list[tuple[float, float]], *,
+               topic: str, model: str, log: Callable[[str], None],
+               brief: Brief | None = None) -> ZoomPlan:
+    """`hidden` = timeline stretches where the speaker isn't on screen."""
+    total = timeline[-1].timeline_end if timeline else 0.0
+    prompt = _ZOOMS_PROMPT.format(
+        total=total, topic=topic or "—", timeline=_timeline_text(timeline),
+        hidden="\n".join(f"- {a:.2f}–{b:.2f}" for a, b in hidden) or "- nessuno",
+        brief="\n" + brief.for_step("zoom") if brief else "")
+    data = _ask_json(prompt, model, log, "zoom")
+    plan = ZoomPlan(summary=_str(data.get("summary")))
+    for it in data.get("zooms") or []:
+        if not isinstance(it, dict):
+            continue
+        start, end = _float(it.get("from"), -1.0), _float(it.get("to"), -1.0)
+        kind = _str(it.get("kind")).lower()
+        if start < 0 or end <= start or kind not in ("in", "out"):
+            continue
+        amount = min(1.25, max(1.04, _float(it.get("amount"), 1.1)))
+        plan.zooms.append((start, min(end, total), kind, amount, _str(it.get("why"))))
+    plan.zooms.sort()
+    return plan
+
+
+# ===========================================================================
 # 3. SUONI — which sound effects matter, and where
 # ===========================================================================
 
@@ -1018,6 +1219,12 @@ Suoni disponibili nel template:
 
 Musica disponibile nel template:
 {music}
+
+Testi a schermo decisi per questo video:
+{texts}
+
+Abitudini del template (i suoni che il suo autore fa partire insieme ai blocchi di testo):
+{habits}
 {brief}
 Decidi TU il ruolo di ogni suono e usalo SOLO quando ha una funzione precisa:
 - suoni di transizione (whoosh, swish, riser…) solo su cambi di scena reali, non su ogni taglio;
@@ -1027,6 +1234,9 @@ numero, una rivelazione, una CTA;
 vicini; meglio pochi e mirati che tanti;
 - `at` = secondo in cui il suono deve INIZIARE (per una transizione, poco prima del taglio);
 - puoi usare lo stesso suono più volte, e puoi decidere di non usarne alcuni;
+- rispetta le abitudini del template: se un blocco di testo lì entra con un certo suono, \
+quando quel blocco compare in questo video fallo entrare con lo stesso suono, nello \
+stesso rapporto di tempo (in un elenco, un suono per ogni voce che compare);
 - la musica: decidi se tenerla come sottofondo per tutto il reel. Se la regia indica una \
 musica precisa (per esempio «audio del trend», un brano, un genere) e quella del template \
 non lo è, NON tenerla (`keep`: false): meglio nessuna musica che una sbagliata, la \
@@ -1071,7 +1281,8 @@ def scene_cuts(timeline: list[TimelineSegment], min_jump: float = 1.0) -> list[s
 
 def plan_sounds(timeline: list[TimelineSegment], inventory: dict, *, topic: str,
                 model: str, log: Callable[[str], None],
-                brief: Brief | None = None) -> SoundPlan:
+                brief: Brief | None = None, texts: list[str] | None = None,
+                habits: list[str] | None = None) -> SoundPlan:
     total = timeline[-1].timeline_end if timeline else 0.0
     cuts = scene_cuts(timeline)
     sounds = "\n".join(
@@ -1085,6 +1296,9 @@ def plan_sounds(timeline: list[TimelineSegment], inventory: dict, *, topic: str,
                                    timeline=_timeline_text(timeline),
                                    cuts="\n".join(cuts) or "- nessun cambio di scena netto",
                                    sounds=sounds, music=music,
+                                   texts="\n".join(f"- {t}" for t in texts or []) or "- nessuno",
+                                   habits="\n".join(f"- {h}" for h in habits or [])
+                                   or "- nessuna rilevata",
                                    brief="\n" + brief.for_step("sounds") if brief else "")
     data = _ask_json(prompt, model, log, "suoni")
     plan = SoundPlan(summary=_str(data.get("summary")))

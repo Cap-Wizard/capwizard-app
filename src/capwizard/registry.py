@@ -17,18 +17,21 @@ from pathlib import Path
 
 def app_data_dir() -> Path:
     if sys.platform == "darwin":
-        root, name, legacy = Path.home() / "Library/Application Support", "CapWiz", "CapCutAuto"
+        root, name, legacy = Path.home() / "Library/Application Support", "CapWizard", ("CapWiz", "CapCutAuto")
     elif sys.platform == "win32":
-        root, name, legacy = Path(os.environ.get("APPDATA") or str(Path.home())), "CapWiz", "CapCutAuto"
+        root, name, legacy = Path(os.environ.get("APPDATA") or str(Path.home())), "CapWizard", ("CapWiz", "CapCutAuto")
     else:
-        root, name, legacy = Path.home() / ".config", "capwiz", "capcut-auto"
+        root, name, legacy = Path.home() / ".config", "capwizard", ("capwiz", "capcut-auto")
     base = root / name
-    # The app used to be called "CapCut Auto": carry its projects and reports over.
-    if not base.exists() and (root / legacy).is_dir():
-        try:
-            (root / legacy).rename(base)
-        except OSError:
-            pass
+    # The app was called "CapCut Auto", then "CapWiz": carry its projects and reports over.
+    if not base.exists():
+        for old in legacy:
+            if (root / old).is_dir():
+                try:
+                    (root / old).rename(base)
+                except OSError:
+                    continue
+                break
     base.mkdir(parents=True, exist_ok=True)
     return base
 
