@@ -110,6 +110,7 @@ class GenerateRequest(BaseModel):
     subtitle_max_duration: float = 1.4
     subtitle_like_template: bool = True
     ai_zoom: bool = False
+    sentence_transitions: bool = True
     fmt: str = "vertical"
     projects_dir: str | None = None
 
@@ -268,6 +269,7 @@ def _do_generate(req: GenerateRequest, log) -> tuple[str, str]:
         subtitle_max_duration=req.subtitle_max_duration,
         subtitle_like_template=req.subtitle_like_template,
         ai_zoom=req.ai_zoom,
+        sentence_transitions=req.sentence_transitions,
         fmt=req.fmt,
         projects_dir=Path(req.projects_dir) if req.projects_dir else None,
         log=log,

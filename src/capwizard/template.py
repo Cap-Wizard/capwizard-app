@@ -76,7 +76,7 @@ def load_template(template_name: str, projects_dir: Path = CAPCUT_PROJECTS_DIR) 
 # ---------------------------------------------------------------------------
 
 # substring → category, checked in order
-_TRANSITION_HINTS = ("whoosh", "swish", "swoosh", "transition", "riser", "swipe")
+_TRANSITION_HINTS = ("whoosh", "woosh", "swish", "swoosh", "transition", "riser", "swipe")
 _EMPHASIS_HINTS = ("ding", "explosion", "boom", "chakin", "money", "ka-ching",
                    "kaching", "notification", "alert", "pop", "tap", "click",
                    "magic", "reveal", "tada", "ta-da")
@@ -1218,6 +1218,44 @@ def _place_kit_texts(info: dict, index: dict, lines: list[tuple[str, str, float,
     return placed, len(slots), owned
 
 
+def _transition_uses(info: dict) -> list[dict]:
+    """The transition materials a draft really uses, one entry per use."""
+    by_id = {m["id"]: m for m in info.get("materials", {}).get("transitions", [])
+             if isinstance(m, dict) and m.get("id")}
+    return [by_id[r] for t in info.get("tracks", []) if t["type"] == "video"
+            for s in t["segments"] for r in s.get("extra_material_refs") or [] if r in by_id]
+
+
+def find_transition(template_name: str | None,
+                    projects_dir: Path = CAPCUT_PROJECTS_DIR) -> tuple[dict | None, str]:
+    """The video transition to put between sentences: the one the template
+    uses most, else the one used most across the user's own projects (so it is
+    already in CapCut's cache). Returns (material, where it was found)."""
+    def most_used(uses: list[dict]) -> dict | None:
+        counts = Counter(m.get("effect_id") for m in uses if m.get("effect_id"))
+        for effect_id, _ in counts.most_common():
+            m = next(u for u in uses if u.get("effect_id") == effect_id)
+            if not m.get("path") or Path(m["path"]).exists():
+                return m
+        return None
+
+    if template_name:
+        try:
+            m = most_used(_transition_uses(load_template(template_name, projects_dir)))
+            if m:
+                return m, f"dal template «{template_name}»"
+        except ValueError:
+            pass
+    uses: list[dict] = []
+    for folder in projects_dir.iterdir() if projects_dir.exists() else []:
+        try:
+            uses += _transition_uses(json.loads((folder / "draft_info.json").read_text()))
+        except (OSError, ValueError):
+            continue
+    m = most_used(uses)
+    return (m, "la più usata nei tuoi progetti CapCut") if m else (None, "")
+
+
 def template_blueprint(template_name: str, projects_dir: Path = CAPCUT_PROJECTS_DIR) -> dict:
     """What the template's own video is like, for the AI's brief: what was said
     (its subtitles), which texts appear on screen and when, how sounds are
@@ -1282,6 +1320,7 @@ def build_from_template(
     sound_plan=None,
     covers: list[CoverShot] | None = None,
     kit_texts: list[tuple[str, str, float, float]] | None = None,
+    transition: dict | None = None,
     projects_dir: Path = CAPCUT_PROJECTS_DIR,
     log=lambda _line: None,
 ) -> Path:
@@ -1331,6 +1370,12 @@ def build_from_template(
         info["materials"]["sound_channel_mappings"].append(sm)
         info["materials"]["vocal_separations"].append(vsep)
         extras = [speed["id"], ph["id"], canv["id"], anim["id"], sm["id"], vsep["id"]]
+        if ts.transition_after and transition:
+            # like CapCut: the transition hangs on the segment it leads out of
+            tm = copy.deepcopy(transition)
+            tm["id"] = _uid()
+            info["materials"].setdefault("transitions", []).append(tm)
+            extras.insert(3, tm["id"])
         main_video["segments"].append(
             _video_segment(ts, src_to_mat[ts.keep.source.path], extras)
         )

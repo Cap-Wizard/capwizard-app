@@ -38,6 +38,10 @@ Whisper trascrive, poi l'AI sceglie ogni cosa e spiega perché.
   ed effetti del template vengono estesi a tutto il video. Nell'app, sotto il menu
   del template, un riquadro mostra cosa contiene il kit e cosa manca, con la guida
   «Come si prepara un template»
+- **fine frase** (di default, `--no-sentence-transitions` per toglierlo) — sulla clip che
+  chiude una frase l'inquadratura si stringe nell'ultimo secondo (100% → 115%), poi
+  una transizione porta alla clip dopo con il woosh del template. La transizione è
+  quella del template o, se non ne ha, quella che usi di più nei tuoi progetti CapCut
 - **zoom** (opzionale, `--ai-zoom` o l'interruttore nell'app) — zoom in / zoom out
   leggeri (6–18%) sulle frasi chiave, scelti dall'AI; nel draft sono keyframe di
   scala come quelli fatti a mano in CapCut, e continuano attraverso i tagli dei silenzi

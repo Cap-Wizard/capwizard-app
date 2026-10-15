@@ -48,6 +48,7 @@ class TimelineSegment:
     timeline_end: float
     # zoom: (second in the SOURCE clip, scale) pairs — CapCut keys scale on source time
     scale_keys: list[tuple[float, float]] = field(default_factory=list)
+    transition_after: bool = False   # a video transition into the next segment
 
 
 @dataclass

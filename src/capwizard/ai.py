@@ -396,7 +396,8 @@ e conta;
 - "music": la musica che il copione chiede (per esempio «audio del trend»), con le sue \
 parole; stringa vuota se non ne parla;
 - "missing": ciò che il copione chiede e che NON c'è nel materiale: una ripresa prevista \
-che nel girato manca, una musica o un suono che il template non ha. Per ognuna "what" e \
+che nel girato manca, una musica o un suono che il template non ha (la musica e i suoni \
+del template contano come presenti). Per ognuna "what" e \
 "why". Servirà a dire all'utente cosa aggiungere a mano; lista vuota se c'è tutto;
 - "caption": la didascalia del post, se il copione la riporta (non va nel video); \
 altrimenti stringa vuota;
@@ -1225,6 +1226,9 @@ Testi a schermo decisi per questo video:
 
 Abitudini del template (i suoni che il suo autore fa partire insieme ai blocchi di testo):
 {habits}
+
+Già messi (non toccarli e non mettere altri suoni a meno di 1 secondo da questi):
+{fixed}
 {brief}
 Decidi TU il ruolo di ogni suono e usalo SOLO quando ha una funzione precisa:
 - suoni di transizione (whoosh, swish, riser…) solo su cambi di scena reali, non su ogni taglio;
@@ -1237,10 +1241,10 @@ vicini; meglio pochi e mirati che tanti;
 - rispetta le abitudini del template: se un blocco di testo lì entra con un certo suono, \
 quando quel blocco compare in questo video fallo entrare con lo stesso suono, nello \
 stesso rapporto di tempo (in un elenco, un suono per ogni voce che compare);
-- la musica: decidi se tenerla come sottofondo per tutto il reel. Se la regia indica una \
-musica precisa (per esempio «audio del trend», un brano, un genere) e quella del template \
-non lo è, NON tenerla (`keep`: false): meglio nessuna musica che una sbagliata, la \
-aggiungerà l'utente;
+- la musica del template è quella che chi monta ha scelto per questo cliente: tienila come \
+sottofondo per tutto il reel e non giudicarla dal nome del file. Toglila (`keep`: false) \
+solo se la regia indica una musica diversa (per esempio «audio del trend», un brano, un \
+genere): in quel caso meglio nessuna musica che una sbagliata, la aggiungerà l'utente;
 - se il copione chiede un suono che tra questi non c'è, usa il più simile solo se regge \
 davvero la stessa funzione, e dillo nel motivo;
 - `todo`: SOLO per musica e suoni, ciò che resta da fare A MANO in CapCut perché il \
@@ -1282,7 +1286,7 @@ def scene_cuts(timeline: list[TimelineSegment], min_jump: float = 1.0) -> list[s
 def plan_sounds(timeline: list[TimelineSegment], inventory: dict, *, topic: str,
                 model: str, log: Callable[[str], None],
                 brief: Brief | None = None, texts: list[str] | None = None,
-                habits: list[str] | None = None) -> SoundPlan:
+                habits: list[str] | None = None, fixed: list[str] | None = None) -> SoundPlan:
     total = timeline[-1].timeline_end if timeline else 0.0
     cuts = scene_cuts(timeline)
     sounds = "\n".join(
@@ -1299,6 +1303,7 @@ def plan_sounds(timeline: list[TimelineSegment], inventory: dict, *, topic: str,
                                    texts="\n".join(f"- {t}" for t in texts or []) or "- nessuno",
                                    habits="\n".join(f"- {h}" for h in habits or [])
                                    or "- nessuna rilevata",
+                                   fixed="\n".join(f"- {x}" for x in fixed or []) or "- nessuno",
                                    brief="\n" + brief.for_step("sounds") if brief else "")
     data = _ask_json(prompt, model, log, "suoni")
     plan = SoundPlan(summary=_str(data.get("summary")))

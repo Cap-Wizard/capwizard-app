@@ -19,7 +19,7 @@ const DEFAULTS = {
   subtitle_max_words: 4, subtitle_max_duration: 1.4, subtitle_like_template: true,
   drop_fillers: true, aggressive_fillers: false,
   clear_template_texts: true, redistribute_sfx_enabled: true, stabilize_clips: false,
-  ai_model: "sonnet", use_ai_review: true, ai_zoom: false,
+  ai_model: "sonnet", use_ai_review: true, ai_zoom: false, sentence_transitions: true,
   ai_target_duration: null,
 };
 
@@ -326,6 +326,7 @@ function applySettings(s) {
   setSwitch("sw-stab", s.stabilize_clips);
   setSwitch("sw-ai-review", s.use_ai_review ?? true);
   setSwitch("sw-zoom", s.ai_zoom ?? false);
+  setSwitch("sw-transitions", s.sentence_transitions ?? true);
 
   $("ai-model").value = s.ai_model || "sonnet";
   $("ai-target").value = s.ai_target_duration == null ? "auto" : String(Math.round(s.ai_target_duration));
@@ -520,6 +521,7 @@ function buildRequest() {
     ai_model: $("ai-model").value,
     use_ai_review: isOn("sw-ai-review"),
     ai_zoom: isOn("sw-zoom"),
+    sentence_transitions: isOn("sw-transitions"),
     ai_target_duration: aiTarget === "auto" ? null : parseFloat(aiTarget),
   };
 }
@@ -628,7 +630,7 @@ function classify(line) {
   if (t.startsWith("✂")) return "cut";
   if (t.startsWith("✓")) return "ok";
   if (t.includes("⚠") || t.startsWith("☐")) return "warn";
-  if (/^(👁|🎞|🔍|🧩|🔊|🔇|♪|✚|✎|Titolo iniziale|Argomento|Come l|Soglia|Regia|Formato|Tono|Struttura|Indicazioni|Consegne|Ritmo dal copione|Musica chiesta|Didascalia|🎬|Sottotitoli:|📄)/u.test(t)) return "ai";
+  if (/^(👁|🎞|🔍|🧩|↪|🔊|🔇|♪|✚|✎|Titolo iniziale|Argomento|Come l|Soglia|Regia|Formato|Tono|Struttura|Indicazioni|Consegne|Ritmo dal copione|Musica chiesta|Didascalia|🎬|Sottotitoli:|📄)/u.test(t)) return "ai";
   return "";
 }
 

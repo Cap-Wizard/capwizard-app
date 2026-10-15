@@ -32,8 +32,9 @@ from .probe import probe
 from .report import Report
 from .stabilize import stabilize
 from .subtitles import build_subtitles
-from .template import (build_from_template, template_blueprint, template_exists,
-                       template_kit, template_sound_inventory, template_subtitle_look)
+from .template import (_TRANSITION_HINTS, build_from_template, find_transition,
+                       template_blueprint, template_exists, template_kit,
+                       template_sound_inventory, template_subtitle_look)
 from .transcribe import transcribe
 from .vision import light_changes, make_strip
 
@@ -196,6 +197,28 @@ def apply_zooms(timeline: list[TimelineSegment], zooms: list[tuple], hidden: lis
     return done
 
 
+def sentence_ends(timeline: list[TimelineSegment], hidden: list[tuple[float, float]],
+                  min_gap: float = 2.5) -> list[int]:
+    """Indices of the talking segments that close a sentence and are followed
+    by another segment: where a punch-in and a transition belong. A sentence
+    closes on a full stop / question / exclamation mark or where the AI ended a
+    kept block; cuts inside a sentence (a silence taken out) don't count. Not
+    in the first 2 seconds, not under a b-roll cover, at least `min_gap`
+    seconds apart."""
+    out: list[int] = []
+    last = -min_gap
+    for i, (a, b) in enumerate(zip(timeline, timeline[1:])):
+        if a.keep.muted or not a.keep.words:
+            continue
+        ends = a.keep.words[-1].text.strip()[-1:] in ".?!…" or a.keep.block != b.keep.block
+        cut = a.timeline_end
+        covered = any(ha - 0.2 <= cut <= hb + 0.2 for ha, hb in hidden)
+        if ends and cut >= 2.0 and not covered and cut - last >= min_gap:
+            out.append(i)
+            last = cut
+    return out
+
+
 @dataclass
 class PipelineResult:
     draft_path: Path
@@ -225,6 +248,7 @@ def run_pipeline(
     subtitle_max_duration: float = 1.4,
     subtitle_like_template: bool = True,
     ai_zoom: bool = False,
+    sentence_transitions: bool = True,
     fmt: str = "vertical",
     projects_dir: Path | None = None,
     log: Callable[[str], None] = print,
@@ -234,7 +258,9 @@ def run_pipeline(
     `subtitle_like_template` = write the subtitles the way the template's own
     are written (block length, letter case, punctuation); off uses
     `subtitle_max_words` / `subtitle_max_duration`.
-    `ai_zoom` = let the AI add light zoom-ins / zoom-outs on the key lines."""
+    `ai_zoom` = let the AI add light zoom-ins / zoom-outs on the key lines.
+    `sentence_transitions` = at the end of a sentence: punch-in, video
+    transition into the next clip and a woosh."""
     rep = Report(name, log)
     try:
         out = _run(rep, input_path, name, template, script, model, language,
@@ -242,7 +268,8 @@ def run_pipeline(
                    add_emphasis, emphasis_count, drop_fillers, aggressive_fillers,
                    intro_title, clear_template_texts, ai_model, use_ai_review,
                    ai_target_duration, subtitle_max_words, subtitle_max_duration,
-                   subtitle_like_template, ai_zoom, fmt, projects_dir or CAPCUT_PROJECTS_DIR)
+                   subtitle_like_template, ai_zoom, sentence_transitions, fmt,
+                   projects_dir or CAPCUT_PROJECTS_DIR)
     except Exception as e:
         rep("")
         rep(f"✘ INTERROTTO: {e}")
@@ -259,7 +286,7 @@ def _run(rep: Report, input_path, name, template, script, model, language,
          pacing: Pacing, stabilize_clips, ai_sounds, add_emphasis, emphasis_count,
          drop_fillers, aggressive_fillers, intro_title, clear_template_texts,
          ai_model, use_ai_review, target_duration, subtitle_max_words,
-         subtitle_max_duration, subtitle_like_template, ai_zoom, fmt,
+         subtitle_max_duration, subtitle_like_template, ai_zoom, sentence_transitions, fmt,
          projects_dir: Path) -> Path:
     inputs = gather_inputs(input_path)
     if template and not template_exists(template, projects_dir):
@@ -490,6 +517,42 @@ def _run(rep: Report, input_path, name, template, script, model, language,
         if not zp.zooms:
             rep("Nessuno zoom: l'AI non ha trovato frasi che lo meritino.")
 
+    # 5c — end of a sentence: punch-in, transition into the next clip, woosh
+    transition, woosh_cuts, woosh = None, [], None
+    if sentence_transitions and any(ts.keep.words and not ts.keep.muted for ts in timeline):
+        rep.section("5c · ZOOM E TRANSIZIONE A FINE FRASE")
+        hidden = ([(ts.timeline_start, ts.timeline_end) for ts in timeline if ts.keep.muted]
+                  + [(c.timeline_start, c.timeline_start + c.duration) for c in covers])
+        ends = sentence_ends(timeline, hidden)
+        transition, found_in = find_transition(template, projects_dir)
+        if template:
+            names = [s["name"] for s in template_sound_inventory(template, projects_dir)["sounds"]]
+            woosh = next((n for n in names if any(h in n.lower() for h in _TRANSITION_HINTS[:5])),
+                         None)
+        rep(f"Transizione: «{transition['name']}» ({found_in})" if transition
+            else "⚠ Nessuna transizione trovata nel template né nei tuoi progetti: solo zoom e suono.")
+        rep(f"Suono: «{woosh}» dal template" if woosh
+            else "⚠ Il template non ha un suono woosh: transizioni senza suono.")
+        for i in ends:
+            ts = timeline[i]
+            ts.transition_after = transition is not None
+            zoom = ""
+            if not ts.scale_keys:
+                # the user's own habit: the frame tightens over the sentence's last second
+                end = ts.keep.src_end - 0.05
+                ramp = min(1.0, 0.4 * (ts.timeline_end - ts.timeline_start))
+                ts.scale_keys = [(end - ramp, 1.0), (end, 1.15)]
+                zoom = "zoom 100% → 115% sulle ultime parole + "
+            woosh_cuts.append(ts.timeline_end)
+            last_words = " ".join(w.text for w in ts.keep.words[-5:])
+            rep(f"↪ @ {ts.timeline_end:.2f}s «…{last_words}» → {zoom}"
+                + (f"transizione «{transition['name']}»" if transition else "nessuna transizione")
+                + (f" + «{woosh}»" if woosh else ""))
+            extras.append(f"fine frase @ {ts.timeline_end:.1f}s: zoom in, transizione"
+                          + (" e woosh" if woosh else ""))
+        if not ends:
+            rep("Nessuna fine frase adatta (tagli troppo vicini, coperti dal b-roll o nei primi 2 secondi).")
+
     # 6 — subtitles
     rep.section("6 · SOTTOTITOLI")
     look = template_subtitle_look(template, projects_dir) if template else None
@@ -584,9 +647,18 @@ def _run(rep: Report, input_path, name, template, script, model, language,
         if ai_sounds:
             inventory = template_sound_inventory(template, projects_dir)
             if inventory["sounds"] or inventory["music"]:
+                fixed = [f"«{woosh}» con la transizione a fine frase @ {t - 0.2:.2f}s"
+                         for t in woosh_cuts] if woosh else []
                 sound_plan = plan_sounds(timeline, inventory, topic=topic,
                                          model=ai_model, log=rep, brief=brief,
-                                         texts=text_notes, habits=sound_habits)
+                                         texts=text_notes, habits=sound_habits, fixed=fixed)
+                if woosh:
+                    # never two sounds on top of each other: the AI's own ones near a woosh go
+                    sound_plan.placements = [p for p in sound_plan.placements
+                                             if all(abs(p[1] - (t - 0.2)) >= 0.8 for t in woosh_cuts)]
+                    sound_plan.placements += [(woosh, max(0.0, t - 0.2), "transizione a fine frase")
+                                              for t in woosh_cuts]
+                    sound_plan.placements.sort(key=lambda p: p[1])
                 rep(f"Come li ha usati: {sound_plan.summary or '—'}")
                 for mname, keep, why in sound_plan.music:
                     rep(f"♪ musica «{mname}»: {'tenuta come sottofondo' if keep else 'rimossa'}"
@@ -602,7 +674,8 @@ def _run(rep: Report, input_path, name, template, script, model, language,
                 sound_plan = SoundPlan()      # still applied: clears the old project's audio
                 rep("Il template non contiene suoni né musica utilizzabili.")
         else:
-            rep("Gestione suoni con AI disattivata: audio del template lasciato com'è.")
+            rep("Gestione suoni con AI disattivata: audio del template lasciato com'è"
+                + (" (quindi niente woosh sulle transizioni)." if woosh_cuts else "."))
     else:
         rep("")
         rep("ⓘ Nessun template: testi di enfasi e suoni non vengono aggiunti.")
@@ -623,7 +696,7 @@ def _run(rep: Report, input_path, name, template, script, model, language,
             emphasis=emphasis or None, intro_title=final_intro,
             clear_template_texts_enabled=clear_template_texts,
             sound_plan=sound_plan, covers=covers, kit_texts=kit_texts,
-            projects_dir=projects_dir, log=rep,
+            transition=transition, projects_dir=projects_dir, log=rep,
         )
         if clear_template_texts and kit_texts is None:
             rep("Testi residui del template rimossi (restano solo le emoji decorative).")
@@ -631,7 +704,7 @@ def _run(rep: Report, input_path, name, template, script, model, language,
         canvas = (1080, 1920) if fmt == "vertical" else (1920, 1080)
         out = build_draft(name=name, timeline=timeline, subtitles=subs,
                           canvas_w=canvas[0], canvas_h=canvas[1], projects_dir=projects_dir,
-                          covers=covers)
+                          covers=covers, transition=transition)
     if covers:
         rep(f"{len(covers)} coperture b-roll su una traccia video sopra il parlato (mute).")
     rep(f"✓ Draft scritto: {out}")

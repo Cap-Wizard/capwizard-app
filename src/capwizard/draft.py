@@ -301,8 +301,10 @@ def build_draft(
     fps: float = 30.0,
     projects_dir: Path = CAPCUT_PROJECTS_DIR,
     covers: list[CoverShot] | None = None,
+    transition: dict | None = None,
 ) -> Path:
-    """Write the draft folder and return its path."""
+    """Write the draft folder and return its path. `transition` = the video
+    transition material put on the segments flagged `transition_after`."""
     draft_id = _uid()
     folder = projects_dir / name
     folder.mkdir(parents=True, exist_ok=True)
@@ -356,6 +358,10 @@ def build_draft(
         materials["sound_channel_mappings"].append(smap)
         materials["vocal_separations"].append(vsep)
         extras = [speed["id"], placeholder["id"], canvas["id"], anim["id"], smap["id"], vsep["id"]]
+        if seg.transition_after and transition:
+            tm = dict(transition, id=_uid())
+            materials.setdefault("transitions", []).append(tm)
+            extras.insert(3, tm["id"])
         video_segments.append(_video_segment(seg, src_to_mat[seg.keep.source.path], extras))
 
     # ---- text materials + segments ----
