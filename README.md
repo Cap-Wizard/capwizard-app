@@ -60,9 +60,16 @@ Ogni scelta viene scritta nel log con il motivo e salvata in un **report Markdow
 
 ## Setup
 
+Questo repository è l'**app** (interfaccia grafica + backend per Electron). Il
+motore che monta i video è il pacchetto `capwizard`, nel repository
+[Cap-Wizard/capwizard-mcp](https://github.com/Cap-Wizard/capwizard-mcp), e viene
+installato come dipendenza.
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e .
+# per lavorare sul motore in parallelo, con il repo clonato accanto:
+.venv/bin/pip install -e ../capwizard-mcp
 ```
 
 Serve `ffmpeg`/`ffprobe` nel PATH (`brew install ffmpeg`).
@@ -137,7 +144,7 @@ desktop/                    # guscio Electron
     └── app.js              # parla col backend via REST + WebSocket
 ```
 
-Il backend è un server **FastAPI** ([server.py](src/capwizard/server.py)) che avvolge
+Il backend è un server **FastAPI** ([server.py](src/capwizard_app/server.py)) che avvolge
 il pipeline esistente ed espone:
 - `GET /api/health` · `GET /api/system` · `GET /api/templates`
 - `POST /api/generate` → avvia un job, ritorna `job_id`
@@ -163,7 +170,7 @@ nome della sottocartella (con un prefisso opzionale). Endpoint:
 ### Schermate
 
 - **Home** — griglia dei progetti creati dal programma (registro in
-  [registry.py](src/capwizard/registry.py), salvato in app-data). Ogni card ha
+  `capwizard.registry` del motore, salvato in app-data). Ogni card ha
   *Apri* (in Finder/Explorer) e *Duplica*.
 - **Duplica** — riapre l'editor pre-riempito con tutte le impostazioni del
   progetto: basta cambiare le clip / qualche preferenza e rigenerare.
@@ -199,23 +206,13 @@ impacchettata userà un sidecar PyInstaller in `resources/backend/` (da fare).
 ## Architettura Python
 
 ```
-src/capwizard/
-├── cli.py          # entry point CLI (click)
-├── gui.py          # entry point GUI (customtkinter)
-├── pipeline.py     # orchestrator: AI check → transcribe → AI looks at clips → AI brief → AI edit / b-roll → subtitles → AI texts/sounds → draft → AI review
-├── ai.py           # Claude: look_at_clips / plan_brief / plan_edit / plan_covers / plan_montage / plan_texts / plan_sounds / review (CLI o SDK, nessun fallback)
-├── vision.py       # strisce di fotogrammi per far vedere le clip all'AI
-├── edit.py         # trascrizione globale multi-clip, applica le decisioni AI, taglia i silenzi, log
-├── report.py       # log live + report Markdown per progetto
-├── probe.py        # ffprobe wrapper
-├── transcribe.py   # faster-whisper, word-level timestamps
-├── cuts.py         # preset di ritmo (pad ai bordi delle frasi)
-├── subtitles.py    # blocchi di sottotitoli: a mano o a frasi come il template
-├── stabilize.py    # ffmpeg vidstab + deshake fallback, with cache
-├── draft.py        # CapCut draft writer (from scratch)
-├── template.py     # CapCut draft writer (template-based): clone dei sottotitoli, lettura del template per la regia, piano suoni AI
-└── models.py       # dataclasses
+src/capwizard_app/
+├── server.py       # backend FastAPI per Electron (REST + WebSocket), avvolge capwizard.pipeline
+└── gui.py          # vecchia GUI customtkinter
 ```
+
+Il resto (pipeline, AI, trascrizione, scrittura dei draft CapCut, CLI `capwizard`)
+è il motore in [Cap-Wizard/capwizard-mcp](https://github.com/Cap-Wizard/capwizard-mcp).
 
 ## Note di fragilità
 

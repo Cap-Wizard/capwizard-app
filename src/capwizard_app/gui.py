@@ -8,9 +8,9 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from .cuts import PACING_BY_NAME
-from .draft import CAPCUT_PROJECTS_DIR
-from .pipeline import read_script, run_pipeline
+from capwizard.cuts import PACING_BY_NAME
+from capwizard.draft import CAPCUT_PROJECTS_DIR
+from capwizard.pipeline import read_script, run_pipeline
 
 
 ctk.set_appearance_mode("dark")

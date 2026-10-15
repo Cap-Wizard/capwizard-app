@@ -29,10 +29,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import registry
-from .draft import CAPCUT_PROJECTS_DIR
-from .pipeline import read_script, run_pipeline
-from .template import template_kit
+from capwizard import registry
+from capwizard.draft import CAPCUT_PROJECTS_DIR
+from capwizard.pipeline import read_script, run_pipeline
+from capwizard.template import template_kit
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ def _whisper_cached_models() -> list[str]:
 
 @app.get("/api/system")
 def system() -> dict:
-    from .ai import _find_claude_cli
+    from capwizard.ai import _find_claude_cli
     return {
         "os": platform.system().lower(),          # darwin | windows | linux
         "os_version": platform.version(),
@@ -295,7 +295,7 @@ def _run_job(job: Job, req: GenerateRequest) -> None:
 
 def _project_subfolders(parent: Path) -> list[Path]:
     """Immediate subfolders of `parent` that contain at least one video."""
-    from .pipeline import _is_video
+    from capwizard.pipeline import _is_video
     if not parent.is_dir():
         return []
     out: list[Path] = []
@@ -323,7 +323,7 @@ def _run_batch(job: Job, req: BatchRequest) -> None:
 
         job.log(f"▶ Modalità blocco: {len(subs)} progetti da generare")
         # fail fast: without Claude every project would fail the same way
-        from .ai import require_ai
+        from capwizard.ai import require_ai
         require_ai(req.ai_model, job.log)
         base = req.model_dump()
         base.pop("parent_folder", None)
@@ -398,13 +398,13 @@ def project_delete(project_id: str) -> dict:
 
 @app.get("/api/ai/status")
 def ai_status_endpoint() -> dict:
-    from .ai import ai_status
+    from capwizard.ai import ai_status
     return ai_status()
 
 
 @app.post("/api/ai/test")
 def ai_test_endpoint() -> dict:
-    from .ai import ai_ping
+    from capwizard.ai import ai_ping
     return ai_ping()
 
 

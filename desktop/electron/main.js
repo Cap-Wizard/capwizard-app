@@ -61,7 +61,7 @@ function startBackend() {
   } else {
     pyProc = spawn(
       devPythonPath(),
-      ["-m", "capwizard.server", "--port", String(BACKEND_PORT)],
+      ["-m", "capwizard_app.server", "--port", String(BACKEND_PORT)],
       { cwd: repoRoot(), env: { ...process.env } }
     );
   }

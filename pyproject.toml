@@ -1,24 +1,21 @@
 [project]
-name = "capwizard"
+name = "capwizard-app"
 version = "0.1.0"
-description = "Auto-generate CapCut drafts (vertical 9:16) from videos: silence-cut + subtitles + optional script-driven cuts."
+description = "CapWizard desktop app backend: FastAPI server for the Electron UI (the engine is the capwizard package)."
 requires-python = ">=3.10"
 dependencies = [
-    "faster-whisper>=1.0.0",
-    "rapidfuzz>=3.6.0",
-    "click>=8.1.0",
+    "capwizard @ git+https://github.com/Cap-Wizard/capwizard-mcp.git",
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
 ]
 
 [project.optional-dependencies]
-ai = ["anthropic>=0.39.0"]
+ai = ["capwizard[ai] @ git+https://github.com/Cap-Wizard/capwizard-mcp.git"]
 gui = ["customtkinter>=5.2.0"]
 
 [project.scripts]
-capwizard = "capwizard.cli:main"
-capwizard-gui = "capwizard.gui:main"
-capwizard-server = "capwizard.server:run"
+capwizard-gui = "capwizard_app.gui:main"
+capwizard-server = "capwizard_app.server:run"
 
 [build-system]
 requires = ["setuptools>=68"]
