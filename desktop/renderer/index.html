@@ -9,16 +9,26 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="topbar">
-    <div class="brand"><img src="logo.png" alt="" />Cap<span>Wizard</span></div>
-    <div class="spacer"></div>
-    <span class="tb-email" id="tb-email" hidden></span>
-    <button class="btn-link" id="tb-account" hidden>Gestisci abbonamento</button>
-    <button class="btn-link" id="tb-logout" hidden>Esci</button>
-    <div class="pill" id="pill-ffmpeg"><span class="dot"></span> ffmpeg</div>
-    <div class="pill" id="pill-ai"><span class="dot"></span> AI</div>
-    <div class="pill" id="pill-backend"><span class="dot"></span> backend</div>
-  </div>
+  <header class="topbar">
+    <img class="logo" src="logo.png" alt="" />
+    <div class="brand-text">
+      <h1>Cap<span>Wizard</span></h1>
+      <div class="sub">Scegli cliente e clip, Claude monta il video con le tue regole</div>
+    </div>
+    <nav class="views" id="views">
+      <button class="vbtn on" id="v-new">＋ Nuovo video</button>
+      <button class="vbtn" id="v-proj">📂 I miei progetti<b id="n-proj">0</b></button>
+    </nav>
+    <div class="pills">
+      <span class="tb-email" id="tb-email" hidden></span>
+      <button class="btn-link" id="tb-account" hidden>Gestisci abbonamento</button>
+      <button class="btn-link" id="tb-logout" hidden>Esci</button>
+      <div class="pill" id="pill-ffmpeg"><i></i>ffmpeg</div>
+      <div class="pill" id="pill-ai"><i></i>Claude</div>
+      <div class="pill" id="pill-backend"><i></i>backend</div>
+      <button class="icon-btn" id="btn-config-ai" title="Collegamento a Claude">⚙</button>
+    </div>
+  </header>
 
   <!-- ==================== LOGIN ==================== -->
   <div id="view-auth" class="view gate-view" hidden>
@@ -44,239 +54,131 @@
       <p class="gate-text">Per usare CapWizard serve un abbonamento attivo.</p>
       <div class="gate-info" id="sub-info"></div>
       <button class="btn-primary-sm gate-btn" id="btn-subscribe">Abbonati</button>
-      <button class="btn-secondary gate-btn" id="btn-recheck">Ho già pagato — ricontrolla</button>
+      <button class="btn2 gate-btn" id="btn-recheck">Ho già pagato — ricontrolla</button>
       <button class="btn-link" id="btn-logout-sub">Esci</button>
     </div>
   </div>
 
-  <!-- ==================== HOME ==================== -->
-  <div id="view-home" class="view view-scroll">
-    <div class="home-header">
-      <div>
-        <h1>I tuoi progetti</h1>
-        <p class="home-sub">Progetti creati con CapWizard — apri o duplica con un click.</p>
-      </div>
-      <div class="home-actions">
-        <button class="btn-secondary" id="btn-config-ai">⚙&nbsp; Configura AI</button>
-        <button class="btn-primary-sm" id="btn-new">+&nbsp; Nuovo progetto</button>
-      </div>
-    </div>
-
-    <div id="projects-grid" class="projects-grid"></div>
-
-    <div id="projects-empty" class="empty-state" hidden>
-      <div class="empty-icon">🎬</div>
-      <h3>Nessun progetto ancora</h3>
-      <p>Crea il tuo primo reel: scegli una cartella di video e un template.</p>
-      <button class="btn-primary-sm" id="btn-new-empty">+&nbsp; Nuovo progetto</button>
-    </div>
-  </div>
-
-  <!-- ==================== EDITOR ==================== -->
-  <div id="view-editor" class="view" hidden>
-    <div class="editor-topnav">
-      <button class="link-back" id="btn-back">←&nbsp; Progetti</button>
-      <span class="editor-title" id="editor-title">Nuovo progetto</span>
-    </div>
-
-    <div class="layout">
-      <!-- FORM -->
-      <div class="form-pane">
-        <div class="card">
-          <h2>Sorgente & progetto</h2>
-          <div class="switch-row" style="padding-top:0;">
-            <div class="switch-label">Modalità blocco — un progetto per ogni sottocartella</div>
-            <div class="switch" id="sw-batch"></div>
-          </div>
-          <div class="hint" style="margin-bottom:12px;">
-            Scegli una cartella madre: ogni sottocartella con video diventa un progetto,
-            tutti con questo template e queste preferenze.
-          </div>
-          <div class="row">
-            <label class="field-label" id="src-label">Cartella video o singolo file</label>
-            <div class="input-with-btn">
-              <input type="text" id="input-path" placeholder="Nessuna sorgente selezionata" />
-              <button class="btn-secondary" id="btn-folder">Cartella…</button>
-              <button class="btn-secondary" id="btn-video">File…</button>
-            </div>
-            <div class="hint" id="batch-preview" hidden></div>
-          </div>
-          <div class="row">
-            <label class="field-label" id="name-label">Nome progetto</label>
-            <input type="text" id="name" placeholder="es. Reel 23 maggio" />
-          </div>
-          <div class="row">
-            <label class="field-label">Cliente</label>
-            <select id="client"></select>
-            <div class="client-card" id="client-card" hidden>
-              <span class="client-dot" id="client-dot"></span>
-              <div class="client-body">
-                <div class="client-desc" id="client-desc"></div>
-                <button class="btn-link" id="btn-client-open">Apri il profilo del cliente</button>
-              </div>
-            </div>
-            <div class="hint" id="client-hint"></div>
-          </div>
-          <div class="row">
-            <label class="field-label">Template CapCut</label>
+  <!-- ==================== NUOVO VIDEO ==================== -->
+  <main id="view-editor" class="view split" hidden>
+    <section class="left">
+      <div class="lscroll">
+        <div class="step" id="s1">
+          <h2><span class="num">1</span>Per quale cliente?<small id="s1-sel"></small></h2>
+          <div class="chips" id="chips"></div>
+          <div class="hint" id="client-hint"></div>
+          <div id="template-box" hidden>
+            <label>Template CapCut</label>
             <select id="template"></select>
-            <div class="hint">Il template è il kit del cliente: l'AI ne riusa titoli, titoletti, elenchi, sottotitoli, suoni, musica e colore.
-              <button class="btn-link" id="btn-kit-guide">Come si prepara un template</button></div>
-            <div class="kit-panel" id="kit-panel" hidden>
-              <div class="kit-head" id="kit-head"></div>
+          </div>
+          <details class="adv" id="kit-details" hidden>
+            <summary>Cosa contiene il template <span id="kit-count"></span></summary>
+            <div class="kit-panel">
               <div id="kit-checks"></div>
+              <button class="btn-link" id="btn-kit-guide">Come si prepara un template</button>
             </div>
-          </div>
-          <div class="row">
-            <label class="field-label">Titolo iniziale (opzionale)</label>
-            <input type="text" id="intro-title" placeholder="es. CASA INVASA — sostituisce i titoli del template" />
-          </div>
-          <div class="row">
-            <label class="field-label">Copione (opzionale)</label>
-            <div class="input-with-btn">
-              <input type="text" id="script-path" placeholder="txt, md, docx o foto — le indicazioni sono vincolanti" />
-              <button class="btn-secondary" id="btn-script">Sfoglia…</button>
-            </div>
-          </div>
-          <div class="row">
-            <label class="field-label">Note per Claude (opzionale)</label>
-            <textarea id="notes" rows="3" placeholder="es. tieni la seconda versione del gancio, niente musica, metti il prezzo a schermo"></textarea>
-          </div>
+          </details>
         </div>
 
-        <div class="card" hidden>
-          <h2>Ritmo & sottotitoli</h2>
-          <div class="row">
-            <label class="field-label">Ritmo (indicazione per l'AI)</label>
-            <div class="segmented" id="pacing">
-              <button data-val="normal">normal</button>
-              <button data-val="fast" class="active">fast</button>
-              <button data-val="aggressive">aggressive</button>
-            </div>
-            <div class="hint" id="pacing-hint"></div>
+        <div class="step" id="s2">
+          <h2><span class="num">2</span>Le clip<small id="s2-info"></small></h2>
+          <div class="drop" id="drop">
+            <b>📁 Trascina qui la cartella delle clip</b>
+            <span>oppure clicca per sceglierla dal Finder</span>
+            <div class="path" id="input-path-label"></div>
           </div>
-          <div class="switch-row"><div class="switch-label">Sottotitoli come quelli del template (stile, lunghezza delle frasi, maiuscole)</div><div class="switch on" id="sw-sub-template"></div></div>
-          <div class="hint" id="sub-hint">Ogni sottotitolo è una copia esatta di uno del template: stesso modello di testo, animazione, effetto, font e posizione.</div>
-          <div class="row slider-row sub-manual">
-            <label class="field-label">Parole per sottotitolo</label>
-            <input type="range" id="sub-words" min="2" max="8" step="1" value="4" />
-            <div class="slider-val" id="sub-words-val">4</div>
+          <input type="hidden" id="input-path" />
+          <div class="thumbs" id="thumbs"></div>
+          <div class="switch" id="row-batch">
+            <span>Un progetto per ogni sottocartella</span><div class="tgl" id="sw-batch"></div>
           </div>
-          <div class="row slider-row sub-manual">
-            <label class="field-label">Durata max sottotitolo</label>
-            <input type="range" id="sub-dur" min="0.8" max="3.0" step="0.1" value="1.4" />
-            <div class="slider-val" id="sub-dur-val">1.4 s</div>
-          </div>
+          <div class="hint" id="batch-preview" hidden></div>
         </div>
 
-        <div class="card">
-          <div class="card-head">
-            <h2>Montatore AI (Claude)</h2>
-            <button class="btn-link" id="btn-ai-wizard-inline">Configura…</button>
+        <div class="step" id="s3">
+          <h2><span class="num">3</span>Il progetto CapCut</h2>
+          <label id="name-label">Nome del nuovo progetto</label>
+          <input type="text" id="name" placeholder="es. CLIENTE - Video 1" />
+          <label>Copione <span class="opt">facoltativo</span></label>
+          <div class="row2">
+            <input type="text" id="script-path" placeholder="txt, md, docx o foto — indicazioni vincolanti" />
+            <button class="btn2" id="btn-script">Scegli…</button>
           </div>
-          <div class="ai-status" id="ai-status">Verifico il collegamento a Claude…</div>
-          <div class="card-note">
-            Il montaggio lo fa Claude Code sul tuo Mac, con il tuo account Claude:
-            analizza le clip, decide ogni taglio con la skill reel-capcut-mac e le regole
-            del cliente, scrive il progetto CapCut e lo ricontrolla. Dura 10-30 minuti.
-          </div>
-          <div class="row slider-row">
-            <label class="field-label">Modello</label>
-            <select id="ai-model" style="flex:1;">
-              <option value="opus" selected>Opus — massima qualità (consigliato)</option>
-              <option value="sonnet">Sonnet — più veloce</option>
-              <option value="haiku">Haiku — il più rapido, meno accurato</option>
-            </select>
-          </div>
-          <div class="row slider-row">
-            <label class="field-label">Durata target reel</label>
-            <select id="ai-target" style="flex:1;">
-              <option value="auto">decide l'AI</option>
+          <label>Titolo iniziale <span class="opt">facoltativo</span></label>
+          <input type="text" id="intro-title" placeholder="lo decide Claude" />
+        </div>
+
+        <div class="step" id="s4">
+          <h2><span class="num">4</span>Extra <small>facoltativo</small></h2>
+          <div class="switch" data-sw="sw-transitions"><span>🎬 A fine frase: zoom, transizione e woosh</span><div class="tgl on" id="sw-transitions"></div></div>
+          <div class="switch" data-sw="sw-zoom"><span>🔍 Zoom leggeri sulle frasi chiave</span><div class="tgl" id="sw-zoom"></div></div>
+          <label>Note per Claude</label>
+          <textarea id="notes" placeholder="es. tieni la seconda versione del gancio, niente musica, metti il prezzo a schermo"></textarea>
+          <details class="adv">
+            <summary>Avanzate</summary>
+            <label>Durata del reel</label>
+            <select id="ai-target">
+              <option value="auto">la decide Claude</option>
               <option value="15">15 s</option><option value="20">20 s</option>
               <option value="30">30 s</option><option value="45">45 s</option>
               <option value="60">60 s</option><option value="90">90 s</option>
             </select>
-          </div>
-          <div class="switch-row"><div class="switch-label">A fine frase: zoom in, transizione e woosh verso la clip dopo</div><div class="switch on" id="sw-transitions"></div></div>
-          <div class="switch-row"><div class="switch-label">Zoom leggeri sulle frasi chiave (dove e quanto lo decide l'AI)</div><div class="switch" id="sw-zoom"></div></div>
-          <div class="switch-row" hidden><div class="switch-label">Recensione finale del montato</div><div class="switch on" id="sw-ai-review"></div></div>
-        </div>
-
-        <div class="card" hidden>
-          <h2>Preferenze per l'AI</h2>
-          <div class="switch-row"><div class="switch-label">Togli gli intercalari (ehm, uhm, ah…)</div><div class="switch on" id="sw-fillers"></div></div>
-          <div class="switch-row"><div class="switch-label">Togli anche cioè/tipo/diciamo (aggressivo)</div><div class="switch" id="sw-aggr"></div></div>
-          <div class="switch-row"><div class="switch-label">Suoni del template decisi dall'AI (dove e se usarli)</div><div class="switch on" id="sw-sfx"></div></div>
-          <div class="divider"></div>
-          <div class="switch-row"><div class="switch-label">Rimuovi i testi residui del template (3,2,1 vai…)</div><div class="switch on" id="sw-clear"></div></div>
-          <div class="switch-row"><div class="switch-label">Stabilizza le clip (ffmpeg)</div><div class="switch" id="sw-stab"></div></div>
-        </div>
-
-        <div class="card" hidden>
-          <h2>Output</h2>
-          <div class="row">
-            <label class="field-label">Modello Whisper</label>
-            <select id="model">
-              <option value="tiny">tiny (veloce, bozza)</option>
-              <option value="base">base</option>
-              <option value="small">small</option>
-              <option value="medium">medium</option>
-              <option value="large-v3" selected>large-v3 (max accuratezza)</option>
+            <label>Modello di Claude</label>
+            <select id="ai-model">
+              <option value="opus" selected>Opus — massima qualità (consigliato)</option>
+              <option value="sonnet">Sonnet — più veloce</option>
             </select>
-            <div class="hint" id="model-hint"></div>
-          </div>
-          <div class="row">
-            <label class="field-label">Lingua</label>
-            <select id="language">
-              <option value="it" selected>it</option>
-              <option value="en">en</option><option value="es">es</option>
-              <option value="fr">fr</option><option value="de">de</option><option value="pt">pt</option>
-            </select>
-          </div>
-          <div class="row">
-            <label class="field-label">Formato</label>
-            <div class="segmented" id="format">
-              <button data-val="vertical" class="active">vertical</button>
-              <button data-val="horizontal">horizontal</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="action-bar">
-          <button class="btn-primary" id="btn-generate" disabled>GENERA PROGETTO</button>
+            <div class="switch" data-sw="sw-aggr"><span>Togli anche cioè / tipo / diciamo</span><div class="tgl" id="sw-aggr"></div></div>
+          </details>
         </div>
       </div>
+      <div class="lfoot">
+        <button class="go" id="btn-generate" disabled>INIZIA A EDITARE</button>
+        <div class="missing" id="missing"></div>
+      </div>
+    </section>
 
-      <!-- CONSOLE -->
-      <div class="console-pane">
-        <div class="console-header">
-          <h3>Avanzamento</h3>
-          <div class="status-tag" id="status-tag">in attesa</div>
-          <button class="btn-stop" id="btn-stop" hidden>Ferma</button>
-        </div>
-        <ol class="steps" id="steps"></ol>
-        <div class="console-body" id="console">
-          <div class="console-empty">Qui vedrai cosa fa Claude, passo per passo.</div>
-        </div>
-        <div class="console-footer">
-          <div class="result-box" id="result-box">
-            <div class="result-title" id="result-title">✓ Progetto creato</div>
-            <div class="result-path" id="result-path"></div>
-            <div class="result-actions">
-              <button id="btn-report">Leggi il report delle decisioni</button>
-              <button id="btn-open" class="btn-ghost">Apri cartella in Finder</button>
-            </div>
+    <section class="right">
+      <div class="card">
+        <h3><i></i><span id="rules-title">Regole del cliente</span>
+          <button class="btn-link mini" id="btn-client-open" hidden>Apri il file</button></h3>
+        <div class="rules" id="rules"><div class="empty">Scegli un cliente per vedere le sue regole</div></div>
+      </div>
+      <div class="card">
+        <h3>Avanzamento <span class="status-tag" id="status-tag">in attesa</span></h3>
+        <div class="progress" id="steps"></div>
+      </div>
+      <div class="card logcard">
+        <h3>Dettagli <button class="stopbtn" id="btn-stop" hidden>Ferma</button></h3>
+        <div id="console"><div class="k-tool">Qui vedrai cosa sta facendo Claude, passo per passo.</div></div>
+        <div class="result-box" id="result-box">
+          <div class="result-title" id="result-title">✓ Progetto creato</div>
+          <div class="result-path" id="result-path"></div>
+          <div class="result-actions">
+            <button class="btn2" id="btn-report">Leggi il report</button>
+            <button class="btn2" id="btn-open">Apri in Finder</button>
           </div>
         </div>
       </div>
-    </div>
+    </section>
+  </main>
+
+  <!-- ==================== I MIEI PROGETTI ==================== -->
+  <div id="view-home" class="view projs" hidden>
+    <section class="plist">
+      <input type="text" class="search" id="psearch" placeholder="Cerca progetto o cliente…" />
+      <div id="groups"></div>
+    </section>
+    <section class="pdet" id="pdet">
+      <div class="empty" style="margin:auto">Scegli un progetto a sinistra per vedere com'è stato fatto</div>
+    </section>
   </div>
 
-  <!-- ==================== AI WIZARD ==================== -->
+  <!-- ==================== COLLEGAMENTO A CLAUDE ==================== -->
   <div id="ai-wizard" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-head">
-        <h2>Configurazione AI</h2>
+        <h2>Collegamento a Claude</h2>
         <button class="modal-close" id="wizard-close">✕</button>
       </div>
       <div class="wizard-steps">
@@ -284,46 +186,32 @@
         <div class="wizard-step" data-step="2"><span class="step-num">2</span> Setup</div>
         <div class="wizard-step" data-step="3"><span class="step-num">3</span> Test</div>
       </div>
-
       <div class="modal-body">
-        <!-- STEP 1: status -->
         <div class="wizard-pane" data-pane="1">
           <div id="ai-status-box" class="status-block">Controllo in corso…</div>
           <p class="wizard-text">
-            Il montaggio lo fa <strong>Claude</strong>: decide i tagli, i silenzi, il dietro le
-            quinte, i suoni e i testi, e spiega ogni scelta. <strong>Senza Claude collegato
-            l'app non genera.</strong> Serve un accesso a Claude, in uno dei due modi del passo
-            successivo.
+            Il montaggio lo fa <strong>Claude Code</strong> sul tuo Mac, con il tuo account Claude:
+            analizza le clip, decide i tagli con le regole del cliente, scrive il progetto CapCut e lo
+            ricontrolla. <strong>Senza Claude collegato l'app non monta.</strong>
           </p>
         </div>
-
-        <!-- STEP 2: setup -->
         <div class="wizard-pane" data-pane="2" hidden>
           <div class="setup-option">
-            <h4>Opzione A — Claude Code CLI <span class="badge">consigliato</span></h4>
-            <p class="wizard-text">Usa il tuo login di Claude Code, nessuna API key da gestire.</p>
+            <h4>Installa Claude Code</h4>
             <div class="code-box">npm install -g @anthropic-ai/claude-code</div>
-            <p class="wizard-text">Poi autenticati una volta: apri un terminale, lancia
-              <strong>claude</strong> ed esegui <strong>/login</strong>.</p>
+            <p class="wizard-text">Poi collegalo al tuo account una volta: apri il Terminale, scrivi
+              <strong>claude</strong> e poi <strong>/login</strong>.</p>
           </div>
-          <div class="setup-option">
-            <h4>Opzione B — API key Anthropic</h4>
-            <p class="wizard-text">Imposta la variabile d'ambiente prima di aprire l'app:</p>
-            <div class="code-box">export ANTHROPIC_API_KEY="sk-ant-…"</div>
-          </div>
-          <p class="wizard-hint">Dopo aver configurato, torna al passo 3 e premi “Testa connessione”.</p>
+          <p class="wizard-hint">Fatto questo, vai al passo 3 e premi “Testa connessione”.</p>
         </div>
-
-        <!-- STEP 3: test -->
         <div class="wizard-pane" data-pane="3" hidden>
           <p class="wizard-text">Verifica che Claude risponda davvero:</p>
-          <button class="btn-secondary" id="btn-ai-test">Testa connessione</button>
+          <button class="btn2" id="btn-ai-test">Testa connessione</button>
           <div id="ai-test-result" class="test-result"></div>
         </div>
       </div>
-
       <div class="modal-foot">
-        <button class="btn-secondary" id="wizard-prev" hidden>Indietro</button>
+        <button class="btn2" id="wizard-prev" hidden>Indietro</button>
         <div class="spacer"></div>
         <button class="btn-primary-sm" id="wizard-next">Avanti</button>
         <button class="btn-primary-sm" id="wizard-done" hidden>Fine</button>
@@ -339,26 +227,26 @@
       </div>
       <div class="modal-body">
         <p class="wizard-text">Un template è un normale progetto CapCut che contiene <strong>tutto ciò che per quel
-          cliente usi sempre</strong>. Lo prepari una volta; a ogni video l'AI lo studia e lo riusa.
+          cliente usi sempre</strong>. Lo prepari una volta; a ogni video Claude lo studia e lo riusa.
           Non servono clip video: bastano i pezzi qui sotto, anche con testi di esempio.</p>
         <ol class="guide-steps">
           <li><strong>Crea il progetto</strong> in CapCut e dagli il nome del cliente, per esempio «TEMPLATE MARIO ROSSI».</li>
           <li><strong>Titolo d'apertura.</strong> All'inizio metti i testi del titolo come li vuoi sempre: più righe,
             la riga grande, un'emoji, le animazioni.</li>
-          <li><strong>Titoletti.</strong> Subito dopo, un titoletto di esempio a una o due righe: l'AI lo userà
+          <li><strong>Titoletti.</strong> Subito dopo, un titoletto di esempio a una o due righe: servirà
             per i capitoli e per i dati da far leggere.</li>
           <li><strong>Elenco.</strong> Tre o più testi uno sotto l'altro che entrano uno dopo l'altro: verrà usato
             quando chi parla elenca più cose, una voce alla volta.</li>
           <li><strong>Sottotitoli.</strong> Qualche sottotitolo con lo stile del cliente (meglio tre o più).</li>
           <li><strong>Suoni.</strong> Metti sulla timeline quelli che usi sempre, <em>vicino ai testi con cui li fai
-            partire</em>: l'AI impara l'abbinamento e lo ripete.</li>
+            partire</em>: Claude impara l'abbinamento e lo ripete.</li>
           <li><strong>Musica.</strong> La base che usi di solito.</li>
           <li><strong>Colore ed effetti.</strong> Regolazione, filtri o effetti dall'inizio del progetto: vengono
             estesi a tutta la durata di ogni video.</li>
-          <li><strong>Chiudi il progetto in CapCut</strong> e sceglilo qui: sotto il menu vedi subito cosa l'app ha
+          <li><strong>Chiudi il progetto in CapCut</strong> e sceglilo qui: vedi subito cosa l'app ha
             trovato e cosa manca.</li>
         </ol>
-        <p class="wizard-hint">Le parole che scrivi nel template sono solo modelli: l'AI le riscrive per ogni video
+        <p class="wizard-hint">Le parole che scrivi nel template sono solo modelli: Claude le riscrive per ogni video
           mantenendo font, colori, posizione e animazioni.</p>
       </div>
       <div class="modal-foot">

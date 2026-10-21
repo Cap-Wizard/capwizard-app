@@ -19,9 +19,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import hashlib
 import os
 import platform
+import re
 import shutil
+import subprocess
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -342,6 +346,52 @@ def clients() -> dict:
             "editor_skill": bool(agent.editor_skill())}
 
 
+@app.get("/api/clients/{client_id}/rules")
+def client_rules(client_id: str) -> dict:
+    return {"text": agent.client_rules(client_id)}
+
+
+VIDEO_EXT = (".mp4", ".mov", ".m4v", ".mkv", ".webm", ".mts")
+THUMBS = registry.app_data_dir() / "thumbs"
+
+
+def _thumb(src: Path, height: int, at: float | None = None) -> str:
+    """A small JPEG of a video frame (or of an image) as a data URL, cached."""
+    THUMBS.mkdir(parents=True, exist_ok=True)
+    key = hashlib.sha1(f"{src}|{src.stat().st_mtime}|{height}|{at}".encode()).hexdigest()[:16]
+    out = THUMBS / f"{key}.jpg"
+    if not out.exists():
+        args = ["ffmpeg", "-v", "error", "-y"] + (["-ss", str(at)] if at is not None else []) + \
+               ["-i", str(src), "-frames:v", "1", "-vf", f"scale=-2:{height}", str(out)]
+        subprocess.run(args, capture_output=True, timeout=30)
+    if not out.exists():
+        return ""
+    return "data:image/jpeg;base64," + base64.b64encode(out.read_bytes()).decode()
+
+
+def _duration(p: Path) -> float:
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(p)],
+                       capture_output=True, text=True, timeout=30)
+    try:
+        return float(r.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
+@app.get("/api/folder-info")
+def folder_info(path: str) -> dict:
+    """The clips of a folder (and of its subfolders, e.g. CLIP/ and BROLL/): count, total length, a few frames."""
+    base = Path(path)
+    if not base.is_dir():
+        return {"ok": False}
+    clips = sorted(p for p in list(base.iterdir()) + [q for d in base.iterdir() if d.is_dir() and not d.name.startswith(".")
+                                                     for q in d.iterdir()]
+                   if p.is_file() and p.suffix.lower() in VIDEO_EXT and not p.name.startswith("._"))
+    lengths = [_duration(c) for c in clips]
+    thumbs = [_thumb(c, 160, min(1.0, d / 2)) for c, d in list(zip(clips, lengths))[:8]]
+    return {"ok": True, "n": len(clips), "durata": round(sum(lengths)), "thumbs": [t for t in thumbs if t]}
+
+
 @app.post("/api/jobs/{job_id}/stop")
 def job_stop(job_id: str) -> dict:
     job = manager.get(job_id)
@@ -373,9 +423,29 @@ def job_status(job_id: str) -> dict:
     return job.snapshot()
 
 
+def _summary(report: str | None) -> str:
+    """"Cosa ha fatto Claude" from a project's report."""
+    try:
+        text = Path(report).read_text() if report else ""
+    except OSError:
+        return ""
+    m = re.search(r"## Cosa ha fatto Claude\n(.*?)(?:\n## |\Z)", text, re.S)
+    return m.group(1).strip() if m else ""
+
+
 @app.get("/api/projects")
 def projects_list() -> dict:
-    return {"projects": registry.list_projects()}
+    """Projects made with the app, with their client's name and colour, summary and CapCut cover."""
+    clients = {c["id"]: c for c in agent.list_clients()}
+    out = []
+    for p in registry.list_projects():
+        s = p.get("settings") or {}
+        c = clients.get(s.get("client") or "")
+        cover = Path(p.get("result_path") or "") / "draft_cover.jpg"
+        out.append({**p, "cliente": c["nome"] if c else (s.get("template") or "Senza cliente"),
+                    "colore": c["colore"] if c else "#6b7180", "riassunto": _summary(p.get("report_path")),
+                    "cover": _thumb(cover, 320) if p.get("result_path") and cover.exists() else ""})
+    return {"projects": out}
 
 
 @app.get("/api/projects/{project_id}")

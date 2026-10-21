@@ -1,6 +1,6 @@
 "use strict";
 
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   backendUrl: () => ipcRenderer.invoke("backend-url"),
@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld("api", {
   selectVideo: () => ipcRenderer.invoke("select-video"),
   selectScript: () => ipcRenderer.invoke("select-script"),
   openPath: (p) => ipcRenderer.invoke("open-path", p),
+  // real path of a file or folder dropped on the window
+  pathForFile: (f) => webUtils.getPathForFile(f),
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
   getToken: () => ipcRenderer.invoke("auth-get-token"),
   setToken: (t) => ipcRenderer.invoke("auth-set-token", t),

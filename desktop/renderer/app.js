@@ -7,35 +7,21 @@ const WS_BACKEND = "ws://127.0.0.1:8765";
 // Metti false quando il backend cloud è pronto per la vendita.
 const LOCAL_MODE = true;
 
-const PACING_HINTS = {
-  normal: "frasi che respirano · la soglia dei silenzi la decide l'AI (di solito intorno a 0,45s)",
-  fast: "ritmo da reel · la soglia dei silenzi la decide l'AI (di solito intorno a 0,30s)",
-  aggressive: "massima densità, zero respiri · soglia dei silenzi decisa dall'AI (intorno a 0,18s)",
-};
-
-const DEFAULTS = {
-  input_path: "", name: "", script_path: "", intro_title: "", client: "", notes: "",
-  model: "large-v3", language: "it", pacing: "fast", fmt: "vertical",
-  subtitle_max_words: 4, subtitle_max_duration: 1.4, subtitle_like_template: true,
-  drop_fillers: true, aggressive_fillers: false,
-  clear_template_texts: true, redistribute_sfx_enabled: true, stabilize_clips: false,
-  ai_model: "opus", use_ai_review: true, ai_zoom: false, sentence_transitions: true,
-  ai_target_duration: null,
-};
-
 const state = {
   backendReady: false,
-  aiReady: false,          // Claude verified with a real request — required to generate
+  aiReady: false,          // Claude verified with a real request — required to edit
+  ffmpeg: false,
   running: false,
-  pacing: "fast",
-  format: "vertical",
-  defaultTemplate: "",
   clients: [],             // client profiles (skills with one client's rules)
+  client: null,            // chosen client, or null
+  otherTemplate: false,    // "Altro template…": no client, template picked by hand
   steps: [],               // progress steps of an editing run
   jobId: null,
-  wizardStep: 1,
   batch: false,
   batchCount: 0,
+  projects: [],
+  currentProject: null,
+  wizardStep: 1,
   authMode: "login",       // login | register
   authToken: null,
   cloudUrl: "http://127.0.0.1:8799",
@@ -53,10 +39,10 @@ const $ = (id) => document.getElementById(id);
 // ---------------------------------------------------------------------------
 
 window.addEventListener("DOMContentLoaded", async () => {
-  wireStaticControls();
+  wireEditor();
+  wireProjects();
   wireWizard();
   wireAuth();
-  $("pacing-hint").textContent = PACING_HINTS.fast;
 
   // Resolve the cloud licensing URL (Electron injects it; browser dev falls back)
   if (window.api && window.api.cloudUrl) {
@@ -67,10 +53,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (window.api && window.api.onBackendReady) {
     window.api.onBackendReady(() => bootBackend());
   }
-  bootBackend();          // sidecar readiness (pills + generate), runs regardless
+  bootBackend();          // sidecar readiness (pills + editing), runs regardless
 
   if (LOCAL_MODE) {
-    showView("home");     // private use: skip the login/subscription gate
+    showView("editor");   // private use: skip the login/subscription gate
   } else {
     startAuthGate();      // decides the first visible screen
   }
@@ -91,7 +77,7 @@ async function bootBackend() {
         await loadTemplates();
         await loadClients();
         await loadProjects();
-        refreshGenerateEnabled();
+        check();
         checkClaude();                      // real request, takes a few seconds
         _booting = false;
         return;
@@ -111,8 +97,12 @@ function showView(name) {
   for (const v of ["view-auth", "view-subscribe", "view-home", "view-editor"]) {
     $(v).hidden = v !== `view-${name}`;
   }
+  const inApp = name === "home" || name === "editor";
+  $("views").hidden = !inApp;
+  $("v-new").classList.toggle("on", name === "editor");
+  $("v-proj").classList.toggle("on", name === "home");
   // account controls only when past the gate (and not in local/private mode)
-  const authed = (name === "home" || name === "editor") && !LOCAL_MODE;
+  const authed = inApp && !LOCAL_MODE;
   $("tb-email").hidden = !authed || !state.email;
   $("tb-account").hidden = !authed;
   $("tb-logout").hidden = !authed;
@@ -120,340 +110,281 @@ function showView(name) {
   if (name === "home" && state.backendReady) loadProjects();
 }
 
+function setPill(id, cls, label) {
+  const p = $(id);
+  p.className = `pill ${cls}`;
+  p.innerHTML = `<i></i>${escapeHtml(label)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Data loads
 // ---------------------------------------------------------------------------
 
-// Claude is mandatory: verify it with a real request and gate "Genera" on it.
+// Claude is mandatory: verify it with a real request and gate editing on it.
 async function checkClaude() {
-  const box = $("ai-status");
-  box.className = "ai-status";
-  box.textContent = "Verifico il collegamento a Claude…";
-  setPill("pill-ai", "warn", "AI…");
+  setPill("pill-ai", "warn", "Claude…");
   try {
     const r = await (await fetch(`${BACKEND}/api/ai/test`, { method: "POST" })).json();
     state.aiReady = !!r.ok;
-    if (r.ok) {
-      const via = r.method === "claude-cli" ? "Claude Code CLI" : "API key Anthropic";
-      box.classList.add("ok");
-      box.textContent = `✓ Claude collegato (${via}) — pronto a montare.`;
-      setPill("pill-ai", "ok", "AI");
-    } else {
-      box.classList.add("err");
-      box.textContent = `✘ Claude non collegato: ${r.message} — senza Claude non si può generare.`;
-      setPill("pill-ai", "err", "AI");
-    }
+    setPill("pill-ai", r.ok ? "ok" : "err", r.ok ? "Claude collegato" : "Claude da collegare");
+    if (!r.ok) addLog(`Claude non è collegato: ${r.message}. Premi ⚙ in alto per collegarlo.`, "err");
   } catch (_) {
     state.aiReady = false;
-    box.classList.add("err");
-    box.textContent = "✘ Impossibile verificare Claude (backend non raggiungibile).";
-    setPill("pill-ai", "err", "AI");
+    setPill("pill-ai", "err", "Claude da collegare");
   }
-  refreshGenerateEnabled();
+  check();
 }
 
 async function loadSystem() {
   try {
     const sys = await (await fetch(`${BACKEND}/api/system`)).json();
+    state.ffmpeg = !!sys.ffmpeg;
     setPill("pill-ffmpeg", sys.ffmpeg ? "ok" : "err", "ffmpeg");
-    const aiFound = sys.ai && (sys.ai.claude_cli || sys.ai.anthropic_key);
-    if (!aiFound) setPill("pill-ai", "err", "AI");   // checkClaude() sets the final state
-    const cached = (sys.whisper_models_cached || []).join(", ");
-    $("model-hint").textContent = cached
-      ? `Modelli già scaricati: ${cached}`
-      : "Nessun modello in cache — il primo uso scaricherà ~3GB per large-v3.";
   } catch (e) { console.error("system", e); }
 }
 
 async function loadTemplates() {
   try {
     const data = await (await fetch(`${BACKEND}/api/templates`)).json();
-    state.defaultTemplate = data.default || "";
     const sel = $("template");
     sel.innerHTML = "";
     const none = document.createElement("option");
-    none.value = ""; none.textContent = "(nessun template)";
+    none.value = ""; none.textContent = "Scegli il template…";
     sel.appendChild(none);
     for (const t of data.templates) {
       const o = document.createElement("option");
       o.value = t.name; o.textContent = t.name;
-      if (data.default && t.name === data.default) o.selected = true;
       sel.appendChild(o);
     }
   } catch (e) { console.error("templates", e); }
-  loadKit();
 }
 
-// What the chosen template offers, and what to add to make it a full kit.
-async function loadKit() {
-  const name = $("template").value;
-  const panel = $("kit-panel");
-  if (!name) { panel.hidden = true; return; }
-  try {
-    const kit = await (await fetch(`${BACKEND}/api/template-kit?name=${encodeURIComponent(name)}`)).json();
-    if ($("template").value !== name) return;          // the user picked another one meanwhile
-    const head = $("kit-head");
-    const box = $("kit-checks");
-    box.innerHTML = "";
-    panel.hidden = false;
-    if (!kit.ok) { head.textContent = kit.error || "Template non leggibile."; return; }
-    head.innerHTML = "";
-    const count = document.createElement("strong");
-    count.textContent = `${kit.found} su ${kit.total}`;
-    head.append("In questo template l'app ha trovato ", count,
-      kit.found === kit.total ? " pezzi: è un kit completo." : " pezzi del kit.");
-    for (const c of kit.checks) {
-      const row = document.createElement("div");
-      row.className = `kit-row ${c.ok ? "ok" : "missing"}`;
-      const mark = document.createElement("span");
-      mark.className = "kit-mark"; mark.textContent = c.ok ? "✓" : "○";
-      const body = document.createElement("div");
-      const label = document.createElement("span");
-      label.className = "kit-label"; label.textContent = c.label;
-      const detail = document.createElement("span");
-      detail.className = "kit-detail";
-      detail.textContent = c.ok ? (c.detail ? ` — ${c.detail}` : "") : ` — manca. ${c.hint}`;
-      body.append(label, detail);
-      row.append(mark, body);
-      box.appendChild(row);
-    }
-  } catch (e) { panel.hidden = true; console.error("kit", e); }
-}
-
-// Client profiles: picking one fills in its template and shows its rules.
 async function loadClients() {
   try {
     const data = await (await fetch(`${BACKEND}/api/clients`)).json();
     state.clients = data.clients || [];
     state.steps = data.steps || [];
-    const sel = $("client");
-    sel.innerHTML = "";
-    const none = document.createElement("option");
-    none.value = ""; none.textContent = "Nessun cliente — scelgo io il template";
-    sel.appendChild(none);
-    for (const c of state.clients) {
-      const o = document.createElement("option");
-      o.value = c.id; o.textContent = c.nome;
-      sel.appendChild(o);
-    }
-    $("client-hint").textContent = state.clients.length ? ""
-      : "Nessun profilo cliente trovato: è una skill reel-<cliente> che nomina il suo TEMPLATE.";
-    renderSteps(0);
   } catch (e) { console.error("clients", e); }
-  syncClient(false);
-}
-
-function syncClient(applyTemplate = true) {
-  const c = state.clients.find((x) => x.id === $("client").value);
-  $("client-card").hidden = !c;
-  if (!c) return;
-  $("client-dot").style.background = c.colore;
-  $("client-desc").textContent = c.descrizione || c.nome;
-  if (applyTemplate && c.template_ok) {
-    $("template").value = c.template;
-    loadKit();
-  }
-  $("client-hint").textContent = c.template_ok ? ""
-    : `Il template «${c.template}» del profilo non c'è tra i progetti CapCut.`;
-}
-
-function renderSteps(current, finished = false) {
-  $("steps").innerHTML = "";
-  state.steps.forEach((label, i) => {
-    const li = document.createElement("li");
-    const n = i + 1;
-    if (finished || n < current) li.className = "done";
-    else if (n === current) li.className = "now";
-    li.textContent = label;
-    $("steps").appendChild(li);
-  });
-}
-
-async function loadProjects() {
-  try {
-    const data = await (await fetch(`${BACKEND}/api/projects`)).json();
-    renderProjects(data.projects || []);
-  } catch (e) { console.error("projects", e); }
-}
-
-function renderProjects(projects) {
-  const grid = $("projects-grid");
-  const empty = $("projects-empty");
-  grid.innerHTML = "";
-  if (!projects.length) {
-    grid.hidden = true; empty.hidden = false; return;
-  }
-  grid.hidden = false; empty.hidden = true;
-
-  for (const p of projects) {
-    const card = document.createElement("div");
-    card.className = "project-card" + (p.exists ? "" : " missing");
-    const tmpl = p.settings && p.settings.template ? p.settings.template : "—";
-    const date = new Date((p.created_at || 0) * 1000);
-    const dateStr = date.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" });
-
-    card.innerHTML = `
-      <div class="pc-name">${escapeHtml(p.name)}</div>
-      <div class="pc-meta">
-        <span class="pc-badge">${escapeHtml(tmpl)}</span>
-        <span>${dateStr}</span>
-        ${p.exists ? "" : '<span style="color:var(--err)">cartella rimossa</span>'}
-      </div>
-      <div class="pc-actions">
-        <button class="pc-open" ${p.exists ? "" : "disabled"}>Apri</button>
-        <button class="pc-dup">Duplica</button>
-      </div>`;
-
-    card.querySelector(".pc-open").onclick = () => {
-      if (p.exists) window.api.openPath(p.result_path);
-    };
-    card.querySelector(".pc-dup").onclick = () => duplicateProject(p.id);
-    grid.appendChild(card);
-  }
+  renderChips();
+  renderSteps(0);
 }
 
 // ---------------------------------------------------------------------------
-// New / duplicate
+// Step 1: client
 // ---------------------------------------------------------------------------
 
-function resetBatch() {
-  state.batch = false;
-  state.batchCount = 0;
-  setSwitch("sw-batch", false);
-  updateBatchUI();
+function renderChips() {
+  const box = $("chips");
+  box.innerHTML = "";
+  for (const c of state.clients) {
+    const chip = document.createElement("button");
+    chip.className = "chip" + (state.client && state.client.id === c.id ? " on" : "");
+    chip.style.setProperty("--c", c.colore);
+    chip.innerHTML = `<i style="background:${c.colore}"></i>${escapeHtml(c.nome)}`;
+    chip.onclick = () => chooseClient(c);
+    box.appendChild(chip);
+  }
+  const other = document.createElement("button");
+  other.className = "chip other" + (state.otherTemplate ? " on" : "");
+  other.textContent = "Altro template…";
+  other.onclick = () => chooseClient(null);
+  box.appendChild(other);
+  $("client-hint").textContent = state.clients.length ? ""
+    : "Nessun profilo cliente: è una skill reel-<cliente> che nomina il suo TEMPLATE. Intanto scegli un template a mano.";
 }
 
-function newProject() {
-  applySettings(DEFAULTS);
-  // keep the loaded default template selected
-  if (state.defaultTemplate) $("template").value = state.defaultTemplate;
+async function chooseClient(c) {
+  state.client = c;
+  state.otherTemplate = !c;
+  document.documentElement.style.setProperty("--c", c ? c.colore : "#7c6cff");
+  $("s1-sel").textContent = c ? c.nome : "template a mano";
+  $("template-box").hidden = !!c;
+  if (c) {
+    $("template").value = c.template_ok ? c.template : "";
+    $("client-hint").textContent = c.template_ok ? ""
+      : `Il template «${c.template}» del profilo non c'è tra i progetti CapCut.`;
+  } else {
+    $("client-hint").textContent = "";
+  }
+  renderChips();
   loadKit();
-  resetBatch();
-  $("editor-title").textContent = "Nuovo progetto";
-  resetConsole();
-  showView("editor");
-  $("name").focus();
-}
+  suggestName();
+  check();
 
-async function duplicateProject(id) {
+  $("rules-title").textContent = c ? `Regole · ${c.nome}` : "Regole del cliente";
+  $("btn-client-open").hidden = !c;
+  if (!c) {
+    $("rules").innerHTML = '<div class="empty">Senza profilo cliente Claude segue solo le regole generali e il template.</div>';
+    return;
+  }
   try {
-    const p = await (await fetch(`${BACKEND}/api/projects/${id}`)).json();
-    if (p.error) return;
-    const s = p.settings || {};
-    applySettings({ ...DEFAULTS, ...s });
-    resetBatch();
-    $("name").value = `${p.name} copia`;
-    $("editor-title").textContent = `Duplica: ${p.name}`;
-    resetConsole();
-    showView("editor");
-    $("name").focus();
-    $("name").select();
-  } catch (e) { console.error("duplicate", e); }
+    const r = await (await fetch(`${BACKEND}/api/clients/${encodeURIComponent(c.id)}/rules`)).json();
+    if (state.client === c) $("rules").innerHTML = md(r.text || "") || '<div class="empty">Il profilo è vuoto.</div>';
+  } catch (_) { /* rules are informative only */ }
 }
 
-function applySettings(s) {
-  $("input-path").value = s.input_path || "";
-  $("name").value = s.name || "";
-  $("template").value = s.template || "";
-  $("client").value = s.client || "";
-  syncClient(false);
-  $("notes").value = s.notes || "";
-  loadKit();
-  $("script-path").value = s.script_path || "";
-  $("intro-title").value = s.intro_title || "";
-  $("model").value = s.model || "large-v3";
-  $("language").value = s.language || "it";
-
-  setSegmented("pacing", s.pacing || "fast", "pacing");
-  $("pacing-hint").textContent = PACING_HINTS[s.pacing || "fast"] || "";
-  setSegmented("format", s.fmt || "vertical", "format");
-
-  $("sub-words").value = s.subtitle_max_words ?? 4;
-  $("sub-words-val").textContent = String(s.subtitle_max_words ?? 4);
-  $("sub-dur").value = s.subtitle_max_duration ?? 1.4;
-  $("sub-dur-val").textContent = `${(s.subtitle_max_duration ?? 1.4).toFixed(1)} s`;
-
-  setSwitch("sw-sub-template", s.subtitle_like_template ?? true);
-  syncSubtitleMode();
-  setSwitch("sw-fillers", s.drop_fillers);
-  setSwitch("sw-aggr", s.aggressive_fillers);
-  setSwitch("sw-clear", s.clear_template_texts);
-  setSwitch("sw-sfx", s.redistribute_sfx_enabled);
-  setSwitch("sw-stab", s.stabilize_clips);
-  setSwitch("sw-ai-review", s.use_ai_review ?? true);
-  setSwitch("sw-zoom", s.ai_zoom ?? false);
-  setSwitch("sw-transitions", s.sentence_transitions ?? true);
-
-  $("ai-model").value = s.ai_model || "sonnet";
-  $("ai-target").value = s.ai_target_duration == null ? "auto" : String(Math.round(s.ai_target_duration));
-  refreshGenerateEnabled();
-}
-
-// ---------------------------------------------------------------------------
-// Controls
-// ---------------------------------------------------------------------------
-
-function wireStaticControls() {
-  $("btn-new").onclick = newProject;
-  $("btn-new-empty").onclick = newProject;
-  $("btn-back").onclick = () => showView("home");
-
-  $("btn-folder").onclick = async () => {
-    const p = await window.api.selectFolder();
-    if (p) {
-      $("input-path").value = p;
-      if (state.batch) previewBatch();
-      refreshGenerateEnabled();
+// What the chosen template offers, and what to add to make it a full kit.
+async function loadKit() {
+  const name = $("template").value;
+  $("kit-details").hidden = !name;
+  if (!name) return;
+  try {
+    const kit = await (await fetch(`${BACKEND}/api/template-kit?name=${encodeURIComponent(name)}`)).json();
+    if ($("template").value !== name) return;          // another one was picked meanwhile
+    const box = $("kit-checks");
+    box.innerHTML = "";
+    if (!kit.ok) { $("kit-count").textContent = ""; box.textContent = kit.error || "Template non leggibile."; return; }
+    $("kit-count").textContent = `· ${kit.found} su ${kit.total}`;
+    for (const c of kit.checks) {
+      const row = document.createElement("div");
+      row.className = `kit-row ${c.ok ? "ok" : "missing"}`;
+      row.innerHTML = `<span class="kit-mark">${c.ok ? "✓" : "○"}</span><div><span class="kit-label"></span><span class="kit-detail"></span></div>`;
+      row.querySelector(".kit-label").textContent = c.label;
+      row.querySelector(".kit-detail").textContent = c.ok ? (c.detail ? ` — ${c.detail}` : "") : ` — manca. ${c.hint}`;
+      box.appendChild(row);
     }
+  } catch (e) { $("kit-details").hidden = true; console.error("kit", e); }
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: clips
+// ---------------------------------------------------------------------------
+
+async function setFolder(path) {
+  $("input-path").value = path;
+  $("input-path-label").textContent = path;
+  $("s2-info").textContent = "carico…";
+  $("thumbs").innerHTML = "";
+  suggestName();
+  check();
+  if (state.batch) previewBatch();
+  try {
+    const i = await (await fetch(`${BACKEND}/api/folder-info?path=${encodeURIComponent(path)}`)).json();
+    if ($("input-path").value !== path) return;
+    $("s2-info").textContent = i.ok && i.n
+      ? `${i.n} clip · ${Math.floor(i.durata / 60)}:${String(i.durata % 60).padStart(2, "0")} min` : "nessuna clip trovata";
+    for (const t of i.thumbs || []) {
+      const img = document.createElement("img");
+      img.src = t;
+      $("thumbs").appendChild(img);
+    }
+  } catch (_) { $("s2-info").textContent = ""; }
+}
+
+// Name = client + folder, until the user writes their own.
+function suggestName() {
+  const el = $("name");
+  if (state.batch || (el.value && !el.dataset.auto)) return;
+  const folder = $("input-path").value.split("/").filter(Boolean).pop() || "";
+  const name = [state.client ? state.client.nome.toUpperCase() : "", folder].filter(Boolean).join(" - ");
+  el.value = name;
+  el.dataset.auto = name ? "1" : "";
+}
+
+async function previewBatch() {
+  const path = $("input-path").value.trim();
+  if (!path) return;
+  try {
+    const data = await (await fetch(`${BACKEND}/api/subfolders?path=${encodeURIComponent(path)}`)).json();
+    const folders = data.folders || [];
+    state.batchCount = folders.length;
+    const el = $("batch-preview");
+    el.hidden = false;
+    el.textContent = folders.length
+      ? `Farò ${folders.length} progetti: ${folders.map((f) => f.name).join(", ")}`
+      : "Nessuna sottocartella con video qui.";
+  } catch (_) { state.batchCount = 0; }
+  check();
+}
+
+function updateBatchUI() {
+  const b = state.batch;
+  $("sw-batch").classList.toggle("on", b);
+  $("name-label").textContent = b ? "Prefisso dei nomi (facoltativo)" : "Nome del nuovo progetto";
+  $("name").placeholder = b ? "es. CHIRONE" : "es. CLIENTE - Video 1";
+  $("batch-preview").hidden = true;
+  state.batchCount = 0;
+  if (b && $("input-path").value) previewBatch();
+  check();
+}
+
+// ---------------------------------------------------------------------------
+// Readiness
+// ---------------------------------------------------------------------------
+
+function check() {
+  const hasTemplate = !!$("template").value;
+  const hasFolder = !!$("input-path").value;
+  const hasName = state.batch || !!$("name").value.trim();
+  $("s1").classList.toggle("done", hasTemplate);
+  $("s2").classList.toggle("done", hasFolder && (!state.batch || state.batchCount > 0));
+  $("s3").classList.toggle("done", hasName && !state.batch);
+  const miss = [];
+  if (!hasTemplate) miss.push(state.otherTemplate ? "template" : "cliente");
+  if (!hasFolder) miss.push("cartella delle clip");
+  else if (state.batch && !state.batchCount) miss.push("sottocartelle con video");
+  if (!hasName) miss.push("nome del progetto");
+  const ready = state.backendReady && state.aiReady && !state.running && !miss.length;
+  $("btn-generate").disabled = !ready;
+  $("missing").textContent = state.running ? "Montaggio in corso…"
+    : !state.backendReady ? "Avvio del motore dell'app…"
+    : miss.length ? `Manca: ${miss.join(", ")}`
+    : !state.aiReady ? "Collega Claude con ⚙ in alto"
+    : "Tutto pronto ✓";
+  if (!state.running) {
+    $("btn-generate").textContent = state.batch
+      ? (state.batchCount ? `MONTA ${state.batchCount} VIDEO` : "MONTA TUTTI") : "INIZIA A EDITARE";
+  }
+}
+
+function isOn(id) { return $(id).classList.contains("on"); }
+
+function wireEditor() {
+  $("v-new").onclick = () => showView("editor");
+  $("v-proj").onclick = () => showView("home");
+
+  $("drop").onclick = async () => {
+    const p = window.api && await window.api.selectFolder();
+    if (p) setFolder(p);
   };
-  $("btn-video").onclick = async () => {
-    const p = await window.api.selectVideo();
-    if (p) { $("input-path").value = p; refreshGenerateEnabled(); }
-  };
+  // dropping a folder (or a clip: its folder) anywhere on the window
+  document.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    if (!$("view-editor").hidden) document.body.classList.add("dragging");
+  });
+  document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+  document.addEventListener("drop", (e) => {
+    e.preventDefault();
+    document.body.classList.remove("dragging");
+    if ($("view-editor").hidden || state.running) return;
+    const f = e.dataTransfer.files[0];
+    const p = f && window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
+    if (!p) return;
+    setFolder(/\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(p) ? p.replace(/\/[^/]+$/, "") : p);
+  });
+
+  $("template").onchange = () => { loadKit(); check(); };
+  $("name").oninput = () => { $("name").dataset.auto = ""; check(); };
   $("btn-script").onclick = async () => {
-    const p = await window.api.selectScript();
+    const p = window.api && await window.api.selectScript();
     if (p) $("script-path").value = p;
   };
-  $("input-path").oninput = refreshGenerateEnabled;
-  $("name").oninput = refreshGenerateEnabled;
-
-  wireSegmented("pacing", (val) => {
-    state.pacing = val;
-    $("pacing-hint").textContent = PACING_HINTS[val] || "";
+  document.querySelectorAll(".switch[data-sw]").forEach((row) => {
+    row.onclick = () => $(row.dataset.sw).classList.toggle("on");
   });
-  wireSegmented("format", (val) => { state.format = val; });
+  $("row-batch").onclick = () => { state.batch = !state.batch; updateBatchUI(); };
 
-  document.querySelectorAll(".switch").forEach((sw) => {
-    sw.onclick = () => sw.classList.toggle("on");
-  });
-  $("sw-sub-template").onclick = () => {
-    $("sw-sub-template").classList.toggle("on");
-    syncSubtitleMode();
-  };
-  // batch toggle needs extra behaviour on top of the plain on/off
-  $("sw-batch").onclick = () => {
-    $("sw-batch").classList.toggle("on");
-    state.batch = isOn("sw-batch");
-    updateBatchUI();
-  };
+  $("btn-client-open").onclick = () => { if (state.client) window.api.openPath(state.client.path); };
+  $("btn-kit-guide").onclick = () => { $("kit-guide").hidden = false; };
+  $("kit-guide-close").onclick = $("kit-guide-done").onclick = () => { $("kit-guide").hidden = true; };
 
-  $("sub-words").oninput = (e) => { $("sub-words-val").textContent = e.target.value; };
-  $("sub-dur").oninput = (e) => {
-    $("sub-dur-val").textContent = `${parseFloat(e.target.value).toFixed(1)} s`;
-  };
-
-  $("client").onchange = () => syncClient();
-  $("btn-client-open").onclick = () => {
-    const c = state.clients.find((x) => x.id === $("client").value);
-    if (c) window.api.openPath(c.path);
-  };
+  $("btn-generate").onclick = onGenerate;
   $("btn-stop").onclick = async () => {
     if (!state.jobId) return;
     $("btn-stop").disabled = true;
     setStatus("mi fermo…");
     try { await fetch(`${BACKEND}/api/jobs/${state.jobId}/stop`, { method: "POST" }); } catch (_) {}
   };
-  $("btn-generate").onclick = onGenerate;
   $("btn-open").onclick = () => {
     const p = $("result-path").dataset.path;
     if (p) window.api.openPath(p);
@@ -464,159 +395,49 @@ function wireStaticControls() {
   };
 }
 
-function wireSegmented(id, onChange) {
-  const group = $(id);
-  group.querySelectorAll("button").forEach((btn) => {
-    btn.onclick = () => {
-      group.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      onChange(btn.dataset.val);
-    };
-  });
-}
-
-function setSegmented(id, val, stateKey) {
-  const group = $(id);
-  group.querySelectorAll("button").forEach((b) => {
-    b.classList.toggle("active", b.dataset.val === val);
-  });
-  if (stateKey) state[stateKey === "pacing" ? "pacing" : "format"] = val;
-}
-
-function setPill(id, cls, label) {
-  $(id).innerHTML = `<span class="dot ${cls}"></span> ${label}`;
-}
-
-function setSwitch(id, on) { $(id).classList.toggle("on", !!on); }
-
-// The two sliders only count when the subtitles are sized by hand.
-function syncSubtitleMode() {
-  const likeTemplate = isOn("sw-sub-template");
-  document.querySelectorAll(".sub-manual").forEach((row) => {
-    row.classList.toggle("disabled", likeTemplate);
-    row.querySelector("input").disabled = likeTemplate;
-  });
-  $("sub-hint").textContent = likeTemplate
-    ? "Ogni sottotitolo è una copia esatta di uno del template: stesso modello di testo, animazione, effetto, font e posizione. Se il template non ha sottotitoli valgono i due cursori qui sotto."
-    : "Lo stile resta quello del template; la lunghezza dei blocchi la decidi tu con i due cursori.";
-}
-function isOn(id) { return $(id).classList.contains("on"); }
-
-function refreshGenerateEnabled() {
-  const hasSource = !!$("input-path").value.trim();
-  const hasName = state.batch ? true : !!$("name").value.trim();  // prefix optional in batch
-  const hasTemplate = !!$("template").value;
-  const batchOk = !state.batch || state.batchCount > 0;
-  const ready = state.backendReady && state.aiReady && !state.running
-    && hasSource && hasName && hasTemplate && batchOk;
-  const btn = $("btn-generate");
-  btn.disabled = !ready;
-  btn.title = !state.aiReady ? "Serve Claude collegato: l'AI fa il montaggio."
-    : hasTemplate ? "" : "Scegli il cliente o il template.";
-}
-
-function updateBatchUI() {
-  const b = state.batch;
-  $("src-label").textContent = b
-    ? "Cartella madre (una sottocartella = un progetto)"
-    : "Cartella video o singolo file";
-  $("name-label").textContent = b ? "Prefisso nome (opzionale)" : "Nome progetto";
-  $("name").placeholder = b ? "es. CLIENTE X (facoltativo)" : "es. Reel 23 maggio";
-  $("input-path").placeholder = b
-    ? "Nessuna cartella madre selezionata" : "Nessuna sorgente selezionata";
-  $("btn-video").hidden = b;                    // single-file picker off in batch
-  $("batch-preview").hidden = true;
-  $("batch-preview").textContent = "";
-  state.batchCount = 0;
-  if (b && $("input-path").value.trim()) previewBatch();
-  updateGenerateLabel();
-  refreshGenerateEnabled();
-}
-
-function updateGenerateLabel() {
-  if (state.running) return;
-  const btn = $("btn-generate");
-  if (state.batch) {
-    btn.textContent = state.batchCount ? `GENERA ${state.batchCount} PROGETTI` : "GENERA TUTTI";
-  } else {
-    btn.textContent = "GENERA PROGETTO";
-  }
-}
-
-async function previewBatch() {
-  const path = $("input-path").value.trim();
-  if (!path) return;
-  try {
-    const data = await (await fetch(
-      `${BACKEND}/api/subfolders?path=${encodeURIComponent(path)}`)).json();
-    const folders = data.folders || [];
-    state.batchCount = folders.length;
-    const el = $("batch-preview");
-    el.hidden = false;
-    el.textContent = folders.length
-      ? `Troverò ${folders.length} progetti: ${folders.map((f) => f.name).join(", ")}`
-      : "Nessuna sottocartella con video trovata qui.";
-  } catch (_) {
-    state.batchCount = 0;
-  }
-  updateGenerateLabel();
-  refreshGenerateEnabled();
-}
-
 // ---------------------------------------------------------------------------
-// Generate
+// Editing run
 // ---------------------------------------------------------------------------
 
 function buildRequest() {
-  const aiTarget = $("ai-target").value;
+  const target = $("ai-target").value;
   return {
     input_path: $("input-path").value.trim(),
     name: $("name").value.trim(),
     template: $("template").value || null,
-    client: $("client").value || null,
+    client: state.client ? state.client.id : null,
     notes: $("notes").value.trim() || null,
     script_path: $("script-path").value.trim() || null,
     intro_title: $("intro-title").value.trim() || null,
-    model: $("model").value,
-    language: $("language").value,
-    pacing: state.pacing,
-    fmt: state.format,
-    subtitle_max_words: parseInt($("sub-words").value, 10),
-    subtitle_max_duration: parseFloat($("sub-dur").value),
-    subtitle_like_template: isOn("sw-sub-template"),
-    drop_fillers: isOn("sw-fillers"),
-    aggressive_fillers: isOn("sw-aggr"),
-    clear_template_texts: isOn("sw-clear"),
-    redistribute_sfx_enabled: isOn("sw-sfx"),
-    stabilize_clips: isOn("sw-stab"),
     ai_model: $("ai-model").value,
-    use_ai_review: isOn("sw-ai-review"),
+    ai_target_duration: target === "auto" ? null : parseFloat(target),
     ai_zoom: isOn("sw-zoom"),
     sentence_transitions: isOn("sw-transitions"),
-    ai_target_duration: aiTarget === "auto" ? null : parseFloat(aiTarget),
+    aggressive_fillers: isOn("sw-aggr"),
   };
 }
 
 async function onGenerate() {
   state.running = true;
-  refreshGenerateEnabled();
-  clearConsole();
+  check();
+  $("console").innerHTML = "";
   $("result-box").classList.remove("show");
-  $("btn-generate").innerHTML = '<span class="spinner"></span>Lavoro in corso…';
-  setStatus("in esecuzione…");
+  $("btn-generate").classList.add("running");
+  $("btn-generate").innerHTML = '<span class="spinner"></span>Claude sta montando…';
+  setStatus("in corso");
+  renderSteps(1);
 
-  // choose single vs batch endpoint
   let endpoint = "/api/generate";
-  let body = buildRequest();
+  const body = buildRequest();
   if (state.batch) {
     endpoint = "/api/batch";
-    const parent = body.input_path;
-    const prefix = body.name;
+    body.parent_folder = body.input_path;
+    body.name_prefix = body.name;
     delete body.input_path;
     delete body.name;
-    body.parent_folder = parent;
-    body.name_prefix = prefix;
   }
+  addLog(`Lavoro: ${state.batch ? "un video per sottocartella" : body.name} · `
+    + `${state.client ? state.client.nome : body.template}`, "step");
 
   let jobId;
   try {
@@ -630,8 +451,7 @@ async function onGenerate() {
     $("btn-stop").hidden = false;
     $("btn-stop").disabled = false;
   } catch (e) {
-    appendLine(`ERRORE: il motore dell'app non risponde (${e}). Chiudi tutte le finestre `
-      + "di CapWizard e riavvia l'app: di solito ne erano aperte due.", "err");
+    addLog(`Il motore dell'app non risponde (${e}). Chiudi tutte le finestre di CapWizard e riaprila.`, "err");
     finishRun();
     return;
   }
@@ -639,12 +459,10 @@ async function onGenerate() {
   // The log arrives live over a WebSocket. If that stream stalls or drops, the
   // job must not look "still working" forever: a slow poll of the job's status
   // fills in whatever lines are missing and closes the run when it has ended.
-  let shown = 0;                      // log lines already on screen
+  let shown = 0;
   let ended = false;
   const showLines = (lines, from) => {
-    for (let i = Math.max(from, shown); i < from + lines.length; i++) {
-      appendLine(lines[i - from], classify(lines[i - from]));
-    }
+    for (let i = Math.max(from, shown); i < from + lines.length; i++) addLog(lines[i - from]);
     shown = Math.max(shown, from + lines.length);
   };
   const end = (msg) => {
@@ -653,18 +471,18 @@ async function onGenerate() {
     clearInterval(poll);
     renderSteps(msg.step || 0, msg.status === "done");
     if (msg.status === "done") {
-      setStatus("completato");
+      setStatus("finito");
       if (msg.results && msg.results.length) showBatchResult(msg.results);
       else showResult(msg.result_path, msg.report_path);
-      loadProjects();               // refresh home in the background
+      loadProjects();
     } else {
-      setStatus("errore");
-      appendLine(msg.error || "errore sconosciuto", "err");
+      setStatus("interrotto");
+      addLog(msg.error || "errore sconosciuto", "err");
     }
     try { ws.close(); } catch (_) { /* already closed */ }
     finishRun();
   };
-  const check = async () => {
+  const poll = setInterval(async () => {
     try {
       const job = await (await fetch(`${BACKEND}/api/jobs/${jobId}`)).json();
       if (job.error && !job.status) return end({ status: "error", error: job.error });
@@ -672,83 +490,69 @@ async function onGenerate() {
       if (job.status === "running") renderSteps(job.step || 0);
       if (job.status === "done" || job.status === "error") end(job);
     } catch (_) { /* backend busy: try again at the next tick */ }
-  };
-  const poll = setInterval(check, 4000);
+  }, 4000);
 
   const ws = new WebSocket(`${WS_BACKEND}/api/ws/jobs/${jobId}`);
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (msg.type === "log") {
-      showLines([msg.line], msg.i ?? shown);
-    } else if (msg.type === "step") {
-      renderSteps(msg.step);
-    } else if (msg.type === "status") {
-      end(msg);
-    } else if (msg.type === "error") {
-      end({ status: "error", error: msg.message });
-    }
+    if (msg.type === "log") showLines([msg.line], msg.i ?? shown);
+    else if (msg.type === "step") renderSteps(msg.step);
+    else if (msg.type === "status") end(msg);
+    else if (msg.type === "error") end({ status: "error", error: msg.message });
   };
-  ws.onerror = () => check();
-  ws.onclose = () => check();
 }
 
 function finishRun() {
   state.running = false;
   state.jobId = null;
   $("btn-stop").hidden = true;
-  updateGenerateLabel();
-  refreshGenerateEnabled();
+  $("btn-generate").classList.remove("running");
+  check();
 }
 
-function classify(line) {
-  const t = line.trim();
-  if (t.startsWith("━━") || t.startsWith("▶▶")) return "section";
-  if (t.startsWith("✔")) return "keep";
-  if (t.startsWith("✘ INTERROTTO") || t.startsWith("ERRORE")) return "err";
-  if (t.startsWith("✘")) return "drop";
-  if (t.startsWith("perché:") || t.startsWith("«")) return "why";
-  if (t.startsWith("✂")) return "cut";
-  if (t.startsWith("✓")) return "ok";
-  if (t.startsWith("⚙") || t.startsWith("⏱")) return "tool";
-  if (t.includes("⚠") || t.startsWith("☐")) return "warn";
-  if (/^(👁|🎞|🔍|🧩|↪|🔊|🔇|♪|✚|✎|Titolo iniziale|Argomento|Come l|Soglia|Regia|Formato|Tono|Struttura|Indicazioni|Consegne|Ritmo dal copione|Musica chiesta|Didascalia|🎬|Sottotitoli:|📄)/u.test(t)) return "ai";
-  return "";
+function renderSteps(current, finished = false) {
+  $("steps").innerHTML = "";
+  state.steps.forEach((label, i) => {
+    const n = i + 1;
+    const el = document.createElement("div");
+    el.className = "ps" + (finished || n < current ? " done" : n === current ? " on" : "");
+    el.innerHTML = '<div class="bar"></div>';
+    el.append(label);
+    $("steps").appendChild(el);
+  });
 }
 
-// ---------------------------------------------------------------------------
-// Console
-// ---------------------------------------------------------------------------
-
-function clearConsole() { $("console").innerHTML = ""; }
-function resetConsole() {
-  $("console").innerHTML = '<div class="console-empty">Qui vedrai cosa fa Claude, passo per passo.</div>';
-  renderSteps(0);
-  $("result-box").classList.remove("show");
-  setStatus("in attesa");
-}
 function setStatus(t) { $("status-tag").textContent = t; }
 
-function appendLine(text, cls) {
-  const c = $("console");
-  const first = c.querySelector(".console-empty");
-  if (first) first.remove();
+function kindOf(line) {
+  const t = line.trim();
+  if (t.startsWith("▶▶") || t.startsWith("━━")) return "section";
+  if (t.startsWith("⚙") || t.startsWith("⏱")) return "tool";
+  if (t.startsWith("✓")) return "ok";
+  if (t.startsWith("ERRORE") || t.startsWith("✘")) return "err";
+  if (t.startsWith("☐") || t.includes("⚠")) return "warn";
+  if (t.startsWith("🎬") || t.startsWith("▶")) return "step";
+  return "info";
+}
+
+function addLog(text, kind) {
+  const box = $("console");
   const div = document.createElement("div");
-  if (cls) div.className = `line-${cls}`;
+  div.className = `k-${kind || kindOf(text)}`;
   div.textContent = text;
-  c.appendChild(div);
-  c.scrollTop = c.scrollHeight;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
 }
 
 function showResult(path, reportPath) {
   if (!path) return;
   $("result-title").textContent = "✓ Progetto creato";
-  const pathEl = $("result-path");
-  pathEl.textContent = path;
-  pathEl.dataset.path = path;
-  pathEl.dataset.report = reportPath || "";
+  const el = $("result-path");
+  el.textContent = `${path}\nSe non compare in CapCut, chiudilo (⌘Q) e riaprilo.`;
+  el.dataset.path = path;
+  el.dataset.report = reportPath || "";
   $("btn-report").hidden = !reportPath;
-  $("btn-report").textContent = "Leggi il report delle decisioni";
-  $("btn-open").textContent = "Apri cartella in Finder";
+  $("btn-open").textContent = "Apri in Finder";
   $("result-box").classList.add("show");
 }
 
@@ -756,41 +560,140 @@ function showBatchResult(results) {
   const ok = results.filter((r) => r.ok);
   const failed = results.filter((r) => !r.ok);
   $("result-title").textContent = `✓ ${ok.length}/${results.length} progetti creati`;
-  const pathEl = $("result-path");
+  const el = $("result-path");
   let txt = ok.map((r) => "• " + r.name).join("\n");
-  if (failed.length) txt += "\n\nFalliti:\n" + failed.map((r) => "✗ " + r.name).join("\n");
-  pathEl.textContent = txt;
-  // "open" opens the CapCut drafts folder (parent of any created project)
-  const firstOk = ok[0] && ok[0].path;
-  if (firstOk) {
-    const parent = firstOk.replace(/[\/\\][^\/\\]+$/, "");
-    pathEl.dataset.path = parent;
-    $("btn-open").textContent = "Apri cartella progetti";
-  }
-  // one report per project: open their folder
-  const firstReport = ok[0] && ok[0].report;
-  pathEl.dataset.report = firstReport ? firstReport.replace(/[\/\\][^\/\\]+$/, "") : "";
-  $("btn-report").hidden = !firstReport;
-  $("btn-report").textContent = "Apri la cartella dei report";
+  if (failed.length) txt += "\n\nNon riusciti:\n" + failed.map((r) => "✗ " + r.name).join("\n");
+  el.textContent = txt;
+  const first = ok[0];
+  el.dataset.path = first && first.path ? first.path.replace(/\/[^/]+$/, "") : "";
+  el.dataset.report = first && first.report ? first.report.replace(/\/[^/]+$/, "") : "";
+  $("btn-report").hidden = !el.dataset.report;
+  $("btn-open").textContent = "Apri cartella progetti";
   $("result-box").classList.add("show");
 }
 
 // ---------------------------------------------------------------------------
-// AI wizard
+// I miei progetti
 // ---------------------------------------------------------------------------
+
+function wireProjects() {
+  $("psearch").oninput = renderProjects;
+}
+
+async function loadProjects() {
+  try {
+    const data = await (await fetch(`${BACKEND}/api/projects`)).json();
+    state.projects = (data.projects || []).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    $("n-proj").textContent = state.projects.length;
+    renderProjects();
+  } catch (e) { console.error("projects", e); }
+}
+
+function fmtDate(ts) {
+  return new Date((ts || 0) * 1000).toLocaleString("it-IT",
+    { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function renderProjects() {
+  const q = $("psearch").value.toLowerCase();
+  const list = state.projects.filter((p) => `${p.name} ${p.cliente}`.toLowerCase().includes(q));
+  const groups = {};
+  for (const p of list) (groups[p.cliente] = groups[p.cliente] || []).push(p);
+  const box = $("groups");
+  box.innerHTML = "";
+  for (const [cliente, ps] of Object.entries(groups)) {
+    const g = document.createElement("div");
+    g.className = "group";
+    g.innerHTML = `<h4><i style="background:${ps[0].colore}"></i>${escapeHtml(cliente)}<small>${ps.length}</small></h4>`;
+    for (const p of ps) {
+      const card = document.createElement("div");
+      card.className = "pcard" + (state.currentProject && state.currentProject.id === p.id ? " on" : "");
+      card.style.setProperty("--c", p.colore);
+      card.innerHTML = `${p.cover ? `<img src="${p.cover}">` : '<div class="noimg"></div>'}
+        <div><div class="t">${escapeHtml(p.name)}</div><div class="m">${fmtDate(p.created_at)}</div>
+        ${p.exists ? '<span class="badge ok">montato</span>' : '<span class="badge err">non più in CapCut</span>'}</div>`;
+      card.onclick = () => openProject(p);
+      g.appendChild(card);
+    }
+    box.appendChild(g);
+  }
+  if (!list.length) box.innerHTML = '<div class="empty">Ancora nessun progetto montato dall\'app</div>';
+}
+
+function openProject(p) {
+  state.currentProject = p;
+  document.documentElement.style.setProperty("--c", p.colore);
+  renderProjects();
+  const s = p.settings || {};
+  $("pdet").innerHTML = `
+    <div class="phead">${p.cover ? `<img src="${p.cover}">` : ""}
+      <div style="flex:1;min-width:0"><div class="m">${escapeHtml(p.cliente)} · template «${escapeHtml(s.template || "—")}»</div>
+        <h2>${escapeHtml(p.name)}</h2>
+        <div class="m">Montato il ${fmtDate(p.created_at)}</div>
+        <div class="sum">${escapeHtml(p.riassunto || "")}</div></div>
+      <div class="acts">
+        <button class="btn2" id="pd-folder" ${p.exists ? "" : "disabled"}>Apri in Finder</button>
+        <button class="btn2" id="pd-report" ${p.report_path ? "" : "disabled"}>Leggi il report</button>
+        <button class="btn2" id="pd-again">Rifai con questi dati</button>
+      </div>
+    </div>`;
+  $("pd-folder").onclick = () => window.api.openPath(p.result_path);
+  $("pd-report").onclick = () => window.api.openPath(p.report_path);
+  $("pd-again").onclick = () => redoProject(p);
+}
+
+// Back to "Nuovo video" with the same folder, client and notes.
+function redoProject(p) {
+  const s = p.settings || {};
+  const c = state.clients.find((x) => x.id === s.client);
+  showView("editor");
+  chooseClient(c || null);
+  if (!c && s.template) { $("template").value = s.template; loadKit(); }
+  $("name").value = `${p.name} v2`;
+  $("name").dataset.auto = "";
+  $("notes").value = s.notes || "";
+  $("script-path").value = s.script_path || "";
+  $("intro-title").value = s.intro_title || "";
+  if (s.input_path) setFolder(s.input_path);
+  check();
+}
+
+// ---------------------------------------------------------------------------
+// tiny markdown → html for the client's rules
+// ---------------------------------------------------------------------------
+
+function md(t) {
+  let out = "";
+  let inTable = false;
+  for (const l of t.split("\n")) {
+    const h = escapeHtml(l).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+    if (/^\|/.test(l)) {
+      if (/^\|[-\s|:]+\|$/.test(l)) continue;
+      if (!inTable) { out += "<table>"; inTable = true; }
+      out += "<tr>" + h.split("|").slice(1, -1).map((c) => `<td>${c.trim()}</td>`).join("") + "</tr>";
+      continue;
+    }
+    if (inTable) { out += "</table>"; inTable = false; }
+    if (/^#{1,4} /.test(l)) out += `<h4>${h.replace(/^#+ /, "")}</h4>`;
+    else if (/^\s*[-*] /.test(l)) out += `<li>${h.replace(/^\s*[-*] /, "")}</li>`;
+    else if (l.trim()) out += `<p>${h}</p>`;
+  }
+  return out + (inTable ? "</table>" : "");
+}
+
+// ---------------------------------------------------------------------------
+// Claude connection wizard
+// ---------------------------------------------------------------------------
+
 
 function wireWizard() {
   $("btn-config-ai").onclick = openWizard;
-  $("btn-ai-wizard-inline").onclick = openWizard;
-  $("template").onchange = () => { loadKit(); refreshGenerateEnabled(); };
-  $("btn-kit-guide").onclick = () => { $("kit-guide").hidden = false; };
-  $("kit-guide-close").onclick = $("kit-guide-done").onclick = () => { $("kit-guide").hidden = true; };
   $("wizard-close").onclick = closeWizard;
   $("wizard-next").onclick = () => gotoStep(state.wizardStep + 1);
   $("wizard-prev").onclick = () => gotoStep(state.wizardStep - 1);
   $("wizard-done").onclick = () => {
     closeWizard();
-    checkClaude();          // refresh the editor's Claude status + "Genera" gate
+    checkClaude();          // refresh the Claude pill and the editing gate
   };
   $("btn-ai-test").onclick = runAiTest;
 }
@@ -902,7 +805,7 @@ async function routeBySubscription() {
     state.email = me.email;
     if (me.active) {
       cacheActive(true);
-      showView("home");
+      showView("editor");
     } else {
       cacheActive(false);
       renderSubInfo(me);
@@ -911,7 +814,7 @@ async function routeBySubscription() {
   } catch (_) {
     // cloud unreachable — honor the offline grace period
     if (cachedGraceOk()) {
-      showView("home");
+      showView("editor");
     } else {
       renderSubInfo(null);
       showView("subscribe");

@@ -102,11 +102,11 @@ const APP_ICON = path.join(__dirname, "..", "renderer", "logo.png");
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1120,
-    height: 840,
-    minWidth: 940,
+    width: 1320,
+    height: 860,
+    minWidth: 1100,
     minHeight: 720,
-    backgroundColor: "#0e0f13",
+    backgroundColor: "#0b0c10",
     icon: APP_ICON,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
@@ -182,7 +182,7 @@ ipcMain.handle("select-video", async () => {
 ipcMain.handle("select-script", async () => {
   const r = await dialog.showOpenDialog(mainWindow, {
     properties: ["openFile"],
-    filters: [{ name: "Script", extensions: ["txt", "md", "docx"] }],
+    filters: [{ name: "Copione", extensions: ["txt", "md", "docx", "jpg", "jpeg", "png", "heic"] }],
   });
   return r.canceled ? null : r.filePaths[0];
 });

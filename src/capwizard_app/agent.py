@@ -124,6 +124,15 @@ def get_client(client_id: str | None) -> dict | None:
     return next((c for c in list_clients() if c["id"] == client_id), None)
 
 
+def client_rules(client_id: str) -> str:
+    """The profile's text, without its frontmatter: what the app shows as the client's rules."""
+    c = get_client(client_id)
+    if not c:
+        return ""
+    text = Path(c["path"]).read_text()
+    return re.sub(r"\A---\n.*?\n---\n", "", text, flags=re.S).strip()
+
+
 # ---------------------------------------------------------------------------
 # The editing run
 # ---------------------------------------------------------------------------
