@@ -143,7 +143,7 @@ class BatchRequest(GenerateRequest):
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="CapWizard API", version="0.1.0")
+app = FastAPI(title="CapWizard API", version="0.2.0-alpha.1")
 
 # The Electron renderer runs from a file:// or localhost origin; allow all in
 # this local-only server (it binds 127.0.0.1, never exposed to the network).
@@ -565,7 +565,13 @@ def run() -> None:
     parser = argparse.ArgumentParser(description="CapWizard backend server")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--skill-dir", default=os.environ.get("CAPWIZARD_SKILL_DIR"),
+                        help="the reel-capcut-mac skill shipped with the app, installed in ~/.claude/skills")
     args = parser.parse_args()
+    try:
+        print(agent.install_editor_skill(Path(args.skill_dir) if args.skill_dir else None), flush=True)
+    except OSError as e:
+        print(f"skill non installata: {e}", flush=True)
 
     import uvicorn
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

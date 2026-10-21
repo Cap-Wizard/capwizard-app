@@ -1,11 +1,12 @@
 {
   "name": "capwizard-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0-alpha.1",
   "description": "CapWizard — desktop app (Electron shell + Python sidecar)",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "build:backend": "scripts/build-backend.sh",
+    "dist": "npm run build:backend && electron-builder --mac --arm64"
   },
   "author": "Nicola Preda",
   "license": "UNLICENSED",
@@ -23,11 +24,32 @@
     "mac": {
       "category": "public.app-category.video",
       "icon": "build/icon.icns",
-      "target": ["dmg"]
+      "target": [
+        "dmg"
+      ],
+      "identity": null
     },
     "win": {
       "icon": "build/icon.ico",
-      "target": ["nsis"]
-    }
+      "target": [
+        "nsis"
+      ]
+    },
+    "extraResources": [
+      {
+        "from": "backend-dist",
+        "to": "backend"
+      },
+      {
+        "from": "../skill",
+        "to": "skill",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      }
+    ],
+    "artifactName": "CapWizard-${version}-${arch}.${ext}",
+    "afterPack": "scripts/after-pack.js"
   }
 }

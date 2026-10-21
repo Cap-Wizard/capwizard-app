@@ -75,6 +75,32 @@ def editor_skill() -> Path | None:
     return p if p.exists() else None
 
 
+def _version(skill_md: Path) -> tuple:
+    v = _frontmatter(skill_md.read_text())["metadata"].get("version", "") if skill_md.exists() else ""
+    return tuple(int(n) if n.isdigit() else n for n in re.split(r"[.\-]", v)) if v else ()
+
+
+def install_editor_skill(bundled: Path | None) -> str:
+    """Put the skill that ships with the app in ~/.claude/skills, unless a newer one is there.
+    An older copy is kept in the app's backup folder first."""
+    if not bundled or not (bundled / "SKILL.md").exists():
+        return "nessuna skill nell'app"
+    target = SKILLS_DIR / EDITOR_SKILL
+    new, old = _version(bundled / "SKILL.md"), _version(target / "SKILL.md")
+    try:
+        current = bool(old) and old >= new
+    except TypeError:               # e.g. "0.2.0-alpha.1" against "0.2.0-1"
+        current = False
+    if (target / "SKILL.md").exists() and current:
+        return f"skill già aggiornata ({'.'.join(map(str, old))})"
+    if target.exists():
+        keep = registry.app_data_dir() / "backup" / f"{EDITOR_SKILL} {time.strftime('%Y%m%d-%H%M%S')}"
+        shutil.copytree(target, keep, ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.rmtree(target)
+    shutil.copytree(bundled, target, ignore=shutil.ignore_patterns("__pycache__"))
+    return f"skill {EDITOR_SKILL} installata ({'.'.join(map(str, new)) or 'senza versione'})"
+
+
 def _templates() -> list[str]:
     if not CAPCUT_PROJECTS_DIR.is_dir():
         return []

@@ -13,6 +13,8 @@ desktop/dist/
 
 # PyInstaller sidecar build output
 backend-build/
+desktop/backend-dist/
+desktop/pyi-build/
 *.spec
 
 # Cloud backend

@@ -3,7 +3,8 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const { spawn } = require("child_process");
+const os = require("os");
+const { spawn, execFileSync } = require("child_process");
 
 // Fixed local port. The backend binds 127.0.0.1 only (never exposed).
 const BACKEND_PORT = 8765;
@@ -36,8 +37,8 @@ if (!app.requestSingleInstanceLock()) {
 //
 // DEV: run from the repo — use the project's virtualenv interpreter and launch
 //      the FastAPI server module.
-// PROD (packaged): a PyInstaller-built sidecar binary is shipped in resources/.
-//      (Wired later when we set up electron-builder + PyInstaller.)
+// PROD (packaged): a PyInstaller-built sidecar binary is shipped in resources/backend,
+//      and the reel-capcut-mac skill in resources/skill (installed by the backend).
 // ---------------------------------------------------------------------------
 
 function repoRoot() {
@@ -52,17 +53,33 @@ function devPythonPath() {
     : path.join(root, ".venv", "bin", "python");
 }
 
+// An app opened from the Finder gets a bare PATH (/usr/bin:/bin…): take the one of
+// the user's login shell, so the backend and Claude Code find claude, ffmpeg and python3.
+function userPath() {
+  const extra = ["/opt/homebrew/bin", "/usr/local/bin", path.join(os.homedir(), ".local/bin"),
+                 path.join(os.homedir(), ".claude/local")];
+  let shellPath = "";
+  try {
+    shellPath = execFileSync(process.env.SHELL || "/bin/zsh", ["-ilc", "printf %s \"$PATH\""],
+                             { encoding: "utf8", timeout: 5000 }).trim();
+  } catch (_) { /* fall back to the usual places */ }
+  return [...new Set([...shellPath.split(":"), ...(process.env.PATH || "").split(":"), ...extra].filter(Boolean))].join(":");
+}
+
 function startBackend() {
+  const env = { ...process.env, PATH: userPath() };
   if (app.isPackaged) {
     // Packaged sidecar (PyInstaller onefile) lives in resources/backend/
     const exe = process.platform === "win32" ? "capwizard-server.exe" : "capwizard-server";
     const bin = path.join(process.resourcesPath, "backend", exe);
-    pyProc = spawn(bin, ["--port", String(BACKEND_PORT)], { env: { ...process.env } });
+    env.CAPWIZARD_SKILL_DIR = path.join(process.resourcesPath, "skill", "reel-capcut-mac");
+    pyProc = spawn(bin, ["--port", String(BACKEND_PORT)], { env });
   } else {
+    env.CAPWIZARD_SKILL_DIR = path.join(repoRoot(), "skill", "reel-capcut-mac");
     pyProc = spawn(
       devPythonPath(),
       ["-m", "capwizard_app.server", "--port", String(BACKEND_PORT)],
-      { cwd: repoRoot(), env: { ...process.env } }
+      { cwd: repoRoot(), env }
     );
   }
   pyProc.stdout.on("data", (d) => console.log("[backend]", d.toString().trimEnd()));
