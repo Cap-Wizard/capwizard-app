@@ -187,6 +187,14 @@ ipcMain.handle("select-script", async () => {
   return r.canceled ? null : r.filePaths[0];
 });
 
+ipcMain.handle("select-images", async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile", "multiSelections"],
+    filters: [{ name: "Immagini", extensions: ["png", "jpg", "jpeg", "heic", "webp", "gif"] }],
+  });
+  return r.canceled ? [] : r.filePaths;
+});
+
 ipcMain.handle("open-path", async (_e, p) => {
   if (p) await shell.openPath(p);
 });

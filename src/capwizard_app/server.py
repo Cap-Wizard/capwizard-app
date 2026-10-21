@@ -448,6 +448,56 @@ def projects_list() -> dict:
     return {"projects": out}
 
 
+class ModifyRequest(BaseModel):
+    testo: str = ""
+    immagini: list[str] = []
+    ai_model: str = "opus"
+
+
+class AttachmentRequest(BaseModel):
+    path: str | None = None
+    data_url: str | None = None
+
+
+@app.post("/api/attachments")
+def attachment(req: AttachmentRequest) -> dict:
+    """A screenshot for a change request: kept in the app's folder, with a thumbnail."""
+    a = agent.add_attachment(req.path, req.data_url)
+    return a or {"error": "Non è un'immagine."}
+
+
+@app.get("/api/projects/{project_id}/mods")
+def project_mods(project_id: str) -> dict:
+    mods = agent.list_mods(project_id)
+    for m in mods:
+        m["thumbs"] = [agent.image_thumb(Path(p)) for p in m.get("immagini", []) if Path(p).exists()]
+    return {"mods": mods}
+
+
+def _run_modify(job: Job, project: dict, req: ModifyRequest) -> None:
+    job.status = "running"
+    try:
+        agent.run_modify(job, project, req.testo.strip(), req.immagini, req.ai_model)
+        job.result_path = project.get("result_path")
+        job.status = "done"
+    except Exception as e:  # noqa: BLE001 — surface everything to the UI
+        job.error = str(e)
+        job.status = "error"
+        job.log(f"ERRORE: {e}")
+
+
+@app.post("/api/projects/{project_id}/modify")
+def project_modify(project_id: str, req: ModifyRequest) -> dict:
+    project = registry.get_project(project_id)
+    if not project:
+        return {"error": "progetto non trovato"}
+    if not (req.testo.strip() or req.immagini):
+        return {"error": "Scrivi cosa cambiare o allega uno screenshot."}
+    job = manager.create()
+    threading.Thread(target=_run_modify, args=(job, project, req), daemon=True).start()
+    return {"job_id": job.id}
+
+
 @app.get("/api/projects/{project_id}")
 def project_get(project_id: str) -> dict:
     p = registry.get_project(project_id)

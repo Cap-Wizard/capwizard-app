@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -195,6 +196,55 @@ def _slug(s: str) -> str:
     return re.sub(r"[^\w\- ]", "_", s).strip() or "video"
 
 
+def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcript: list[str]) -> str | None:
+    """Run Claude Code on `prompt`, streaming its messages into the job's log.
+    Returns why it stopped badly, if it did."""
+    cmd = [_find_claude_cli(), "-p", "--output-format", "stream-json", "--verbose",
+           "--model", model, "--permission-mode", "acceptEdits",
+           "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill",
+           "--add-dir", *sorted(dirs)]
+    proc = subprocess.Popen(cmd, cwd=cwd, env=_clean_env(), text=True, bufsize=1,
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    job.proc = proc
+    proc.stdin.write(prompt)
+    proc.stdin.close()
+
+    error = None
+    for raw in proc.stdout:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            low = line.lower()
+            if "logged in" in low or "/login" in low:
+                error = "Claude non è collegato: apri il Terminale, scrivi `claude`, poi `/login`."
+            job.log(line[:300])
+            continue
+        if ev.get("type") == "assistant":
+            for c in ev.get("message", {}).get("content", []):
+                if c.get("type") == "text" and c.get("text", "").strip():
+                    text = c["text"].strip()
+                    transcript.append(text)
+                    for ln in text.splitlines():
+                        if ln.strip():
+                            job.log(ln)
+                elif c.get("type") == "tool_use":
+                    tool, inp = c.get("name", ""), c.get("input") or {}
+                    job.set_step(_step_of(tool, inp))
+                    job.log(f"⚙ {_describe(tool, inp)}")
+        elif ev.get("type") == "result":
+            if ev.get("is_error"):
+                error = error or f"Claude si è fermato: {str(ev.get('result', ''))[:300]}"
+            cost = ev.get("total_cost_usd")
+            mins = (ev.get("duration_ms") or 0) / 60000
+            job.log(f"⏱ {mins:.0f} min" + (f" · ${cost:.2f}" if cost else ""))
+    proc.wait()
+    job.proc = None
+    return error
+
+
 def check_request(req) -> str | None:
     """Why this reel can't start, or None."""
     if not _find_claude_cli():
@@ -251,54 +301,11 @@ def run_agent(job, req) -> tuple[str, str]:
         dirs.add(str(Path(client["path"]).parent))
     if req.script_path:
         dirs.add(str(Path(req.script_path).parent))
-    cmd = [_find_claude_cli(), "-p", "--output-format", "stream-json", "--verbose",
-           "--model", req.ai_model or "opus", "--permission-mode", "acceptEdits",
-           "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill",
-           "--add-dir", *sorted(dirs)]
-
     job.log(f"🎬 Avvio Claude Code ({req.ai_model}) con la skill {EDITOR_SKILL}"
             + (f" e il profilo di {client['nome']}" if client else ""))
     job.set_step(1)
-    proc = subprocess.Popen(cmd, cwd=work, env=_clean_env(), text=True, bufsize=1,
-                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    job.proc = proc
-    proc.stdin.write(prompt)
-    proc.stdin.close()
-
     transcript = [f"# {req.name}\n"]
-    error = None
-    for raw in proc.stdout:
-        line = raw.strip()
-        if not line:
-            continue
-        try:
-            ev = json.loads(line)
-        except ValueError:
-            low = line.lower()
-            if "logged in" in low or "/login" in low:
-                error = "Claude non è collegato: apri il Terminale, scrivi `claude`, poi `/login`."
-            job.log(line[:300])
-            continue
-        if ev.get("type") == "assistant":
-            for c in ev.get("message", {}).get("content", []):
-                if c.get("type") == "text" and c.get("text", "").strip():
-                    text = c["text"].strip()
-                    transcript.append(text)
-                    for ln in text.splitlines():
-                        if ln.strip():
-                            job.log(ln)
-                elif c.get("type") == "tool_use":
-                    tool, inp = c.get("name", ""), c.get("input") or {}
-                    job.set_step(_step_of(tool, inp))
-                    job.log(f"⚙ {_describe(tool, inp)}")
-        elif ev.get("type") == "result":
-            if ev.get("is_error"):
-                error = error or f"Claude si è fermato: {str(ev.get('result', ''))[:300]}"
-            cost = ev.get("total_cost_usd")
-            mins = (ev.get("duration_ms") or 0) / 60000
-            job.log(f"⏱ {mins:.0f} min" + (f" · ${cost:.2f}" if cost else ""))
-    proc.wait()
-    job.proc = None
+    error = _run_claude(job, prompt, dirs, req.ai_model or "opus", work, transcript)
     if job.stopped:
         raise RuntimeError("Montaggio fermato.")
 
@@ -325,6 +332,179 @@ def run_agent(job, req) -> tuple[str, str]:
     except Exception as reg_err:  # noqa: BLE001 — registry is best-effort
         job.log(f"⚠ impossibile salvare nel registro progetti: {reg_err}")
     return res["progetto"], str(report)
+
+
+# ---------------------------------------------------------------------------
+# Changes to a reel already made, and the lesson they leave
+# ---------------------------------------------------------------------------
+
+MODS_DIR = registry.app_data_dir() / "modifiche"
+BACKUP_DIR = registry.app_data_dir() / "backup"
+ATTACH_DIR = registry.app_data_dir() / "allegati"
+IMAGE_EXT = (".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif")
+
+MOD_PROMPT = """Devi applicare delle MODIFICHE a un reel che hai già montato, direttamente sul progetto CapCut
+esistente (in place: niente copie v2). Lavori in automatico dall'app CapWizard: NON fare domande.
+
+Progetto: «{name}» → `{folder}`
+Copia di sicurezza fatta dall'app prima di iniziare: `{backup}`
+Cliente: {client}
+Template: «{template}» · cartella delle clip: `{clips}`
+Lavoro del montaggio (config.json, piano, script usati): {work}
+Cosa avevi fatto: {summary}
+Modifiche già fatte in passato su questo video:
+{history}
+
+MODIFICHE RICHIESTE ORA (da Nicola o dal cliente):
+{text}
+{images}
+Procedura:
+1. Segui la skill **{skill}** ({skill_md}), in particolare «Dopo che Nicola l'ha aperto»: il progetto non deve avere
+   `.locked`; confronta il draft attuale con quello che avevi scritto per trovare i ritocchi a mano di Nicola e conservali.
+2. Applica SOLO le modifiche richieste: non toccare tagli, testi, suoni o musica se non è chiesto. Se togli o sposti un
+   taglio, risincronizza sottotitoli e suoni. Scrivi la stessa modifica in tutte le copie della timeline
+   (`draft_info.json`, `.bak`, `template-2.tmp` e `Timelines/<id>/`), con lo stesso id.
+3. Verifica il progetto con `verifica.py`.
+4. {lesson}
+5. Alla fine scrivi il file `{result}` con: {{"riassunto": "<cosa hai cambiato, in italiano, 2-5 righe>",
+   "lezione": "<la lezione per i prossimi video, una riga, o null>"}}.
+Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
+
+LESSON = """Salva la lezione nel profilo del cliente `{profile}`: nella sezione «## Lezioni» (creala in fondo se manca)
+   aggiungi «- {day}: <cosa voleva e come l'hai risolto>». Se è una preferenza che vale anche per i prossimi video
+   (es. «meno suoni», «sottotitoli più in alto»), scrivila anche come regola nella sezione giusta del profilo e correggi
+   le regole vecchie che contraddice. Non toccare l'intestazione tra i `---`."""
+
+
+def _mods_file(project_id: str) -> Path:
+    MODS_DIR.mkdir(parents=True, exist_ok=True)
+    return MODS_DIR / f"{project_id}.json"
+
+
+def list_mods(project_id: str) -> list[dict]:
+    try:
+        return json.loads(_mods_file(project_id).read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def _save_mods(project_id: str, mods: list[dict]) -> None:
+    _mods_file(project_id).write_text(json.dumps(mods, ensure_ascii=False, indent=1))
+
+
+def image_thumb(src: Path, size: int = 240) -> str:
+    """A small JPEG of an image as a data URL (sips also reads HEIC)."""
+    out = src.with_name(src.name + ".thumb.jpg")
+    if not out.exists():
+        subprocess.run(["sips", "-s", "format", "jpeg", "-Z", str(size), str(src), "--out", str(out)], capture_output=True)
+    if not out.exists():
+        return ""
+    import base64
+    return "data:image/jpeg;base64," + base64.b64encode(out.read_bytes()).decode()
+
+
+def add_attachment(path: str | None = None, data_url: str | None = None) -> dict | None:
+    """Keep a copy of a screenshot (a file, or one pasted as a data URL) for a change request."""
+    ATTACH_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%m%d-%H%M%S")
+    if data_url:
+        import base64
+        head, _, data = data_url.partition(",")
+        dst = ATTACH_DIR / f"{stamp}_incollata.{'png' if 'png' in head else 'jpg'}"
+        dst.write_bytes(base64.b64decode(data))
+    elif path and Path(path).is_file() and path.lower().endswith(IMAGE_EXT):
+        dst = ATTACH_DIR / f"{stamp}_{Path(path).name}"
+        shutil.copy2(path, dst)
+    else:
+        return None
+    return {"path": str(dst), "thumb": image_thumb(dst)}
+
+
+def writable_profile(client: dict) -> Path:
+    """The client's profile to write lessons into. A profile synced from claude.ai is
+    copied into ~/.claude/skills first (the local copy then wins), so a sync can't drop them."""
+    p = Path(client["path"])
+    if "synced" not in p.parts:
+        return p
+    local = SKILLS_DIR / p.parent.name
+    if not (local / "SKILL.md").exists():
+        shutil.copytree(p.parent, local, dirs_exist_ok=True)
+    return local / "SKILL.md"
+
+
+def run_modify(job, project: dict, text: str, images: list[str], model: str = "opus") -> dict:
+    """Apply a change request to a project in place, then save the lesson in the client's profile."""
+    folder = Path(project.get("result_path") or "")
+    if not _find_claude_cli():
+        raise RuntimeError("Non trovo Claude Code sul Mac.")
+    if not folder.is_dir():
+        raise RuntimeError("Il progetto non c'è più tra i progetti CapCut.")
+    if (folder / ".locked").exists():
+        raise RuntimeError("Il progetto è aperto in CapCut: torna alla home dei progetti di CapCut e riprova.")
+    settings = project.get("settings") or {}
+    client = get_client(settings.get("client"))
+    profile = writable_profile(client) if client else None
+    skill_md = editor_skill()
+
+    mods = list_mods(project["id"])
+    history = "\n".join(f"- {m['data']}: {m['testo']} → {m.get('riassunto') or m['stato']}" for m in mods) or "- nessuna"
+    entry = {"data": time.strftime("%Y-%m-%d %H:%M"), "testo": text, "immagini": images, "stato": "in corso", "riassunto": ""}
+    mods.append(entry)
+    _save_mods(project["id"], mods)
+
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup = BACKUP_DIR / f"{folder.name} {time.strftime('%m%d-%H%M%S')}"
+    shutil.copytree(folder, backup, ignore=shutil.ignore_patterns(".locked"))
+    job.log(f"🗂 Copia di sicurezza del progetto: {backup}")
+
+    report = Path(project.get("report_path") or "")
+    work = WORK_DIR / f"{_slug(project['name'])} modifica {time.strftime('%m%d-%H%M')}"
+    work.mkdir(parents=True, exist_ok=True)
+    result = work / "risultato.json"
+    old_work = report.parent if report.is_file() else None
+    try:
+        summary = re.search(r"## Cosa ha fatto Claude\n(.*?)(?:\n## |\Z)", report.read_text(), re.S).group(1).strip()
+    except (OSError, AttributeError):
+        summary = "—"
+    prompt = MOD_PROMPT.format(
+        name=project["name"], folder=folder, backup=backup,
+        client=(f"{client['nome']} — profilo `{profile}` (leggilo: prevale sulla skill generale)" if client else "nessun profilo"),
+        template=settings.get("template") or "—", clips=settings.get("input_path") or "—",
+        work=f"`{old_work}`" if old_work else "non disponibile", summary=summary, history=history,
+        text=text or "(vedi gli screenshot)",
+        images=("Screenshot allegati (di solito la chat del cliente): guardali TUTTI con Read, contengono le modifiche:\n"
+                + "\n".join(f"- {p}" for p in images)) if images else "",
+        skill=EDITOR_SKILL, skill_md=skill_md,
+        lesson=LESSON.format(profile=profile, day=time.strftime("%d/%m/%Y")) if profile
+        else "Non c'è un profilo cliente: scrivi la lezione solo nel risultato.",
+        result=result,
+    )
+    dirs = {str(folder), str(CAPCUT_PROJECTS_DIR), str(skill_md.parent), str(work), str(backup), str(ATTACH_DIR)}
+    for d in (old_work, profile.parent if profile else None, settings.get("input_path")):
+        if d:
+            dirs.add(str(d))
+
+    job.log("🎬 Avvio Claude Code sulle modifiche" + (f" · profilo di {client['nome']}" if client else ""))
+    transcript: list[str] = []
+    try:
+        error = _run_claude(job, prompt, dirs, model, work, transcript)
+        if job.stopped:
+            raise RuntimeError("Modifiche fermate.")
+        try:
+            res = json.loads(result.read_text())
+        except (OSError, ValueError):
+            raise RuntimeError(error or "Claude ha finito senza scrivere il risultato.")
+    except Exception as e:
+        entry.update(stato="errore", riassunto=str(e))
+        _save_mods(project["id"], mods)
+        raise
+    entry.update(stato="fatto", riassunto=res.get("riassunto", ""), lezione=res.get("lezione") or "",
+                 profilo=client["nome"] if client else "")
+    _save_mods(project["id"], mods)
+    job.log("✓ " + (res.get("riassunto") or "Modifiche fatte.").replace("\n", " "))
+    if res.get("lezione"):
+        job.log(f"📒 Lezione salvata{' nel profilo di ' + client['nome'] if client else ''}: {res['lezione']}")
+    return res
 
 
 def stop(job) -> None:

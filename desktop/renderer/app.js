@@ -21,6 +21,8 @@ const state = {
   batchCount: 0,
   projects: [],
   currentProject: null,
+  att: [],                 // screenshots attached to the next change request
+  modRunning: null,        // id of the project Claude is changing
   wizardStep: 1,
   authMode: "login",       // login | register
   authToken: null,
@@ -101,6 +103,7 @@ function showView(name) {
   $("views").hidden = !inApp;
   $("v-new").classList.toggle("on", name === "editor");
   $("v-proj").classList.toggle("on", name === "home");
+  document.body.classList.toggle("projs-view", name === "home");
   // account controls only when past the gate (and not in local/private mode)
   const authed = inApp && !LOCAL_MODE;
   $("tb-email").hidden = !authed || !state.email;
@@ -324,7 +327,7 @@ function check() {
   if (!hasFolder) miss.push("cartella delle clip");
   else if (state.batch && !state.batchCount) miss.push("sottocartelle con video");
   if (!hasName) miss.push("nome del progetto");
-  const ready = state.backendReady && state.aiReady && !state.running && !miss.length;
+  const ready = state.backendReady && state.aiReady && !state.running && !state.modRunning && !miss.length;
   $("btn-generate").disabled = !ready;
   $("missing").textContent = state.running ? "Montaggio in corso…"
     : !state.backendReady ? "Avvio del motore dell'app…"
@@ -350,12 +353,19 @@ function wireEditor() {
   // dropping a folder (or a clip: its folder) anywhere on the window
   document.addEventListener("dragover", (e) => {
     e.preventDefault();
-    if (!$("view-editor").hidden) document.body.classList.add("dragging");
+    if (!$("view-editor").hidden || state.currentProject) document.body.classList.add("dragging");
   });
   document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
   document.addEventListener("drop", (e) => {
     e.preventDefault();
     document.body.classList.remove("dragging");
+    if (!$("view-home").hidden) {          // screenshots for a change request
+      for (const f of e.dataTransfer.files) {
+        const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
+        if (p) attach({ path: p });
+      }
+      return;
+    }
     if ($("view-editor").hidden || state.running) return;
     const f = e.dataTransfer.files[0];
     const p = f && window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
@@ -611,7 +621,7 @@ function renderProjects() {
       card.style.setProperty("--c", p.colore);
       card.innerHTML = `${p.cover ? `<img src="${p.cover}">` : '<div class="noimg"></div>'}
         <div><div class="t">${escapeHtml(p.name)}</div><div class="m">${fmtDate(p.created_at)}</div>
-        ${p.exists ? '<span class="badge ok">montato</span>' : '<span class="badge err">non più in CapCut</span>'}</div>`;
+        ${badge(p)}</div>`;
       card.onclick = () => openProject(p);
       g.appendChild(card);
     }
@@ -620,26 +630,166 @@ function renderProjects() {
   if (!list.length) box.innerHTML = '<div class="empty">Ancora nessun progetto montato dall\'app</div>';
 }
 
-function openProject(p) {
+function badge(p) {
+  if (state.modRunning === p.id) return '<span class="badge run">⏳ modifiche in corso</span>';
+  if (!p.exists) return '<span class="badge err">non più in CapCut</span>';
+  return '<span class="badge ok">montato</span>';
+}
+
+async function openProject(p) {
+  if (!state.currentProject || state.currentProject.id !== p.id) state.att = [];
   state.currentProject = p;
   document.documentElement.style.setProperty("--c", p.colore);
   renderProjects();
   const s = p.settings || {};
+  let mods = [];
+  try { mods = (await (await fetch(`${BACKEND}/api/projects/${p.id}/mods`)).json()).mods || []; } catch (_) {}
+  if (state.currentProject !== p) return;
+  const running = state.modRunning === p.id;
+  const thread = mods.map((m, i) => {
+    const last = i === mods.length - 1;
+    const reply = m.stato === "in corso" ? (running && last ? "⏳ Sto facendo le modifiche…" : "⚠️ Interrotto prima di finire")
+      : m.stato === "errore" ? `❌ Non sono riuscito a finire: ${escapeHtml(m.riassunto || "")}`
+      : escapeHtml(m.riassunto || "Fatto.");
+    return `<div class="msg me"><div class="when">Tu · ${escapeHtml(m.data)}</div>${escapeHtml(m.testo || "(solo screenshot)")}`
+      + (m.thumbs && m.thumbs.length ? `<div class="imgs">${m.thumbs.map((t) => `<img src="${t}">`).join("")}</div>` : "")
+      + `</div><div class="msg ai"><div class="when">Claude</div>${reply}`
+      + (m.lezione ? `<div class="lesson">📒 ${m.profilo ? `Lezione salvata nel profilo di ${escapeHtml(m.profilo)}`
+        : "Lezione (nessun profilo cliente: resta solo qui)"}: ${escapeHtml(m.lezione)}</div>` : "") + "</div>";
+  }).join("");
   $("pdet").innerHTML = `
     <div class="phead">${p.cover ? `<img src="${p.cover}">` : ""}
       <div style="flex:1;min-width:0"><div class="m">${escapeHtml(p.cliente)} · template «${escapeHtml(s.template || "—")}»</div>
         <h2>${escapeHtml(p.name)}</h2>
-        <div class="m">Montato il ${fmtDate(p.created_at)}</div>
+        <div class="m">Montato il ${fmtDate(p.created_at)}${mods.length ? ` · ${mods.length} ${mods.length > 1 ? "modifiche" : "modifica"}` : ""}</div>
         <div class="sum">${escapeHtml(p.riassunto || "")}</div></div>
       <div class="acts">
         <button class="btn2" id="pd-folder" ${p.exists ? "" : "disabled"}>Apri in Finder</button>
         <button class="btn2" id="pd-report" ${p.report_path ? "" : "disabled"}>Leggi il report</button>
         <button class="btn2" id="pd-again">Rifai con questi dati</button>
       </div>
+    </div>
+    <div class="thread" id="thread">${thread || '<div class="empty">Nessuna modifica ancora. Se il video non va, scrivi qui sotto cosa cambiare e allega gli screenshot della chat del cliente: Claude corregge questo progetto e salva la lezione nel profilo del cliente.</div>'}</div>
+    <div id="mlog" ${running ? "" : "hidden"}></div>
+    <div class="composer">
+      <textarea id="mtext" placeholder="Cosa cambiare? es. «togli il dong», «sottotitoli più in alto», «il cliente vuole il prezzo più grande»… (incolla gli screenshot con ⌘V)"></textarea>
+      <div class="att" id="att"></div>
+      <div class="cbar"><button class="btn2" id="btn-attach">📎 Allega screenshot</button>
+        <span class="hint">oppure trascinali qui o ⌘V</span>
+        <button class="send" id="send">APPLICA MODIFICHE</button></div>
     </div>`;
   $("pd-folder").onclick = () => window.api.openPath(p.result_path);
   $("pd-report").onclick = () => window.api.openPath(p.report_path);
   $("pd-again").onclick = () => redoProject(p);
+  $("btn-attach").onclick = async () => {
+    for (const path of (window.api && await window.api.selectImages()) || []) attach({ path });
+  };
+  $("mtext").addEventListener("paste", (e) => {
+    for (const it of e.clipboardData.items) {
+      if (!it.type.startsWith("image/")) continue;
+      e.preventDefault();
+      const r = new FileReader();
+      r.onload = () => attach({ data_url: r.result });
+      r.readAsDataURL(it.getAsFile());
+    }
+  });
+  $("thread").querySelectorAll("img").forEach((img) => { img.onclick = () => zoom(img.src); });
+  $("send").onclick = sendChange;
+  $("pdet").scrollTop = $("pdet").scrollHeight;
+  renderAtt();
+}
+
+async function attach(body) {
+  try {
+    const a = await (await fetch(`${BACKEND}/api/attachments`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    })).json();
+    if (a.path) { state.att.push(a); renderAtt(); }
+  } catch (_) { /* not an image */ }
+}
+
+function renderAtt() {
+  const box = $("att");
+  if (!box) return;
+  box.innerHTML = "";
+  state.att.forEach((a, i) => {
+    const d = document.createElement("div");
+    d.innerHTML = `<img src="${a.thumb}"><span>✕</span>`;
+    d.querySelector("span").onclick = () => { state.att.splice(i, 1); renderAtt(); };
+    box.appendChild(d);
+  });
+  const p = state.currentProject;
+  $("send").disabled = !!(state.running || state.modRunning) || !p || !p.exists || !state.aiReady;
+}
+
+function zoom(src) {
+  const z = document.createElement("div");
+  z.className = "zoom";
+  z.innerHTML = `<img src="${src}">`;
+  z.onclick = () => z.remove();
+  document.body.appendChild(z);
+}
+
+async function sendChange() {
+  const p = state.currentProject;
+  const testo = $("mtext").value.trim();
+  if (!testo && !state.att.length) { $("mtext").focus(); return; }
+  $("send").disabled = true;
+  $("send").textContent = "Avvio…";
+  let r;
+  try {
+    r = await (await fetch(`${BACKEND}/api/projects/${p.id}/modify`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ testo, immagini: state.att.map((a) => a.path), ai_model: $("ai-model").value }),
+    })).json();
+  } catch (e) { r = { error: String(e) }; }
+  if (!r.job_id) {
+    $("send").textContent = "APPLICA MODIFICHE";
+    $("send").disabled = false;
+    alert(r.error || "Modifica non avviata.");
+    return;
+  }
+  state.modRunning = p.id;
+  state.att = [];
+  await openProject(p);
+  followChange(r.job_id, p);
+}
+
+// Claude's messages go in the small log under the chat until the change is done.
+function followChange(jobId, p) {
+  let shown = 0;
+  let ended = false;
+  const log = (line) => {
+    const box = $("mlog");
+    if (!box || state.currentProject !== p) return;
+    box.hidden = false;
+    const div = document.createElement("div");
+    div.className = `k-${kindOf(line)}`;
+    div.textContent = line;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  };
+  const end = async (job) => {
+    if (ended) return;
+    ended = true;
+    clearInterval(poll);
+    state.modRunning = null;
+    await loadProjects();
+    const fresh = state.projects.find((x) => x.id === p.id) || p;
+    if (state.currentProject && state.currentProject.id === p.id) {
+      const lines = $("mlog") ? [...$("mlog").children].map((d) => d.textContent) : [];
+      await openProject(fresh);
+      if (job.status !== "done") lines.forEach(log);   // keep the log of a failed change in view
+    }
+  };
+  const poll = setInterval(async () => {
+    try {
+      const job = await (await fetch(`${BACKEND}/api/jobs/${jobId}`)).json();
+      const lines = job.logs || [];
+      while (shown < lines.length) log(lines[shown++]);
+      if (job.status === "done" || job.status === "error") end(job);
+    } catch (_) { /* backend busy: next tick */ }
+  }, 1500);
 }
 
 // Back to "Nuovo video" with the same folder, client and notes.

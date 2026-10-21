@@ -222,6 +222,39 @@ body.dragging::after { content: "Rilascia qui la cartella delle clip"; position:
 .phead .acts { margin-left: auto; display: flex; flex-direction: column; gap: 6px; }
 .phead .btn2 { padding: 8px 12px; white-space: nowrap; }
 
+/* change requests: a chat under the project */
+.thread { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+.thread .empty { padding: 18px 10px; }
+.msg { max-width: 80%; padding: 10px 13px; border-radius: 16px; font-size: 13px; white-space: pre-wrap; }
+.msg.me { align-self: flex-end; background: color-mix(in srgb, var(--c) 26%, var(--panel2));
+  border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); border-bottom-right-radius: 5px; }
+.msg.ai { align-self: flex-start; background: var(--panel); border: 1px solid var(--line2); border-bottom-left-radius: 5px; }
+.msg .when { font-size: 10.5px; color: var(--mute); margin-bottom: 4px; font-weight: 600; }
+.msg .lesson { margin-top: 8px; font-size: 12px; color: var(--ok); }
+.msg .imgs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.msg .imgs img { height: 120px; border-radius: 9px; border: 1px solid var(--line2); cursor: zoom-in; }
+#mlog { max-height: 180px; overflow-y: auto; font: 11.8px/1.55 "SF Mono", Menlo, monospace; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; flex: none; }
+#mlog div { margin-bottom: 2px; white-space: pre-wrap; word-break: break-word; }
+.composer { background: var(--panel); border: 1px solid var(--line2); border-radius: var(--r); padding: 10px; box-shadow: var(--shadow); transition: .15s; flex: none; }
+.composer:focus-within { border-color: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 18%, transparent); }
+.composer textarea { border: 0; background: transparent; min-height: 64px; padding: 6px 8px; box-shadow: none !important; }
+.att { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 6px; }
+.att:empty { display: none; }
+.att div { position: relative; } .att img { height: 70px; border-radius: 9px; border: 1px solid var(--line2); }
+.att span { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; background: var(--err); color: #fff;
+  font-size: 10px; display: grid; place-items: center; cursor: pointer; }
+.cbar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.cbar .btn2 { padding: 8px 12px; }
+.cbar .hint { margin: 0; color: var(--dim); }
+.send { margin-left: auto; padding: 10px 18px; border-radius: 11px; font-weight: 800; font-size: 12.5px; letter-spacing: .05em; color: #fff;
+  background: var(--grad); box-shadow: 0 8px 22px rgba(124, 108, 255, .35); }
+.send:disabled { background: var(--panel2); color: var(--dim); box-shadow: 0 0 0 1px var(--line2) inset; cursor: not-allowed; }
+.badge.run { color: var(--warn); background: rgba(245, 166, 35, .12); }
+body.projs-view.dragging::after { content: "Rilascia qui gli screenshot della chat"; }
+.zoom { position: fixed; inset: 0; background: rgba(0, 0, 0, .88); display: grid; place-items: center; z-index: 200; cursor: zoom-out; }
+.zoom img { max-width: 92vw; max-height: 92vh; border-radius: 12px; }
+
 /* ---- gate views (login / subscribe) ---- */
 .gate-view { display: flex; align-items: center; justify-content: center; }
 .gate-card { width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 32px 28px;

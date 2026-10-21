@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("api", {
   selectFolder: () => ipcRenderer.invoke("select-folder"),
   selectVideo: () => ipcRenderer.invoke("select-video"),
   selectScript: () => ipcRenderer.invoke("select-script"),
+  selectImages: () => ipcRenderer.invoke("select-images"),
   openPath: (p) => ipcRenderer.invoke("open-path", p),
   // real path of a file or folder dropped on the window
   pathForFile: (f) => webUtils.getPathForFile(f),
