@@ -106,6 +106,18 @@
             <input type="text" id="name" placeholder="es. Reel 23 maggio" />
           </div>
           <div class="row">
+            <label class="field-label">Cliente</label>
+            <select id="client"></select>
+            <div class="client-card" id="client-card" hidden>
+              <span class="client-dot" id="client-dot"></span>
+              <div class="client-body">
+                <div class="client-desc" id="client-desc"></div>
+                <button class="btn-link" id="btn-client-open">Apri il profilo del cliente</button>
+              </div>
+            </div>
+            <div class="hint" id="client-hint"></div>
+          </div>
+          <div class="row">
             <label class="field-label">Template CapCut</label>
             <select id="template"></select>
             <div class="hint">Il template è il kit del cliente: l'AI ne riusa titoli, titoletti, elenchi, sottotitoli, suoni, musica e colore.
@@ -122,13 +134,17 @@
           <div class="row">
             <label class="field-label">Copione (opzionale)</label>
             <div class="input-with-btn">
-              <input type="text" id="script-path" placeholder="txt, md o docx — l'AI lo usa per capire cosa è fuori copione" />
+              <input type="text" id="script-path" placeholder="txt, md, docx o foto — le indicazioni sono vincolanti" />
               <button class="btn-secondary" id="btn-script">Sfoglia…</button>
             </div>
           </div>
+          <div class="row">
+            <label class="field-label">Note per Claude (opzionale)</label>
+            <textarea id="notes" rows="3" placeholder="es. tieni la seconda versione del gancio, niente musica, metti il prezzo a schermo"></textarea>
+          </div>
         </div>
 
-        <div class="card">
+        <div class="card" hidden>
           <h2>Ritmo & sottotitoli</h2>
           <div class="row">
             <label class="field-label">Ritmo (indicazione per l'AI)</label>
@@ -160,15 +176,15 @@
           </div>
           <div class="ai-status" id="ai-status">Verifico il collegamento a Claude…</div>
           <div class="card-note">
-            Claude decide cosa tenere, cosa è dietro le quinte o fuori tema, quali
-            silenzi e ripetizioni tagliare, dove mettere suoni e testi. Ogni scelta
-            è spiegata nel log e nel report. Senza Claude collegato non si genera.
+            Il montaggio lo fa Claude Code sul tuo Mac, con il tuo account Claude:
+            analizza le clip, decide ogni taglio con la skill reel-capcut-mac e le regole
+            del cliente, scrive il progetto CapCut e lo ricontrolla. Dura 10-30 minuti.
           </div>
           <div class="row slider-row">
             <label class="field-label">Modello</label>
             <select id="ai-model" style="flex:1;">
-              <option value="sonnet" selected>Sonnet — veloce e preciso (consigliato)</option>
-              <option value="opus">Opus — massima qualità, più lento</option>
+              <option value="opus" selected>Opus — massima qualità (consigliato)</option>
+              <option value="sonnet">Sonnet — più veloce</option>
               <option value="haiku">Haiku — il più rapido, meno accurato</option>
             </select>
           </div>
@@ -183,10 +199,10 @@
           </div>
           <div class="switch-row"><div class="switch-label">A fine frase: zoom in, transizione e woosh verso la clip dopo</div><div class="switch on" id="sw-transitions"></div></div>
           <div class="switch-row"><div class="switch-label">Zoom leggeri sulle frasi chiave (dove e quanto lo decide l'AI)</div><div class="switch" id="sw-zoom"></div></div>
-          <div class="switch-row"><div class="switch-label">Recensione finale del montato</div><div class="switch on" id="sw-ai-review"></div></div>
+          <div class="switch-row" hidden><div class="switch-label">Recensione finale del montato</div><div class="switch on" id="sw-ai-review"></div></div>
         </div>
 
-        <div class="card">
+        <div class="card" hidden>
           <h2>Preferenze per l'AI</h2>
           <div class="switch-row"><div class="switch-label">Togli gli intercalari (ehm, uhm, ah…)</div><div class="switch on" id="sw-fillers"></div></div>
           <div class="switch-row"><div class="switch-label">Togli anche cioè/tipo/diciamo (aggressivo)</div><div class="switch" id="sw-aggr"></div></div>
@@ -196,7 +212,7 @@
           <div class="switch-row"><div class="switch-label">Stabilizza le clip (ffmpeg)</div><div class="switch" id="sw-stab"></div></div>
         </div>
 
-        <div class="card">
+        <div class="card" hidden>
           <h2>Output</h2>
           <div class="row">
             <label class="field-label">Modello Whisper</label>
@@ -234,11 +250,13 @@
       <!-- CONSOLE -->
       <div class="console-pane">
         <div class="console-header">
-          <h3>Log</h3>
+          <h3>Avanzamento</h3>
           <div class="status-tag" id="status-tag">in attesa</div>
+          <button class="btn-stop" id="btn-stop" hidden>Ferma</button>
         </div>
+        <ol class="steps" id="steps"></ol>
         <div class="console-body" id="console">
-          <div class="console-empty">Il log della generazione apparirà qui.</div>
+          <div class="console-empty">Qui vedrai cosa fa Claude, passo per passo.</div>
         </div>
         <div class="console-footer">
           <div class="result-box" id="result-box">

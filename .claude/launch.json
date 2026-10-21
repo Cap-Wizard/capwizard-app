@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": ".venv/bin/capwizard-server",
+      "runtimeArgs": [],
+      "port": 8765
+    },
+    {
+      "name": "renderer",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8766", "-d", "desktop/renderer"],
+      "port": 8766
+    }
+  ]
+}

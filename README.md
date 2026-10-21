@@ -3,6 +3,15 @@
 # CapWizard
 
 Generatore automatico di progetti CapCut per video social brevi.
+
+> **Montaggio con Claude Code.** Il bottone «Genera» dell'app non usa più il motore
+> Python: avvia il Claude Code del Mac (`claude -p`, con il login dell'utente) con la
+> skill `reel-capcut-mac` e il profilo del cliente scelto. Claude analizza le clip,
+> decide i tagli, scrive il progetto CapCut e lo verifica; l'app mostra i suoi messaggi
+> e l'avanzamento a passi. Un **profilo cliente** è una skill `reel-<cliente>` (es.
+> `reel-andrea-leidi`) che nomina il suo `TEMPLATE …`, oppure una skill con
+> `metadata: capwizard-template: …`: lo stesso file vale nell'app e da solo in Claude Code.
+> Vedi [agent.py](src/capwizard_app/agent.py). Il motore descritto sotto resta per la CLI.
 Da una cartella di video genera un draft già pronto. **Il montaggio lo decide Claude**:
 Whisper trascrive, poi l'AI sceglie ogni cosa e spiega perché.
 

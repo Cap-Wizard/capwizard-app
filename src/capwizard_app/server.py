@@ -8,6 +8,8 @@ Design
   and finishes with a status frame.
 * File selection happens in the Electron layer via native dialogs; the UI sends
   us plain filesystem paths.
+* A reel is edited by Claude Code itself (see agent.py); the job also carries
+  the step it has reached, which the app shows as progress.
 
 Run standalone for development:
     capwizard-server            # binds 127.0.0.1:8765
@@ -31,8 +33,9 @@ from pydantic import BaseModel
 
 from capwizard import registry
 from capwizard.draft import CAPCUT_PROJECTS_DIR
-from capwizard.pipeline import read_script, run_pipeline
 from capwizard.template import template_kit
+
+from capwizard_app import agent
 
 
 # ---------------------------------------------------------------------------
@@ -48,11 +51,17 @@ class Job:
     report_path: str | None = None    # AI decision report of the single project
     results: list[dict] = field(default_factory=list)  # batch results
     error: str | None = None
+    step: int = 0                     # progress step reached (agent.STEPS, from 1)
+    proc: object = None               # the running Claude Code process
+    stopped: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def log(self, line: str) -> None:
         with self._lock:
             self.logs.append(line)
+
+    def set_step(self, step: int) -> None:
+        self.step = max(self.step, step)
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -61,6 +70,7 @@ class Job:
                 "logs": list(self.logs),
                 "result_path": self.result_path, "report_path": self.report_path,
                 "results": list(self.results), "error": self.error,
+                "step": self.step,
             }
 
 
@@ -91,6 +101,8 @@ class GenerateRequest(BaseModel):
     input_path: str
     name: str
     template: str | None = None
+    client: str | None = None         # id of the client's profile skill
+    notes: str | None = None          # free instructions for Claude
     script_path: str | None = None
     model: str = "large-v3"
     language: str = "it"
@@ -103,7 +115,7 @@ class GenerateRequest(BaseModel):
     aggressive_fillers: bool = False
     intro_title: str | None = None
     clear_template_texts: bool = False
-    ai_model: str = "sonnet"
+    ai_model: str = "opus"
     use_ai_review: bool = True
     ai_target_duration: float | None = None
     subtitle_max_words: int = 4
@@ -242,50 +254,15 @@ def template_kit_summary(name: str, projects_dir: str | None = None) -> dict:
             "found": sum(c["ok"] for c in checks), "total": len(checks)}
 
 
-def _do_generate(req: GenerateRequest, log) -> tuple[str, str]:
-    """Run the pipeline for one project and record it.
-    Returns (draft path, AI decision report path)."""
-    script_text = read_script(Path(req.script_path)) if req.script_path else None
-    res = run_pipeline(
-        input_path=Path(req.input_path),
-        name=req.name,
-        template=req.template,
-        script=script_text,
-        model=req.model,
-        language=req.language,
-        pacing=req.pacing,
-        stabilize_clips=req.stabilize_clips,
-        redistribute_sfx_enabled=req.redistribute_sfx_enabled,
-        add_emphasis=req.add_emphasis,
-        emphasis_count=req.emphasis_count,
-        drop_fillers=req.drop_fillers,
-        aggressive_fillers=req.aggressive_fillers,
-        intro_title=req.intro_title,
-        clear_template_texts=req.clear_template_texts,
-        ai_model=req.ai_model,
-        use_ai_review=req.use_ai_review,
-        ai_target_duration=req.ai_target_duration,
-        subtitle_max_words=req.subtitle_max_words,
-        subtitle_max_duration=req.subtitle_max_duration,
-        subtitle_like_template=req.subtitle_like_template,
-        ai_zoom=req.ai_zoom,
-        sentence_transitions=req.sentence_transitions,
-        fmt=req.fmt,
-        projects_dir=Path(req.projects_dir) if req.projects_dir else None,
-        log=log,
-    )
-    try:
-        registry.add_project(name=req.name, result_path=str(res.draft_path),
-                             settings=req.model_dump(), report_path=str(res.report_path))
-    except Exception as reg_err:  # noqa: BLE001 — registry is best-effort
-        log(f"⚠ impossibile salvare nel registro progetti: {reg_err}")
-    return str(res.draft_path), str(res.report_path)
+def _do_generate(job: Job, req: GenerateRequest) -> tuple[str, str]:
+    """Edit one reel with Claude Code. Returns (CapCut project path, report path)."""
+    return agent.run_agent(job, req)
 
 
 def _run_job(job: Job, req: GenerateRequest) -> None:
     job.status = "running"
     try:
-        job.result_path, job.report_path = _do_generate(req, job.log)
+        job.result_path, job.report_path = _do_generate(job, req)
         job.status = "done"
     except Exception as e:  # noqa: BLE001 — surface everything to the UI
         job.error = str(e)
@@ -322,9 +299,6 @@ def _run_batch(job: Job, req: BatchRequest) -> None:
             return
 
         job.log(f"▶ Modalità blocco: {len(subs)} progetti da generare")
-        # fail fast: without Claude every project would fail the same way
-        from capwizard.ai import require_ai
-        require_ai(req.ai_model, job.log)
         base = req.model_dump()
         base.pop("parent_folder", None)
         base.pop("name_prefix", None)
@@ -333,9 +307,12 @@ def _run_batch(job: Job, req: BatchRequest) -> None:
             name = (f"{req.name_prefix} {sub.name}".strip()
                     if req.name_prefix else sub.name)
             job.log(f"\n▶▶ PROGETTO [{i}/{len(subs)}] {name}  ←  {sub.name}")
+            if job.stopped:
+                break
+            job.step = 0
             try:
                 one = GenerateRequest(**{**base, "input_path": str(sub), "name": name})
-                out, report = _do_generate(one, job.log)
+                out, report = _do_generate(job, one)
                 job.results.append({"name": name, "path": out, "report": report, "ok": True})
             except Exception as e:  # one folder failing must not abort the batch
                 job.log(f"ERRORE su «{name}»: {e}")
@@ -356,6 +333,22 @@ def generate(req: GenerateRequest) -> dict:
     t = threading.Thread(target=_run_job, args=(job, req), daemon=True)
     t.start()
     return {"job_id": job.id}
+
+
+@app.get("/api/clients")
+def clients() -> dict:
+    """Client profiles (skills with one client's rules) and the progress steps."""
+    return {"clients": agent.list_clients(), "steps": agent.STEPS,
+            "editor_skill": bool(agent.editor_skill())}
+
+
+@app.post("/api/jobs/{job_id}/stop")
+def job_stop(job_id: str) -> dict:
+    job = manager.get(job_id)
+    if job:
+        job.stopped = True
+        agent.stop(job)
+    return {"ok": bool(job)}
 
 
 @app.get("/api/subfolders")
@@ -418,8 +411,12 @@ async def job_logs(websocket: WebSocket, job_id: str) -> None:
         return
 
     sent = 0
+    step = -1
     try:
         while True:
+            if job.step != step:
+                step = job.step
+                await websocket.send_json({"type": "step", "step": step})
             # flush any new log lines
             snapshot_logs = job.logs  # atomic read of the list reference
             while sent < len(snapshot_logs):
@@ -431,7 +428,7 @@ async def job_logs(websocket: WebSocket, job_id: str) -> None:
                     "result_path": job.result_path,
                     "report_path": job.report_path,
                     "results": job.results,
-                    "error": job.error,
+                    "error": job.error, "step": job.step,
                 })
                 break
             await asyncio.sleep(0.15)

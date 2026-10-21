@@ -14,12 +14,12 @@ const PACING_HINTS = {
 };
 
 const DEFAULTS = {
-  input_path: "", name: "", script_path: "", intro_title: "",
+  input_path: "", name: "", script_path: "", intro_title: "", client: "", notes: "",
   model: "large-v3", language: "it", pacing: "fast", fmt: "vertical",
   subtitle_max_words: 4, subtitle_max_duration: 1.4, subtitle_like_template: true,
   drop_fillers: true, aggressive_fillers: false,
   clear_template_texts: true, redistribute_sfx_enabled: true, stabilize_clips: false,
-  ai_model: "sonnet", use_ai_review: true, ai_zoom: false, sentence_transitions: true,
+  ai_model: "opus", use_ai_review: true, ai_zoom: false, sentence_transitions: true,
   ai_target_duration: null,
 };
 
@@ -30,6 +30,9 @@ const state = {
   pacing: "fast",
   format: "vertical",
   defaultTemplate: "",
+  clients: [],             // client profiles (skills with one client's rules)
+  steps: [],               // progress steps of an editing run
+  jobId: null,
   wizardStep: 1,
   batch: false,
   batchCount: 0,
@@ -86,6 +89,7 @@ async function bootBackend() {
         setPill("pill-backend", "ok", "backend");
         await loadSystem();
         await loadTemplates();
+        await loadClients();
         await loadProjects();
         refreshGenerateEnabled();
         checkClaude();                      // real request, takes a few seconds
@@ -216,6 +220,55 @@ async function loadKit() {
   } catch (e) { panel.hidden = true; console.error("kit", e); }
 }
 
+// Client profiles: picking one fills in its template and shows its rules.
+async function loadClients() {
+  try {
+    const data = await (await fetch(`${BACKEND}/api/clients`)).json();
+    state.clients = data.clients || [];
+    state.steps = data.steps || [];
+    const sel = $("client");
+    sel.innerHTML = "";
+    const none = document.createElement("option");
+    none.value = ""; none.textContent = "Nessun cliente — scelgo io il template";
+    sel.appendChild(none);
+    for (const c of state.clients) {
+      const o = document.createElement("option");
+      o.value = c.id; o.textContent = c.nome;
+      sel.appendChild(o);
+    }
+    $("client-hint").textContent = state.clients.length ? ""
+      : "Nessun profilo cliente trovato: è una skill reel-<cliente> che nomina il suo TEMPLATE.";
+    renderSteps(0);
+  } catch (e) { console.error("clients", e); }
+  syncClient(false);
+}
+
+function syncClient(applyTemplate = true) {
+  const c = state.clients.find((x) => x.id === $("client").value);
+  $("client-card").hidden = !c;
+  if (!c) return;
+  $("client-dot").style.background = c.colore;
+  $("client-desc").textContent = c.descrizione || c.nome;
+  if (applyTemplate && c.template_ok) {
+    $("template").value = c.template;
+    loadKit();
+  }
+  $("client-hint").textContent = c.template_ok ? ""
+    : `Il template «${c.template}» del profilo non c'è tra i progetti CapCut.`;
+}
+
+function renderSteps(current, finished = false) {
+  $("steps").innerHTML = "";
+  state.steps.forEach((label, i) => {
+    const li = document.createElement("li");
+    const n = i + 1;
+    if (finished || n < current) li.className = "done";
+    else if (n === current) li.className = "now";
+    li.textContent = label;
+    $("steps").appendChild(li);
+  });
+}
+
 async function loadProjects() {
   try {
     const data = await (await fetch(`${BACKEND}/api/projects`)).json();
@@ -302,6 +355,9 @@ function applySettings(s) {
   $("input-path").value = s.input_path || "";
   $("name").value = s.name || "";
   $("template").value = s.template || "";
+  $("client").value = s.client || "";
+  syncClient(false);
+  $("notes").value = s.notes || "";
   loadKit();
   $("script-path").value = s.script_path || "";
   $("intro-title").value = s.intro_title || "";
@@ -386,6 +442,17 @@ function wireStaticControls() {
     $("sub-dur-val").textContent = `${parseFloat(e.target.value).toFixed(1)} s`;
   };
 
+  $("client").onchange = () => syncClient();
+  $("btn-client-open").onclick = () => {
+    const c = state.clients.find((x) => x.id === $("client").value);
+    if (c) window.api.openPath(c.path);
+  };
+  $("btn-stop").onclick = async () => {
+    if (!state.jobId) return;
+    $("btn-stop").disabled = true;
+    setStatus("mi fermo…");
+    try { await fetch(`${BACKEND}/api/jobs/${state.jobId}/stop`, { method: "POST" }); } catch (_) {}
+  };
   $("btn-generate").onclick = onGenerate;
   $("btn-open").onclick = () => {
     const p = $("result-path").dataset.path;
@@ -438,12 +505,14 @@ function isOn(id) { return $(id).classList.contains("on"); }
 function refreshGenerateEnabled() {
   const hasSource = !!$("input-path").value.trim();
   const hasName = state.batch ? true : !!$("name").value.trim();  // prefix optional in batch
+  const hasTemplate = !!$("template").value;
   const batchOk = !state.batch || state.batchCount > 0;
   const ready = state.backendReady && state.aiReady && !state.running
-    && hasSource && hasName && batchOk;
+    && hasSource && hasName && hasTemplate && batchOk;
   const btn = $("btn-generate");
   btn.disabled = !ready;
-  btn.title = state.aiReady ? "" : "Serve Claude collegato: l'AI fa il montaggio.";
+  btn.title = !state.aiReady ? "Serve Claude collegato: l'AI fa il montaggio."
+    : hasTemplate ? "" : "Scegli il cliente o il template.";
 }
 
 function updateBatchUI() {
@@ -504,6 +573,8 @@ function buildRequest() {
     input_path: $("input-path").value.trim(),
     name: $("name").value.trim(),
     template: $("template").value || null,
+    client: $("client").value || null,
+    notes: $("notes").value.trim() || null,
     script_path: $("script-path").value.trim() || null,
     intro_title: $("intro-title").value.trim() || null,
     model: $("model").value,
@@ -555,6 +626,9 @@ async function onGenerate() {
       body: JSON.stringify(body),
     });
     jobId = (await r.json()).job_id;
+    state.jobId = jobId;
+    $("btn-stop").hidden = false;
+    $("btn-stop").disabled = false;
   } catch (e) {
     appendLine(`ERRORE: il motore dell'app non risponde (${e}). Chiudi tutte le finestre `
       + "di CapWizard e riavvia l'app: di solito ne erano aperte due.", "err");
@@ -577,6 +651,7 @@ async function onGenerate() {
     if (ended) return;
     ended = true;
     clearInterval(poll);
+    renderSteps(msg.step || 0, msg.status === "done");
     if (msg.status === "done") {
       setStatus("completato");
       if (msg.results && msg.results.length) showBatchResult(msg.results);
@@ -594,6 +669,7 @@ async function onGenerate() {
       const job = await (await fetch(`${BACKEND}/api/jobs/${jobId}`)).json();
       if (job.error && !job.status) return end({ status: "error", error: job.error });
       showLines(job.logs || [], 0);
+      if (job.status === "running") renderSteps(job.step || 0);
       if (job.status === "done" || job.status === "error") end(job);
     } catch (_) { /* backend busy: try again at the next tick */ }
   };
@@ -604,6 +680,8 @@ async function onGenerate() {
     const msg = JSON.parse(ev.data);
     if (msg.type === "log") {
       showLines([msg.line], msg.i ?? shown);
+    } else if (msg.type === "step") {
+      renderSteps(msg.step);
     } else if (msg.type === "status") {
       end(msg);
     } else if (msg.type === "error") {
@@ -616,6 +694,8 @@ async function onGenerate() {
 
 function finishRun() {
   state.running = false;
+  state.jobId = null;
+  $("btn-stop").hidden = true;
   updateGenerateLabel();
   refreshGenerateEnabled();
 }
@@ -629,6 +709,7 @@ function classify(line) {
   if (t.startsWith("perché:") || t.startsWith("«")) return "why";
   if (t.startsWith("✂")) return "cut";
   if (t.startsWith("✓")) return "ok";
+  if (t.startsWith("⚙") || t.startsWith("⏱")) return "tool";
   if (t.includes("⚠") || t.startsWith("☐")) return "warn";
   if (/^(👁|🎞|🔍|🧩|↪|🔊|🔇|♪|✚|✎|Titolo iniziale|Argomento|Come l|Soglia|Regia|Formato|Tono|Struttura|Indicazioni|Consegne|Ritmo dal copione|Musica chiesta|Didascalia|🎬|Sottotitoli:|📄)/u.test(t)) return "ai";
   return "";
@@ -640,7 +721,8 @@ function classify(line) {
 
 function clearConsole() { $("console").innerHTML = ""; }
 function resetConsole() {
-  $("console").innerHTML = '<div class="console-empty">Il log della generazione apparirà qui.</div>';
+  $("console").innerHTML = '<div class="console-empty">Qui vedrai cosa fa Claude, passo per passo.</div>';
+  renderSteps(0);
   $("result-box").classList.remove("show");
   setStatus("in attesa");
 }
@@ -700,7 +782,7 @@ function showBatchResult(results) {
 function wireWizard() {
   $("btn-config-ai").onclick = openWizard;
   $("btn-ai-wizard-inline").onclick = openWizard;
-  $("template").onchange = loadKit;
+  $("template").onchange = () => { loadKit(); refreshGenerateEnabled(); };
   $("btn-kit-guide").onclick = () => { $("kit-guide").hidden = false; };
   $("kit-guide-close").onclick = $("kit-guide-done").onclick = () => { $("kit-guide").hidden = true; };
   $("wizard-close").onclick = closeWizard;
