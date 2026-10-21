@@ -22,9 +22,8 @@ import threading
 import time
 from pathlib import Path
 
-from capwizard import registry
-from capwizard.ai import _clean_env, _find_claude_cli
-from capwizard.draft import CAPCUT_PROJECTS_DIR
+from capwizard_app import registry
+from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, clean_env, find_claude_cli
 
 SKILLS_DIR = Path.home() / ".claude/skills"
 EDITOR_SKILL = "reel-capcut-mac"
@@ -159,6 +158,7 @@ Dati del lavoro:
 - Titolo iniziale: {title}
 {extra}
 Cartella di lavoro (è la tua `<lavoro>`): `{work}`
+Report, registro dei progetti e messaggio a Nicola li fa l'app dal risultato: non usare `registra.py`.
 
 Alla fine scrivi il file `{result}` con questo JSON:
 {{"progetto": "<percorso completo della cartella del progetto in com.lveditor.draft>", "nome": "{name}",
@@ -205,11 +205,11 @@ def _slug(s: str) -> str:
 def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcript: list[str]) -> str | None:
     """Run Claude Code on `prompt`, streaming its messages into the job's log.
     Returns why it stopped badly, if it did."""
-    cmd = [_find_claude_cli(), "-p", "--output-format", "stream-json", "--verbose",
+    cmd = [find_claude_cli(), "-p", "--output-format", "stream-json", "--verbose",
            "--model", model, "--permission-mode", "acceptEdits",
            "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill",
            "--add-dir", *sorted(dirs)]
-    proc = subprocess.Popen(cmd, cwd=cwd, env=_clean_env(), text=True, bufsize=1,
+    proc = subprocess.Popen(cmd, cwd=cwd, env=clean_env(), text=True, bufsize=1,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     job.proc = proc
     proc.stdin.write(prompt)
@@ -253,7 +253,7 @@ def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcr
 
 def check_request(req) -> str | None:
     """Why this reel can't start, or None."""
-    if not _find_claude_cli():
+    if not find_claude_cli():
         return "Non trovo Claude Code sul Mac: installalo e fai il login una volta (`claude` → `/login`)."
     if not editor_skill():
         return f"Manca la skill {EDITOR_SKILL} in {SKILLS_DIR}."
@@ -364,22 +364,14 @@ Modifiche già fatte in passato su questo video:
 MODIFICHE RICHIESTE ORA (da Nicola o dal cliente):
 {text}
 {images}
-Procedura:
-1. Segui la skill **{skill}** ({skill_md}), in particolare «Dopo che Nicola l'ha aperto»: il progetto non deve avere
-   `.locked`; confronta il draft attuale con quello che avevi scritto per trovare i ritocchi a mano di Nicola e conservali.
-2. Applica SOLO le modifiche richieste: non toccare tagli, testi, suoni o musica se non è chiesto. Se togli o sposti un
-   taglio, risincronizza sottotitoli e suoni. Scrivi la stessa modifica in tutte le copie della timeline
-   (`draft_info.json`, `.bak`, `template-2.tmp` e `Timelines/<id>/`), con lo stesso id.
-3. Verifica il progetto con `verifica.py`.
-4. {lesson}
-5. Alla fine scrivi il file `{result}` con: {{"riassunto": "<cosa hai cambiato, in italiano, 2-5 righe>",
+Procedura: segui la skill **{skill}** ({skill_md}), sezione «8. Dopo che Nicola l'ha aperto: correzioni».
+La copia di sicurezza l'ha già fatta l'app e lo storico lo aggiorna lei: salta il passo 4 e non usare `registra.py`.
+{lesson}
+Alla fine scrivi il file `{result}` con: {{"riassunto": "<cosa hai cambiato, in italiano, 2-5 righe>",
    "lezione": "<la lezione per i prossimi video, una riga, o null>"}}.
 Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
 
-LESSON = """Salva la lezione nel profilo del cliente `{profile}`: nella sezione «## Lezioni» (creala in fondo se manca)
-   aggiungi «- {day}: <cosa voleva e come l'hai risolto>». Se è una preferenza che vale anche per i prossimi video
-   (es. «meno suoni», «sottotitoli più in alto»), scrivila anche come regola nella sezione giusta del profilo e correggi
-   le regole vecchie che contraddice. Non toccare l'intestazione tra i `---`."""
+LESSON = "La lezione va nel profilo del cliente `{profile}` (passo 8 della skill), con la data {day}."
 
 
 def _mods_file(project_id: str) -> Path:
@@ -441,7 +433,7 @@ def writable_profile(client: dict) -> Path:
 def run_modify(job, project: dict, text: str, images: list[str], model: str = "opus") -> dict:
     """Apply a change request to a project in place, then save the lesson in the client's profile."""
     folder = Path(project.get("result_path") or "")
-    if not _find_claude_cli():
+    if not find_claude_cli():
         raise RuntimeError("Non trovo Claude Code sul Mac.")
     if not folder.is_dir():
         raise RuntimeError("Il progetto non c'è più tra i progetti CapCut.")

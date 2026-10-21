@@ -1,4 +1,4 @@
-"""FastAPI backend — wraps the pipeline so a desktop UI (Electron) can drive it.
+"""FastAPI backend — lets the desktop UI (Electron) start and follow Claude Code runs.
 
 Design
 ------
@@ -35,9 +35,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from capwizard import registry
-from capwizard.draft import CAPCUT_PROJECTS_DIR
-from capwizard.template import template_kit
+from capwizard_app import registry
+from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
 from capwizard_app import agent
 
@@ -175,7 +174,6 @@ def _whisper_cached_models() -> list[str]:
 
 @app.get("/api/system")
 def system() -> dict:
-    from capwizard.ai import _find_claude_cli
     return {
         "os": platform.system().lower(),          # darwin | windows | linux
         "os_version": platform.version(),
@@ -183,7 +181,7 @@ def system() -> dict:
         "ffprobe": bool(shutil.which("ffprobe")),
         "whisper_models_cached": _whisper_cached_models(),
         "ai": {
-            "claude_cli": _find_claude_cli(),
+            "claude_cli": find_claude_cli(),
             "anthropic_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
         },
         "projects_dir": str(CAPCUT_PROJECTS_DIR),
@@ -276,7 +274,6 @@ def _run_job(job: Job, req: GenerateRequest) -> None:
 
 def _project_subfolders(parent: Path) -> list[Path]:
     """Immediate subfolders of `parent` that contain at least one video."""
-    from capwizard.pipeline import _is_video
     if not parent.is_dir():
         return []
     out: list[Path] = []
@@ -284,7 +281,7 @@ def _project_subfolders(parent: Path) -> list[Path]:
         if not d.is_dir() or d.name.startswith("."):
             continue
         try:
-            if any(_is_video(p) for p in d.iterdir()):
+            if any(is_video(p) for p in d.iterdir()):
                 out.append(d)
         except OSError:
             continue
@@ -512,13 +509,11 @@ def project_delete(project_id: str) -> dict:
 
 @app.get("/api/ai/status")
 def ai_status_endpoint() -> dict:
-    from capwizard.ai import ai_status
     return ai_status()
 
 
 @app.post("/api/ai/test")
 def ai_test_endpoint() -> dict:
-    from capwizard.ai import ai_ping
     return ai_ping()
 
 
