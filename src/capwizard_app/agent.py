@@ -125,6 +125,12 @@ def get_client(client_id: str | None) -> dict | None:
     return next((c for c in list_clients() if c["id"] == client_id), None)
 
 
+def client_for(settings: dict) -> dict | None:
+    """The client of a project: the one chosen when it was made, else the one whose template it used."""
+    return get_client(settings.get("client")) or next(
+        (c for c in list_clients() if settings.get("template") and c["template"] == settings.get("template")), None)
+
+
 def client_rules(client_id: str) -> str:
     """The profile's text, without its frontmatter: what the app shows as the client's rules."""
     c = get_client(client_id)
@@ -442,7 +448,7 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
     if (folder / ".locked").exists():
         raise RuntimeError("Il progetto è aperto in CapCut: torna alla home dei progetti di CapCut e riprova.")
     settings = project.get("settings") or {}
-    client = get_client(settings.get("client"))
+    client = client_for(settings)
     profile = writable_profile(client) if client else None
     skill_md = editor_skill()
 

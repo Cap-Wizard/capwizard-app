@@ -440,7 +440,8 @@ def projects_list() -> dict:
     out = []
     for p in registry.list_projects():
         s = p.get("settings") or {}
-        c = clients.get(s.get("client") or "")
+        c = clients.get(s.get("client") or "") or next(
+            (x for x in clients.values() if s.get("template") and x["template"] == s.get("template")), None)
         cover = Path(p.get("result_path") or "") / "draft_cover.jpg"
         out.append({**p, "cliente": c["nome"] if c else (s.get("template") or "Senza cliente"),
                     "colore": c["colore"] if c else "#6b7180", "riassunto": _summary(p.get("report_path")),
