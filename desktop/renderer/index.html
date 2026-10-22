@@ -65,6 +65,8 @@
       <div class="lscroll">
         <div class="step" id="s1">
           <h2><span class="num">1</span>Per quale cliente?<small id="s1-sel"></small></h2>
+          <div class="tabs" id="ag-tabs" hidden></div>
+          <input type="text" class="search" id="csearch" placeholder="Cerca cliente…" hidden />
           <div class="chips" id="chips"></div>
           <div class="hint" id="client-hint"></div>
           <div id="template-box" hidden>
@@ -89,6 +91,14 @@
           </div>
           <input type="hidden" id="input-path" />
           <div class="thumbs" id="thumbs"></div>
+          <label>B-roll in un'altra cartella <span class="opt">facoltativo</span><small id="br-info" class="opt" style="float:right"></small></label>
+          <div class="drop drop2" id="drop-broll">
+            <b>🎞️ Trascina qui la cartella dei b-roll</b>
+            <span>se il cliente li ha dati a parte</span>
+            <div class="path" id="broll-label"></div>
+          </div>
+          <input type="hidden" id="broll-path" />
+          <div class="thumbs" id="thumbs-broll"></div>
           <div class="switch" id="row-batch">
             <span>Un progetto per ogni sottocartella</span><div class="tgl" id="sw-batch"></div>
           </div>
@@ -112,6 +122,7 @@
           <h2><span class="num">4</span>Extra <small>facoltativo</small></h2>
           <div class="switch" data-sw="sw-transitions"><span>🎬 A fine frase: zoom, transizione e woosh</span><div class="tgl on" id="sw-transitions"></div></div>
           <div class="switch" data-sw="sw-zoom"><span>🔍 Zoom leggeri sulle frasi chiave</span><div class="tgl" id="sw-zoom"></div></div>
+          <div class="switch" data-sw="sw-cine"><span>🎬 Video cine <span class="opt">colori clip per clip, b-roll sui tagli</span></span><div class="tgl" id="sw-cine"></div></div>
           <label>Note per Claude</label>
           <textarea id="notes" placeholder="es. tieni la seconda versione del gancio, niente musica, metti il prezzo a schermo"></textarea>
           <details class="adv">
@@ -141,6 +152,7 @@
     <section class="right">
       <div class="card">
         <h3><i></i><span id="rules-title">Regole del cliente</span>
+          <button class="btn-link mini" id="btn-client-edit" hidden>✏️ Modifica cliente</button>
           <button class="btn-link mini" id="btn-client-open" hidden>Apri il file</button></h3>
         <div class="rules" id="rules"><div class="empty">Scegli un cliente per vedere le sue regole</div></div>
       </div>
@@ -172,6 +184,44 @@
     <section class="pdet" id="pdet">
       <div class="empty" style="margin:auto">Scegli un progetto a sinistra per vedere com'è stato fatto</div>
     </section>
+  </div>
+
+  <!-- ==================== CLIENTE: NUOVO / MODIFICA (vault Obsidian) ==================== -->
+  <div id="client-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="cm-title">Nuovo cliente</h2>
+        <button class="modal-close" id="cm-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="cm-new">
+          <label>Agenzia</label>
+          <select id="cm-ag"></select>
+          <label>Nome del cliente</label>
+          <input type="text" id="cm-name" placeholder="es. PIZZERIA DA MARIO" />
+        </div>
+        <label>Colore</label>
+        <div class="row2 color-row">
+          <input type="color" id="cm-pick" value="#7c6cff" />
+          <input type="text" id="cm-col" placeholder="#RRGGBB" />
+        </div>
+        <div class="hint" id="cm-now"></div>
+        <label>Font <span class="opt">solo se il cliente ne vuole uno: vuoto = quello dell'agenzia</span></label>
+        <input type="text" id="cm-font" placeholder="es. Montserrat Bold" />
+        <div id="cm-edit-only">
+          <label>Base tecnica CapCut</label>
+          <select id="cm-base"></select>
+        </div>
+        <label id="cm-reg-label">Nuova regola <span class="opt">facoltativo</span></label>
+        <textarea id="cm-reg" placeholder="es. da ora vuole i sottotitoli più grandi"></textarea>
+        <div class="missing" id="cm-msg" style="text-align:left"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn2" id="cm-cancel">Annulla</button>
+        <div class="spacer"></div>
+        <button class="btn-primary-sm" id="cm-save">SALVA</button>
+      </div>
+    </div>
   </div>
 
   <!-- ==================== COLLEGAMENTO A CLAUDE ==================== -->

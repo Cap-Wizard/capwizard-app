@@ -38,7 +38,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent
+from capwizard_app import agent, vault
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +128,8 @@ class GenerateRequest(BaseModel):
     sentence_transitions: bool = True
     fmt: str = "vertical"
     projects_dir: str | None = None
+    broll_path: str | None = None     # b-roll the client gave in another folder
+    cine: bool = False                # "video cine": per-clip colour, b-roll on the cuts (vault clients)
 
 
 class BatchRequest(GenerateRequest):
@@ -177,7 +179,7 @@ def system() -> dict:
     return {
         "os": platform.system().lower(),          # darwin | windows | linux
         "os_version": platform.version(),
-        "ffmpeg": bool(shutil.which("ffmpeg")),
+        "ffmpeg": bool(vault.ffmpeg()),
         "ffprobe": bool(shutil.which("ffprobe")),
         "whisper_models_cached": _whisper_cached_models(),
         "ai": {
@@ -340,10 +342,46 @@ def generate(req: GenerateRequest) -> dict:
 def clients() -> dict:
     """Client profiles (skills with one client's rules) and the progress steps."""
     return {"clients": agent.list_clients(), "steps": agent.STEPS,
-            "editor_skill": bool(agent.editor_skill())}
+            "editor_skill": bool(agent.editor_skill()),
+            "vault": {"enabled": vault.enabled(), "path": str(vault.VAULT), "agenzie": vault.agenzie()}}
 
 
-@app.get("/api/clients/{client_id}/rules")
+class NewClientRequest(BaseModel):
+    agenzia: str
+    nome: str
+    colore: str
+    font: str = ""
+    note: str = ""
+
+
+class ClientParams(BaseModel):
+    colore: str = ""
+    font: str = ""
+    base: str = ""
+    regola: str = ""
+
+
+@app.post("/api/clients")
+def client_new(req: NewClientRequest) -> dict:
+    """A new client of an agency already in the vault: colour (and font only if the client wants one)."""
+    if not vault.enabled():
+        return {"ok": False, "msg": "Nessun vault Obsidian trovato."}
+    return vault.crea_cliente(req.agenzia, req.nome, req.colore, req.font, req.note)
+
+
+@app.get("/api/clients/{client_id:path}/params")
+def client_params(client_id: str) -> dict:
+    return vault.dati_cliente(client_id) if client_id.startswith(vault.PREFIX) else {"ok": False}
+
+
+@app.put("/api/clients/{client_id:path}/params")
+def client_params_save(client_id: str, req: ClientParams) -> dict:
+    if not client_id.startswith(vault.PREFIX):
+        return {"ok": False, "msg": "Solo i clienti del vault si modificano da qui: per un profilo skill apri il file."}
+    return vault.salva_cliente(client_id, req.colore, req.font, req.base, req.regola)
+
+
+@app.get("/api/clients/{client_id:path}/rules")
 def client_rules(client_id: str) -> dict:
     return {"text": agent.client_rules(client_id)}
 
@@ -358,7 +396,7 @@ def _thumb(src: Path, height: int, at: float | None = None) -> str:
     key = hashlib.sha1(f"{src}|{src.stat().st_mtime}|{height}|{at}".encode()).hexdigest()[:16]
     out = THUMBS / f"{key}.jpg"
     if not out.exists():
-        args = ["ffmpeg", "-v", "error", "-y"] + (["-ss", str(at)] if at is not None else []) + \
+        args = [vault.ffmpeg() or "ffmpeg", "-v", "error", "-y"] + (["-ss", str(at)] if at is not None else []) + \
                ["-i", str(src), "-frames:v", "1", "-vf", f"scale=-2:{height}", str(out)]
         subprocess.run(args, capture_output=True, timeout=30)
     if not out.exists():
@@ -384,9 +422,13 @@ def folder_info(path: str) -> dict:
     clips = sorted(p for p in list(base.iterdir()) + [q for d in base.iterdir() if d.is_dir() and not d.name.startswith(".")
                                                      for q in d.iterdir()]
                    if p.is_file() and p.suffix.lower() in VIDEO_EXT and not p.name.startswith("._"))
-    lengths = [_duration(c) for c in clips]
-    thumbs = [_thumb(c, 160, min(1.0, d / 2)) for c, d in list(zip(clips, lengths))[:8]]
-    return {"ok": True, "n": len(clips), "durata": round(sum(lengths)), "thumbs": [t for t in thumbs if t]}
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(6) as ex:      # all clips in parallel: a big folder must not freeze the page
+        info = list(ex.map(lambda c: vault.probe(str(c)), clips))
+        lengths = [d or 0.0 for d, _ in info]
+        thumbs = list(ex.map(lambda cd: _thumb(cd[0], 160, min(1.0, cd[1] / 2)), list(zip(clips, lengths))[:8]))
+    return {"ok": True, "n": len(clips), "durata": round(sum(lengths)), "thumbs": [t for t in thumbs if t],
+            "lenti": sum(1 for _, f in info if vault.is_slowmo(f))}
 
 
 @app.post("/api/jobs/{job_id}/stop")

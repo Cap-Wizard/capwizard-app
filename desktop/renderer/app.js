@@ -12,7 +12,10 @@ const state = {
   aiReady: false,          // Claude verified with a real request — required to edit
   ffmpeg: false,
   running: false,
-  clients: [],             // client profiles (skills with one client's rules)
+  clients: [],             // client profiles (skills with one client's rules) and clients of the Obsidian vault
+  vault: { enabled: false, agenzie: [] },
+  ag: "Tutti",             // agency filter of the client chips
+  editing: null,           // client being edited in the modal, or null for a new one
   client: null,            // chosen client, or null
   otherTemplate: false,    // "Altro template…": no client, template picked by hand
   steps: [],               // progress steps of an editing run
@@ -167,6 +170,7 @@ async function loadClients() {
     const data = await (await fetch(`${BACKEND}/api/clients`)).json();
     state.clients = data.clients || [];
     state.steps = data.steps || [];
+    state.vault = data.vault || state.vault;
   } catch (e) { console.error("clients", e); }
   renderChips();
   renderSteps(0);
@@ -179,13 +183,38 @@ async function loadClients() {
 function renderChips() {
   const box = $("chips");
   box.innerHTML = "";
-  for (const c of state.clients) {
+  // with many clients: agency tabs + search
+  const ags = [...new Set(state.clients.map((c) => c.agenzia || "Profili"))];
+  const many = state.clients.length > 12;
+  $("ag-tabs").hidden = !many || ags.length < 2;
+  $("csearch").hidden = !many;
+  if (many && ags.length > 1) {
+    $("ag-tabs").innerHTML = "";
+    for (const a of ["Tutti", ...ags]) {
+      const t = document.createElement("button");
+      t.className = "tab" + (a === state.ag ? " on" : "");
+      t.textContent = a;
+      t.onclick = () => { state.ag = a; renderChips(); };
+      $("ag-tabs").appendChild(t);
+    }
+  }
+  const q = $("csearch").value.trim().toLowerCase();
+  const shown = state.clients.filter((c) => (state.ag === "Tutti" || (c.agenzia || "Profili") === state.ag)
+                                            && (!q || c.nome.toLowerCase().includes(q)));
+  for (const c of shown) {
     const chip = document.createElement("button");
     chip.className = "chip" + (state.client && state.client.id === c.id ? " on" : "");
     chip.style.setProperty("--c", c.colore);
     chip.innerHTML = `<i style="background:${c.colore}"></i>${escapeHtml(c.nome)}`;
     chip.onclick = () => chooseClient(c);
     box.appendChild(chip);
+  }
+  if (state.vault.enabled) {
+    const add = document.createElement("button");
+    add.className = "chip add";
+    add.textContent = "＋ Cliente";
+    add.onclick = () => openClientModal(null);
+    box.appendChild(add);
   }
   const other = document.createElement("button");
   other.className = "chip other" + (state.otherTemplate ? " on" : "");
@@ -216,6 +245,7 @@ async function chooseClient(c) {
 
   $("rules-title").textContent = c ? `Regole · ${c.nome}` : "Regole del cliente";
   $("btn-client-open").hidden = !c;
+  $("btn-client-edit").hidden = !(c && c.source === "vault");
   if (!c) {
     $("rules").innerHTML = '<div class="empty">Senza profilo cliente Claude segue solo le regole generali e il template.</div>';
     return;
@@ -253,6 +283,23 @@ async function loadKit() {
 // Step 2: clips
 // ---------------------------------------------------------------------------
 
+let brTok = 0;
+async function setBroll(path) {
+  const tok = ++brTok;
+  $("broll-path").value = path;
+  $("broll-label").innerHTML = path ? `${escapeHtml(path)} <button class="btn-link mini" id="br-clear">✕ togli</button>` : "";
+  $("thumbs-broll").innerHTML = "";
+  $("br-info").textContent = path ? "carico…" : "";
+  if (!path) return;
+  $("br-clear").onclick = (e) => { e.stopPropagation(); setBroll(""); };
+  try {
+    const i = await (await fetch(`${BACKEND}/api/folder-info?path=${encodeURIComponent(path)}`)).json();
+    if (tok !== brTok) return;
+    $("br-info").textContent = i.ok && i.n ? `${i.n} b-roll${i.lenti ? " · 🐢 " + i.lenti + " slow-mo" : ""}` : "nessun video";
+    for (const t of i.thumbs || []) { const img = document.createElement("img"); img.src = t; $("thumbs-broll").appendChild(img); }
+  } catch (_) { $("br-info").textContent = ""; }
+}
+
 async function setFolder(path) {
   $("input-path").value = path;
   $("input-path-label").textContent = path;
@@ -265,7 +312,7 @@ async function setFolder(path) {
     const i = await (await fetch(`${BACKEND}/api/folder-info?path=${encodeURIComponent(path)}`)).json();
     if ($("input-path").value !== path) return;
     $("s2-info").textContent = i.ok && i.n
-      ? `${i.n} clip · ${Math.floor(i.durata / 60)}:${String(i.durata % 60).padStart(2, "0")} min` : "nessuna clip trovata";
+      ? `${i.n} clip · ${Math.floor(i.durata / 60)}:${String(i.durata % 60).padStart(2, "0")} min${i.lenti ? " · 🐢 " + i.lenti + " slow-mo" : ""}` : "nessuna clip trovata";
     for (const t of i.thumbs || []) {
       const img = document.createElement("img");
       img.src = t;
@@ -350,15 +397,33 @@ function wireEditor() {
     const p = window.api && await window.api.selectFolder();
     if (p) setFolder(p);
   };
-  // dropping a folder (or a clip: its folder) anywhere on the window
+  $("drop-broll").onclick = async () => {
+    const p = window.api && await window.api.selectFolder();
+    if (p) setBroll(p);
+  };
+  $("csearch").oninput = renderChips;
+  $("btn-client-edit").onclick = () => { if (state.client) openClientModal(state.client); };
+  wireClientModal();
+  // dropping a folder (or a clip: its folder) anywhere on the window. WebKit fires dragleave with no
+  // relatedTarget all the time (the overlay flickered and could stay stuck): keep it while dragover keeps coming.
+  let dragT = null, dropZone = null;
+  const endDrag = () => {
+    clearTimeout(dragT);
+    document.body.classList.remove("dragging");
+    document.querySelectorAll(".drop").forEach((d) => d.classList.remove("hover"));
+  };
   document.addEventListener("dragover", (e) => {
     e.preventDefault();
+    const z = e.target.closest && e.target.closest(".drop");
+    dropZone = z ? z.id : null;
+    document.querySelectorAll(".drop").forEach((d) => d.classList.toggle("hover", d === z));
     if (!$("view-editor").hidden || state.currentProject) document.body.classList.add("dragging");
+    clearTimeout(dragT);
+    dragT = setTimeout(endDrag, 250);
   });
-  document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
   document.addEventListener("drop", (e) => {
     e.preventDefault();
-    document.body.classList.remove("dragging");
+    endDrag();
     if (!$("view-home").hidden) {          // screenshots for a change request
       for (const f of e.dataTransfer.files) {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
@@ -370,7 +435,8 @@ function wireEditor() {
     const f = e.dataTransfer.files[0];
     const p = f && window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
     if (!p) return;
-    setFolder(/\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(p) ? p.replace(/\/[^/]+$/, "") : p);
+    const dir = /\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(p) ? p.replace(/\/[^/]+$/, "") : p;
+    if (dropZone === "drop-broll") setBroll(dir); else setFolder(dir);
   });
 
   $("template").onchange = () => { loadKit(); check(); };
@@ -424,6 +490,8 @@ function buildRequest() {
     ai_zoom: isOn("sw-zoom"),
     sentence_transitions: isOn("sw-transitions"),
     aggressive_fillers: isOn("sw-aggr"),
+    broll_path: $("broll-path").value.trim() || null,
+    cine: isOn("sw-cine"),
   };
 }
 
@@ -447,7 +515,7 @@ async function onGenerate() {
     delete body.name;
   }
   addLog(`Lavoro: ${state.batch ? "un video per sottocartella" : body.name} · `
-    + `${state.client ? state.client.nome : body.template}`, "step");
+    + `${state.client ? state.client.nome : body.template}` + (body.cine ? " · 🎬 cine" : "") + (body.broll_path ? " · con b-roll" : ""), "step");
 
   let jobId;
   try {
@@ -1076,6 +1144,71 @@ function openExternal(url) {
 // ---------------------------------------------------------------------------
 // utils
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Client of the Obsidian vault: new (agency + name + colour, font only if wanted) or edit (colour/font/base/rule)
+// ---------------------------------------------------------------------------
+
+function wireClientModal() {
+  $("cm-close").onclick = $("cm-cancel").onclick = () => { $("client-modal").hidden = true; };
+  $("cm-pick").oninput = () => { $("cm-col").value = $("cm-pick").value.toUpperCase(); };
+  $("cm-col").oninput = () => {
+    const v = $("cm-col").value.trim().replace(/^#?/, "#");
+    if (/^#[0-9a-f]{6}$/i.test(v)) $("cm-pick").value = v.toLowerCase();
+  };
+  $("cm-save").onclick = saveClientModal;
+}
+
+async function openClientModal(c) {
+  state.editing = c;
+  $("cm-title").textContent = c ? `✏️ ${c.nome}` : "Nuovo cliente";
+  $("cm-new").hidden = !!c;
+  $("cm-edit-only").hidden = !c;
+  $("cm-reg-label").hidden = $("cm-reg").hidden = !c;
+  $("cm-msg").textContent = "";
+  ["cm-name", "cm-col", "cm-font", "cm-reg"].forEach((i) => { $(i).value = ""; });
+  $("cm-now").textContent = "";
+  if (!c) {
+    $("cm-ag").innerHTML = (state.vault.agenzie || []).map((a) => `<option>${escapeHtml(a)}</option>`).join("");
+    if (state.ag !== "Tutti" && (state.vault.agenzie || []).includes(state.ag)) $("cm-ag").value = state.ag;
+  } else {
+    const d = await (await fetch(`${BACKEND}/api/clients/${encodeURIComponent(c.id)}/params`)).json();
+    $("cm-col").value = d.colore || "";
+    if (d.colore) $("cm-pick").value = d.colore.toLowerCase();
+    $("cm-font").value = d.font || "";
+    $("cm-now").textContent = `Ora: ${d.colori || "—"}`;
+    const tpl = await (await fetch(`${BACKEND}/api/templates`)).json();
+    $("cm-base").innerHTML = ["", ...tpl.templates.map((t) => t.name)]
+      .map((n) => `<option ${n === d.base ? "selected" : ""}>${escapeHtml(n)}</option>`).join("");
+  }
+  $("client-modal").hidden = false;
+}
+
+async function saveClientModal() {
+  let col = $("cm-col").value.trim();
+  if (col && !col.startsWith("#")) col = "#" + col;
+  const c = state.editing;
+  let r;
+  try {
+    if (!c) {
+      r = await (await fetch(`${BACKEND}/api/clients`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agenzia: $("cm-ag").value, nome: $("cm-name").value.trim(), colore: col.toUpperCase(),
+                               font: $("cm-font").value.trim() }) })).json();
+    } else {
+      r = await (await fetch(`${BACKEND}/api/clients/${encodeURIComponent(c.id)}/params`, { method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ colore: col.toUpperCase(), font: $("cm-font").value.trim(), base: $("cm-base").value,
+                               regola: $("cm-reg").value.trim() }) })).json();
+    }
+  } catch (e) { r = { ok: false, msg: String(e) }; }
+  if (!r.ok) { $("cm-msg").textContent = "⚠️ " + r.msg; return; }
+  $("client-modal").hidden = true;
+  const id = c ? c.id : r.id;
+  await loadClients();
+  const fresh = state.clients.find((x) => x.id === id);
+  if (fresh) await chooseClient(fresh);
+  addLog("✏️ " + r.msg, "ok");
+}
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>

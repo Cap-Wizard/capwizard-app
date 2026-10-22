@@ -43,7 +43,10 @@ def find_claude_cli() -> str | None:
     for p in _CLAUDE_CLI_FALLBACKS:
         if p.exists() and os.access(p, os.X_OK):
             return str(p)
-    return None
+    # the CLI that comes with the Claude desktop app (no `claude` in PATH)
+    bundled = sorted(Path.home().glob("Library/Application Support/Claude/claude-code/*/*/claude.app/Contents/MacOS/claude"),
+                     key=lambda p: p.stat().st_mtime)
+    return str(bundled[-1]) if bundled else None
 
 
 def clean_env() -> dict[str, str]:
