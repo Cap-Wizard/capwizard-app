@@ -564,6 +564,8 @@ Procedura:
      della voce misurato sull'energia dell'audio (0–0,05 s prima), non sull'inizio della parola di Whisper, che dopo il "vai!" è 0,2–0,4 s in anticipo;
    - clip senza parlato vero nella cartella delle clip (trascrizione vuota, assurda o "Grazie a tutti"): spesso sono B-ROLL del posto,
      guarda i fotogrammi prima di scartarle; quando si nomina il posto mettine uno (esterno poi interno); b-roll solo pertinenti e leggibili;
+   - QUANTITÀ dei suoni: quella dello stile dell'agenzia, che vince (Exodia dal 22/10: pochi e con senso — parole grandi animate
+     all'inizio dell'animazione, swish su transizioni e zoom, pochi ding, niente bong né riser in mezzo);
    - ogni suono ha il colpo all'INIZIO di un sottotitolo (quando compare la parola chiave), riser che finiscono su un sottotitolo o su un taglio;
    - niente transizione subito dopo il titolo;
    - titolo dietro la testa: copia della clip su una traccia video SOPRA i testi del titolo, stesso tempo e stessa sorgente; lo scontorno
