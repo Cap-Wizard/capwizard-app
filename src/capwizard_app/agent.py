@@ -560,7 +560,10 @@ Procedura:
    ~/Desktop/VIDEO CLAUDE/720 STUDI0 ci sono script di video simili (work_*/), riusali e adattali.
    Tagli, titolo, sottotitoli, suoni, musica, b-roll, foto: tutto secondo le regole del cliente.
 3. Controlla il risultato (JSON valido, nessun riferimento rotto, durata giusta) e in particolare:
-   - tagli STRETTI: ogni clip finisce ~0,05–0,1 s dopo l'ultima parola (niente code di silenzio);
+   - tagli STRETTI: ogni clip finisce ~0,05–0,1 s dopo l'ultima parola (niente code di silenzio) e INIZIA sull'attacco reale
+     della voce misurato sull'energia dell'audio (0–0,05 s prima), non sull'inizio della parola di Whisper, che dopo il "vai!" è 0,2–0,4 s in anticipo;
+   - clip senza parlato vero nella cartella delle clip (trascrizione vuota, assurda o "Grazie a tutti"): spesso sono B-ROLL del posto,
+     guarda i fotogrammi prima di scartarle; quando si nomina il posto mettine uno (esterno poi interno); b-roll solo pertinenti e leggibili;
    - ogni suono ha il colpo all'INIZIO di un sottotitolo (quando compare la parola chiave), riser che finiscono su un sottotitolo o su un taglio;
    - niente transizione subito dopo il titolo;
    - titolo dietro la testa: copia della clip su una traccia video SOPRA i testi del titolo, stesso tempo e stessa sorgente; lo scontorno
