@@ -376,6 +376,8 @@ function check() {
   if (!hasName) miss.push("nome del progetto");
   const ready = state.backendReady && state.aiReady && !state.running && !state.modRunning && !miss.length;
   $("btn-generate").disabled = !ready;
+  // the queue takes new videos even while another one is being edited
+  $("btn-queue").disabled = !(state.backendReady && state.aiReady && !state.batch && !miss.length);
   $("missing").textContent = state.running ? "Montaggio in corso…"
     : !state.backendReady ? "Avvio del motore dell'app…"
     : miss.length ? `Manca: ${miss.join(", ")}`
@@ -455,6 +457,9 @@ function wireEditor() {
   $("kit-guide-close").onclick = $("kit-guide-done").onclick = () => { $("kit-guide").hidden = true; };
 
   $("btn-generate").onclick = onGenerate;
+  $("btn-queue").onclick = addToQueue;
+  $("btn-queue-clear").onclick = async () => { await fetch(`${BACKEND}/api/queue/clear`, { method: "POST" }); loadQueue(); };
+  loadQueue();
   $("btn-stop").onclick = async () => {
     if (!state.jobId) return;
     $("btn-stop").disabled = true;
@@ -578,6 +583,79 @@ async function onGenerate() {
     else if (msg.type === "status") end(msg);
     else if (msg.type === "error") end({ status: "error", error: msg.message });
   };
+}
+
+// ---------------------------------------------------------------------------
+// Queue: add videos one after the other, they are edited one at a time; a sound when all are done
+// ---------------------------------------------------------------------------
+
+let queueTimer = null, queueSel = null;
+
+async function addToQueue() {
+  const body = buildRequest();
+  $("btn-queue").disabled = true;
+  try {
+    const r = await (await fetch(`${BACKEND}/api/queue`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                         body: JSON.stringify(body) })).json();
+    if (r.error) { $("missing").textContent = "⚠️ " + r.error; check(); return; }
+    addLog(`＋ In coda: ${body.name} · ${state.client ? state.client.nome : body.template}`, "step");
+    // ready for the next video of the same client: clear folder, b-roll, name and notes
+    $("input-path").value = ""; $("input-path-label").textContent = ""; $("thumbs").innerHTML = ""; $("s2-info").textContent = "";
+    setBroll(""); $("name").value = ""; $("name").dataset.auto = "1"; $("notes").value = "";
+  } catch (e) { addLog(`Il motore dell'app non risponde (${e}).`, "err"); }
+  check();
+  loadQueue();
+}
+
+const Q_LABEL = { "in coda": "⏳ in coda", "in corso": "▶ in corso", "fatto": "✓ pronto", "errore": "✕ errore", "tolto": "fermato" };
+
+async function loadQueue() {
+  clearTimeout(queueTimer);
+  let items = [];
+  try { items = (await (await fetch(`${BACKEND}/api/queue`)).json()).items || []; } catch (_) { queueTimer = setTimeout(loadQueue, 4000); return; }
+  $("queue-card").hidden = !items.length;
+  const waiting = items.filter((i) => i.status === "in coda").length, running = items.find((i) => i.status === "in corso");
+  $("queue-tag").textContent = running ? `${waiting + 1} da fare` : waiting ? `${waiting} in attesa` : "finita";
+  const box = $("queue-list");
+  box.innerHTML = "";
+  for (const it of items) {
+    const row = document.createElement("div");
+    row.className = "qitem" + (queueSel === it.id ? " sel" : "");
+    const cls = it.status === "in corso" ? "run" : it.status === "fatto" ? "ok" : it.status === "errore" ? "err" : "";
+    const step = it.status === "in corso" && it.step ? ` ${it.step}/${state.steps.length || 6}` : "";
+    row.innerHTML = `<div style="min-width:0"><div class="qn"></div><div class="ql"></div></div><span class="qs ${cls}">${Q_LABEL[it.status] || it.status}${step}</span>`
+      + `<button class="qx" title="${it.status === "in corso" ? "Ferma" : "Togli"}">✕</button>`;
+    row.querySelector(".qn").textContent = `${it.name} · ${it.cliente}`;
+    row.querySelector(".ql").textContent = it.status === "errore" ? (it.error || "") : it.last || (it.status === "in coda" ? "aspetta il suo turno" : "");
+    row.querySelector(".qx").onclick = async (e) => {
+      e.stopPropagation();
+      if (it.status === "in corso" && !confirm(`Fermo il montaggio di «${it.name}»?`)) return;
+      await fetch(`${BACKEND}/api/queue/${it.id}`, { method: "DELETE" }); loadQueue();
+    };
+    row.onclick = () => showQueueLog(it);
+    box.appendChild(row);
+  }
+  if (running || waiting) {
+    if (queueSel) { const s = items.find((i) => i.id === queueSel); if (s) showQueueLog(s, true); }
+    queueTimer = setTimeout(loadQueue, 3000);
+  } else if (state.queueWasRunning) {
+    loadProjects();
+  }
+  state.queueWasRunning = !!(running || waiting);
+}
+
+// the log of a queued video in the "Dettagli" box (when no single edit is running)
+async function showQueueLog(it, refresh = false) {
+  if (state.running || !it.job_id) { queueSel = it.id; return; }
+  queueSel = it.id;
+  try {
+    const job = await (await fetch(`${BACKEND}/api/jobs/${it.job_id}`)).json();
+    $("console").innerHTML = "";
+    for (const l of job.logs || []) addLog(l);
+    renderSteps(job.step || 0, job.status === "done");
+    setStatus(`${it.name}: ${Q_LABEL[it.status] || it.status}`);
+  } catch (_) { /* try at the next refresh */ }
+  if (!refresh) loadQueue();
 }
 
 function finishRun() {

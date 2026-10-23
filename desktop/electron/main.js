@@ -76,6 +76,8 @@ function startBackend() {
     pyProc = spawn(bin, ["--port", String(BACKEND_PORT)], { env });
   } else {
     env.CAPWIZARD_SKILL_DIR = path.join(repoRoot(), "skill", "reel-capcut-mac");
+    // the package from the repo even if the editable install's .pth is skipped (macOS can flag it hidden)
+    env.PYTHONPATH = [path.join(repoRoot(), "src"), env.PYTHONPATH].filter(Boolean).join(path.delimiter);
     pyProc = spawn(
       devPythonPath(),
       ["-m", "capwizard_app.server", "--port", String(BACKEND_PORT)],

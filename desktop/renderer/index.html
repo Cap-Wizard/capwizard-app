@@ -145,6 +145,7 @@
       </div>
       <div class="lfoot">
         <button class="go" id="btn-generate" disabled>INIZIA A EDITARE</button>
+        <button class="btn2 queue-add" id="btn-queue" disabled>＋ METTI IN CODA <span class="opt">e prepara il prossimo video</span></button>
         <div class="missing" id="missing"></div>
       </div>
     </section>
@@ -155,6 +156,11 @@
           <button class="btn-link mini" id="btn-client-edit" hidden>✏️ Modifica cliente</button>
           <button class="btn-link mini" id="btn-client-open" hidden>Apri il file</button></h3>
         <div class="rules" id="rules"><div class="empty">Scegli un cliente per vedere le sue regole</div></div>
+      </div>
+      <div class="card" id="queue-card" hidden>
+        <h3>Coda <span class="status-tag" id="queue-tag"></span>
+          <button class="btn-link mini" id="btn-queue-clear">Togli i finiti</button></h3>
+        <div id="queue-list"></div>
       </div>
       <div class="card">
         <h3>Avanzamento <span class="status-tag" id="status-tag">in attesa</span></h3>

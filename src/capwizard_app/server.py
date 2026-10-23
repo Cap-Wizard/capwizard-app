@@ -454,6 +454,137 @@ def batch(req: BatchRequest) -> dict:
     return {"job_id": job.id}
 
 
+# ---------------------------------------------------------------------------
+# Queue: several reels added one after the other, edited one at a time. When the
+# last one ends the Mac plays a sound and shows a notification.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class QueueItem:
+    id: str
+    req: GenerateRequest
+    cliente: str = ""
+    status: str = "in coda"           # in coda | in corso | fatto | errore | tolto
+    job_id: str | None = None
+    result_path: str | None = None
+    error: str | None = None
+    added: float = field(default_factory=lambda: __import__("time").time())
+
+    def view(self) -> dict:
+        job = manager.get(self.job_id) if self.job_id else None
+        last = ""
+        if job:
+            for line in reversed(job.logs):
+                if line.strip() and not line.startswith("⚙"):
+                    last = line.strip()[:160]
+                    break
+        return {"id": self.id, "name": self.req.name, "cliente": self.cliente, "status": self.status,
+                "job_id": self.job_id, "step": job.step if job else 0, "last": last,
+                "result_path": self.result_path, "error": self.error}
+
+
+class Queue:
+    def __init__(self) -> None:
+        self.items: list[QueueItem] = []
+        self.lock = threading.Lock()
+        self.worker: threading.Thread | None = None
+        self.current: QueueItem | None = None
+
+    def add(self, req: GenerateRequest) -> QueueItem:
+        c = agent.get_client(req.client)
+        item = QueueItem(id=uuid.uuid4().hex[:10], req=req, cliente=c["nome"] if c else (req.template or ""))
+        with self.lock:
+            self.items.append(item)
+            if not (self.worker and self.worker.is_alive()):
+                self.worker = threading.Thread(target=self._loop, daemon=True)
+                self.worker.start()
+        return item
+
+    def _next(self) -> QueueItem | None:
+        with self.lock:
+            return next((i for i in self.items if i.status == "in coda"), None)
+
+    def _loop(self) -> None:
+        done = []
+        while True:
+            item = self._next()
+            if not item:
+                break
+            job = manager.create()
+            item.job_id, item.status, self.current = job.id, "in corso", item
+            _run_job(job, item.req)
+            item.result_path, item.error = job.result_path, job.error
+            item.status = "fatto" if job.status == "done" else ("tolto" if job.stopped else "errore")
+            self.current = None
+            done.append(item)
+        if done:
+            _all_done([i for i in done if i.status == "fatto"], [i for i in done if i.status == "errore"])
+
+    def remove(self, item_id: str) -> bool:
+        with self.lock:
+            for i in self.items:
+                if i.id == item_id:
+                    if i.status == "in coda":
+                        i.status = "tolto"
+                        return True
+                    if i.status == "in corso" and i.job_id:
+                        job = manager.get(i.job_id)
+                        if job:
+                            job.stopped = True
+                            agent.stop(job)
+                        return True
+                    if i.status in ("fatto", "errore", "tolto"):
+                        self.items.remove(i)
+                        return True
+        return False
+
+    def clear_finished(self) -> None:
+        with self.lock:
+            self.items = [i for i in self.items if i.status in ("in coda", "in corso")]
+
+
+queue = Queue()
+
+
+def _all_done(ok: list, failed: list) -> None:
+    """The queue has emptied: a sound and a notification, so the user knows without watching the app."""
+    msg = f"{len(ok)} video pront{'o' if len(ok) == 1 else 'i'}" + (f" · {len(failed)} con errore" if failed else "")
+    try:
+        subprocess.Popen(["/bin/sh", "-c", "afplay /System/Library/Sounds/Glass.aiff; afplay /System/Library/Sounds/Hero.aiff"])
+        subprocess.Popen(["osascript", "-e", f'display notification "{msg}" with title "CapWizard" subtitle "Coda finita" sound name "Glass"'])
+    except OSError:
+        pass
+
+
+@app.post("/api/queue")
+def queue_add(req: GenerateRequest) -> dict:
+    if not req.name.strip():
+        return {"error": "Manca il nome del progetto."}
+    if not Path(req.input_path).is_dir():
+        return {"error": "La cartella delle clip non esiste."}
+    if (CAPCUT_PROJECTS_DIR / req.name).exists():
+        return {"error": f"Esiste già un progetto CapCut «{req.name}»."}
+    if any(i.req.name == req.name and i.status in ("in coda", "in corso") for i in queue.items):
+        return {"error": f"«{req.name}» è già in coda."}
+    return {"ok": True, "item": queue.add(req).view()}
+
+
+@app.get("/api/queue")
+def queue_list() -> dict:
+    return {"items": [i.view() for i in queue.items if i.status != "tolto" or i.job_id]}
+
+
+@app.delete("/api/queue/{item_id}")
+def queue_remove(item_id: str) -> dict:
+    return {"ok": queue.remove(item_id)}
+
+
+@app.post("/api/queue/clear")
+def queue_clear() -> dict:
+    queue.clear_finished()
+    return {"ok": True}
+
+
 @app.get("/api/jobs/{job_id}")
 def job_status(job_id: str) -> dict:
     job = manager.get(job_id)
