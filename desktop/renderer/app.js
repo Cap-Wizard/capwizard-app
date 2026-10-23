@@ -172,6 +172,7 @@ async function loadClients() {
     state.clients = data.clients || [];
     state.steps = data.steps || [];
     state.vault = data.vault || state.vault;
+    $("v-client").hidden = !state.vault.enabled;
   } catch (e) { console.error("clients", e); }
   renderChips();
   renderSteps(0);
@@ -395,6 +396,7 @@ function isOn(id) { return $(id).classList.contains("on"); }
 function wireEditor() {
   $("v-new").onclick = () => showView("editor");
   $("v-proj").onclick = () => showView("home");
+  $("v-client").onclick = () => openClientModal(null);
 
   $("drop").onclick = async () => {
     const p = window.api && await window.api.selectFolder();
