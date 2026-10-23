@@ -202,7 +202,7 @@ def _step_of(tool: str, inp: dict) -> int:
     """Which progress step a tool call belongs to (0 = no change)."""
     cmd = str(inp.get("command", ""))
     path = str(inp.get("file_path", ""))
-    if "verifica.py" in cmd:
+    if "verifica.py" in cmd or "livella_voce.py" in cmd:
         return 6
     if "costruisci_draft.py" in cmd:
         return 5
