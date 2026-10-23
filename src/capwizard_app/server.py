@@ -635,12 +635,136 @@ def _summary(report: str | None) -> str:
     return m.group(1).strip() if m else ""
 
 
+OLD_PANEL_JOBS = Path.home() / "video-editor-mcp/jobs"   # Daniel's first panel (CapCut Editor), if it was used on this Mac
+
+
+def _old_job(name: str) -> tuple[dict, dict]:
+    """job.json and result.json the old panel kept for a project of this name, if any."""
+    d = OLD_PANEL_JOBS / re.sub(r"[^\w\- ]", "_", name)
+    out = []
+    for f in ("job.json", "result.json"):
+        try:
+            out.append(__import__("json").loads((d / f).read_text()))
+        except (OSError, ValueError):
+            out.append({})
+    return out[0], out[1]
+
+
+def _video_notes() -> dict[str, str]:
+    """CapCut project name → its video note in the vault ("**Progetto CapCut:** NAME" or a note named like the project)."""
+    out: dict[str, str] = {}
+    if not vault.enabled():
+        return out
+    for f in (vault.VAULT / "05 Video").rglob("*.md"):
+        try:
+            txt = f.read_text()
+        except OSError:
+            continue
+        out.setdefault(f.stem, str(f))
+        for m in re.finditer(r"Progetto CapCut:\*\*\s*([^·\n*]+)", txt):
+            out[m.group(1).strip()] = str(f)
+    return out
+
+
+def _guess_client(name: str, clients: list[dict], notes: dict | None = None) -> dict | None:
+    """The client of a CapCut project not made by this app: from the old panel's job, else a client name inside the project name."""
+    job, _ = _old_job(name)
+    if job.get("cliente"):
+        cid = vault.PREFIX + job["cliente"]
+        c = next((x for x in clients if x["id"] == cid or x["nome"] == job["cliente"].split(" / ")[-1]), None)
+        if c:
+            return c
+    # the video's note in the vault ("05 Video/<client or agency>/<project>.md" with "Cliente [[X]]" or a [[client]] link)
+    vn = (notes if notes is not None else _video_notes()).get(name)
+    if vn:
+        txt = open(vn).read()
+        names = re.findall(r"\[\[([^\]|#]+)", txt) + [Path(vn).parent.name]
+        for n in names:
+            c = next((x for x in clients if x["nome"].upper() == n.strip().upper()), None)
+            if c:
+                return c
+    up = name.upper()
+    hits = [c for c in clients if len(c["nome"]) >= 3 and c["nome"].upper() in up]
+    return max(hits, key=lambda c: len(c["nome"])) if hits else None
+
+
+def _capcut_drafts(known: set[str]) -> list[dict]:
+    """Every project in this Mac's CapCut that the app's registry doesn't list yet (each user sees only their own CapCut)."""
+    out = []
+    if not CAPCUT_PROJECTS_DIR.is_dir():
+        return out
+    for d in CAPCUT_PROJECTS_DIR.iterdir():
+        info = next((d / f for f in ("draft_info.json", "template-2.tmp", "draft_info.json.bak") if (d / f).exists()), None)
+        if not d.is_dir() or d.name.startswith(".") or not info or str(d) in known:
+            continue
+        job, res = _old_job(d.name)
+        out.append({"id": "capcut:" + d.name, "name": d.name, "result_path": str(d), "report_path": None, "exists": True,
+                    "created_at": info.stat().st_mtime, "source": "capcut", "riassunto_old": res.get("riassunto", ""),
+                    "settings": {"client": None, "template": job.get("progetto_reference"), "input_path": job.get("cartella_clip"),
+                                 "broll_path": job.get("cartella_broll"), "staging": res.get("staging")}})
+    return out
+
+
+def _shared_space(folder: str) -> str:
+    """Group of a project whose client is unknown: downloaded from a shared (team) space of CapCut, or just CapCut."""
+    try:
+        meta = __import__("json").loads((Path(folder) / "draft_meta_info.json").read_text())
+        if meta.get("tm_draft_cloud_space_id"):
+            return "Dallo spazio condiviso di CapCut"
+    except (OSError, ValueError):
+        pass
+    return "Altri progetti CapCut"
+
+
+def _project(project_id: str) -> dict | None:
+    if project_id.startswith("capcut:"):
+        name = project_id[len("capcut:"):]
+        return next((p for p in _capcut_drafts(set()) if p["name"] == name), None)
+    return registry.get_project(project_id)
+
+
+def _register_draft(p: dict) -> dict:
+    """A CapCut project picked in "I miei progetti" gets its own record the first time it is changed from the app."""
+    clients = agent.list_clients()
+    c = _guess_client(p["name"], clients)
+    settings = {**p["settings"], "client": c["id"] if c else None}
+    rec = registry.add_project(name=p["name"], result_path=p["result_path"], settings=settings, report_path=None)
+    if p.get("riassunto_old"):
+        rep = registry.app_data_dir() / "lavori" / f"{p['name']} importato"
+        rep.mkdir(parents=True, exist_ok=True)
+        (rep / "report.md").write_text(f"# {p['name']}\n\n## Cosa ha fatto Claude\n{p['riassunto_old']}\n")
+        rec = {**rec, "report_path": str(rep / "report.md")}
+        projects = registry._load()
+        for x in projects:
+            if x["id"] == rec["id"]:
+                x["report_path"] = rec["report_path"]
+        registry._save(projects)
+    return rec
+
+
 @app.get("/api/projects")
 def projects_list() -> dict:
-    """Projects made with the app, with their client's name and colour, summary and CapCut cover."""
-    clients = {c["id"]: c for c in agent.list_clients()}
+    """The projects of this Mac's CapCut: the ones made with the app (with their record) and all the others, each with its
+    client when it can be told, summary and CapCut cover. Only this computer's CapCut, never someone else's."""
+    clients_l = agent.list_clients()
+    clients = {c["id"]: c for c in clients_l}
     out = []
-    for p in registry.list_projects():
+    regs = registry.list_projects()
+    known = {p.get("result_path") for p in regs if p.get("result_path")}
+    notes = _video_notes()
+    for p in _capcut_drafts(known):
+        c = _guess_client(p["name"], clients_l, notes)
+        cover = Path(p["result_path"]) / "draft_cover.jpg"
+        out.append({**p, "cliente": c["nome"] if c else _shared_space(p["result_path"]), "colore": c["colore"] if c else "#6b7180",
+                    "riassunto": p.pop("riassunto_old", ""), "cover": ""})
+        out[-1]["_cover"] = str(cover) if cover.exists() else ""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(8) as ex:
+        covers = list(ex.map(lambda q: _thumb(Path(q["_cover"]), 320) if q["_cover"] else "", out))
+    for q, cv in zip(out, covers):
+        q["cover"] = cv
+        q.pop("_cover", None)
+    for p in regs:
         s = p.get("settings") or {}
         c = clients.get(s.get("client") or "") or next(
             (x for x in clients.values() if s.get("template") and x["template"] == s.get("template")), None)
@@ -669,9 +793,9 @@ def attachment(req: AttachmentRequest) -> dict:
     return a or {"error": "Non è un'immagine."}
 
 
-@app.get("/api/projects/{project_id}/mods")
+@app.get("/api/projects/{project_id:path}/mods")
 def project_mods(project_id: str) -> dict:
-    mods = agent.list_mods(project_id)
+    mods = [] if project_id.startswith("capcut:") else agent.list_mods(project_id)
     for m in mods:
         m["thumbs"] = [agent.image_thumb(Path(p)) for p in m.get("immagini", []) if Path(p).exists()]
     return {"mods": mods}
@@ -689,27 +813,30 @@ def _run_modify(job: Job, project: dict, req: ModifyRequest) -> None:
         job.log(f"ERRORE: {e}")
 
 
-@app.post("/api/projects/{project_id}/modify")
+@app.post("/api/projects/{project_id:path}/modify")
 def project_modify(project_id: str, req: ModifyRequest) -> dict:
-    project = registry.get_project(project_id)
+    project = _project(project_id)
     if not project:
         return {"error": "progetto non trovato"}
+    if project_id.startswith("capcut:"):
+        project = _register_draft(project)
     if not (req.testo.strip() or req.immagini):
         return {"error": "Scrivi cosa cambiare o allega uno screenshot."}
     job = manager.create()
     threading.Thread(target=_run_modify, args=(job, project, req), daemon=True).start()
-    return {"job_id": job.id}
+    return {"job_id": job.id, "project_id": project["id"]}
 
 
-@app.get("/api/projects/{project_id}")
+@app.get("/api/projects/{project_id:path}")
 def project_get(project_id: str) -> dict:
-    p = registry.get_project(project_id)
+    p = _project(project_id)
     return p or {"error": "progetto non trovato"}
 
 
-@app.delete("/api/projects/{project_id}")
+@app.delete("/api/projects/{project_id:path}")
 def project_delete(project_id: str) -> dict:
-    return {"removed": registry.remove_project(project_id)}
+    # only the app's record: a CapCut project is never deleted from here
+    return {"removed": False if project_id.startswith("capcut:") else registry.remove_project(project_id)}
 
 
 @app.get("/api/ai/status")

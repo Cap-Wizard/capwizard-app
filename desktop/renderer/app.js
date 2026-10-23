@@ -783,13 +783,14 @@ function renderProjects() {
     }
     box.appendChild(g);
   }
-  if (!list.length) box.innerHTML = '<div class="empty">Ancora nessun progetto montato dall\'app</div>';
+  if (!list.length) box.innerHTML = '<div class="empty">Nessun progetto CapCut su questo Mac</div>';
 }
 
 function badge(p) {
   if (state.modRunning === p.id) return '<span class="badge run">⏳ modifiche in corso</span>';
   if (!p.exists) return '<span class="badge err">non più in CapCut</span>';
-  return '<span class="badge ok">montato</span>';
+  if (p.source === "capcut") return '<span class="badge">in CapCut</span>';
+  return '<span class="badge ok">montato con l\'app</span>';
 }
 
 async function openProject(p) {
@@ -799,7 +800,7 @@ async function openProject(p) {
   renderProjects();
   const s = p.settings || {};
   let mods = [];
-  try { mods = (await (await fetch(`${BACKEND}/api/projects/${p.id}/mods`)).json()).mods || []; } catch (_) {}
+  try { mods = (await (await fetch(`${BACKEND}/api/projects/${encodeURIComponent(p.id)}/mods`)).json()).mods || []; } catch (_) {}
   if (state.currentProject !== p) return;
   const running = state.modRunning === p.id;
   const thread = mods.map((m, i) => {
@@ -817,7 +818,7 @@ async function openProject(p) {
     <div class="phead">${p.cover ? `<img src="${p.cover}">` : ""}
       <div style="flex:1;min-width:0"><div class="m">${escapeHtml(p.cliente)} · template «${escapeHtml(s.template || "—")}»</div>
         <h2>${escapeHtml(p.name)}</h2>
-        <div class="m">Montato il ${fmtDate(p.created_at)}${mods.length ? ` · ${mods.length} ${mods.length > 1 ? "modifiche" : "modifica"}` : ""}</div>
+        <div class="m">${p.source === "capcut" ? "Ultima modifica in CapCut" : "Montato"} il ${fmtDate(p.created_at)}${mods.length ? ` · ${mods.length} ${mods.length > 1 ? "modifiche" : "modifica"}` : ""}</div>
         <div class="sum">${escapeHtml(p.riassunto || "")}</div></div>
       <div class="acts">
         <button class="btn2" id="pd-folder" ${p.exists ? "" : "disabled"}>Apri in Finder</button>
@@ -894,7 +895,7 @@ async function sendChange() {
   $("send").textContent = "Avvio…";
   let r;
   try {
-    r = await (await fetch(`${BACKEND}/api/projects/${p.id}/modify`, {
+    r = await (await fetch(`${BACKEND}/api/projects/${encodeURIComponent(p.id)}/modify`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ testo, immagini: state.att.map((a) => a.path), ai_model: $("ai-model").value }),
     })).json();
@@ -904,6 +905,9 @@ async function sendChange() {
     $("send").disabled = false;
     alert(r.error || "Modifica non avviata.");
     return;
+  }
+  if (r.project_id && r.project_id !== p.id) {   // a CapCut project changed from the app for the first time now has its record
+    p.id = r.project_id; p.source = "app";
   }
   state.modRunning = p.id;
   state.att = [];
