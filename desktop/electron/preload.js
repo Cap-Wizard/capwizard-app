@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("api", {
   cloudUrl: () => ipcRenderer.invoke("cloud-url"),
   selectFolder: () => ipcRenderer.invoke("select-folder"),
   selectVideo: () => ipcRenderer.invoke("select-video"),
+  selectVideos: () => ipcRenderer.invoke("select-videos"),
   selectScript: () => ipcRenderer.invoke("select-script"),
   selectImages: () => ipcRenderer.invoke("select-images"),
   openPath: (p) => ipcRenderer.invoke("open-path", p),

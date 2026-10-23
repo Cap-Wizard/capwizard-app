@@ -14,6 +14,7 @@ const state = {
   running: false,
   clients: [],             // client profiles (skills with one client's rules) and clients of the Obsidian vault
   vault: { enabled: false, agenzie: [] },
+  study: { video: [], shots: [] },   // material for "fai studiare a Claude" in the client modal
   ag: "Tutti",             // agency filter of the client chips
   editing: null,           // client being edited in the modal, or null for a new one
   client: null,            // chosen client, or null
@@ -426,6 +427,13 @@ function wireEditor() {
   document.addEventListener("drop", (e) => {
     e.preventDefault();
     endDrag();
+    if (!$("client-modal").hidden) {          // videos / screenshots for a new client to study
+      for (const f of e.dataTransfer.files) {
+        const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
+        if (p) addStudyPath(p);
+      }
+      return;
+    }
     if (!$("view-home").hidden) {          // screenshots for a change request
       for (const f of e.dataTransfer.files) {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
@@ -1228,7 +1236,19 @@ function openExternal(url) {
 // ---------------------------------------------------------------------------
 
 function wireClientModal() {
-  $("cm-close").onclick = $("cm-cancel").onclick = () => { $("client-modal").hidden = true; };
+  $("cm-close").onclick = $("cm-cancel").onclick = () => { $("client-modal").hidden = true; document.body.classList.remove("modal-open"); };
+  $("cm-ag").onchange = updateStudyUI;
+  ["cm-name", "cm-links", "cm-msg", "cm-ag-new"].forEach((i) => { $(i).oninput = updateStudyUI; });
+  $("cm-drop").onclick = async () => { for (const p of (window.api && await window.api.selectVideos()) || []) addStudyPath(p); };
+  $("cm-shot-btn").onclick = async () => { for (const p of (window.api && await window.api.selectImages()) || []) addStudyPath(p); };
+  $("cm-msg").addEventListener("paste", (e) => {
+    for (const it of e.clipboardData.items) if (it.type.startsWith("image/")) {
+      e.preventDefault();
+      const r = new FileReader();
+      r.onload = () => addStudyShot({ data_url: r.result });
+      r.readAsDataURL(it.getAsFile());
+    }
+  });
   $("cm-pick").oninput = () => { $("cm-col").value = $("cm-pick").value.toUpperCase(); };
   $("cm-col").oninput = () => {
     const v = $("cm-col").value.trim().replace(/^#?/, "#");
@@ -1237,8 +1257,64 @@ function wireClientModal() {
   $("cm-save").onclick = saveClientModal;
 }
 
+async function addStudyShot(body) {
+  try {
+    const a = await (await fetch(`${BACKEND}/api/attachments`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                                body: JSON.stringify(body) })).json();
+    if (a.path) { state.study.shots.push(a); renderStudy(); }
+  } catch (_) { /* not an image */ }
+}
+
+function addStudyPath(p) {
+  if (/\.(jpe?g|png|heic|webp|gif)$/i.test(p)) return addStudyShot({ path: p });
+  if (!state.study.video.includes(p)) state.study.video.push(p);
+  $("cm-study").open = true;
+  renderStudy();
+}
+
+function renderStudy() {
+  $("cm-refs").innerHTML = "";
+  state.study.video.forEach((p, i) => {
+    const d = document.createElement("div");
+    d.className = "ref";
+    d.innerHTML = `🎞️ <em></em><button>✕</button>`;
+    d.querySelector("em").textContent = p.split("/").slice(-2).join("/");
+    d.querySelector("button").onclick = () => { state.study.video.splice(i, 1); renderStudy(); };
+    $("cm-refs").appendChild(d);
+  });
+  $("cm-shots").innerHTML = "";
+  state.study.shots.forEach((a, i) => {
+    const d = document.createElement("div");
+    d.innerHTML = `<img src="${a.thumb}"><span>✕</span>`;
+    d.querySelector("span").onclick = () => { state.study.shots.splice(i, 1); renderStudy(); };
+    $("cm-shots").appendChild(d);
+  });
+  updateStudyUI();
+}
+
+function hasStudyMaterial() {
+  return !!(state.study.video.length || state.study.shots.length || $("cm-links").value.trim() || $("cm-msg").value.trim());
+}
+
+// new agency → Claude studies it; existing agency + colour → the client is written right away (study only if material is given)
+function updateStudyUI() {
+  if (state.editing) return;
+  const nuova = $("cm-ag").value === "__new";
+  $("cm-ag-new").hidden = !nuova;
+  if (nuova) $("cm-study").open = true;
+  $("cm-name-opt").hidden = !nuova;
+  const study = nuova || hasStudyMaterial();
+  $("cm-save").textContent = study ? "✦ STUDIA E SALVA" : "SALVA";
+}
+
 async function openClientModal(c) {
   state.editing = c;
+  state.study = { video: [], shots: [] };
+  ["cm-links", "cm-msg", "cm-note", "cm-ag-new"].forEach((i) => { $(i).value = ""; });
+  $("cm-study").hidden = !!c;
+  $("cm-study").open = false;
+  renderStudy();
+  document.body.classList.add("modal-open");
   $("cm-title").textContent = c ? `✏️ ${c.nome}` : "Nuovo cliente";
   $("cm-new").hidden = !!c;
   $("cm-edit-only").hidden = !c;
@@ -1247,7 +1323,8 @@ async function openClientModal(c) {
   ["cm-name", "cm-col", "cm-font", "cm-reg"].forEach((i) => { $(i).value = ""; });
   $("cm-now").textContent = "";
   if (!c) {
-    $("cm-ag").innerHTML = (state.vault.agenzie || []).map((a) => `<option>${escapeHtml(a)}</option>`).join("");
+    $("cm-ag").innerHTML = (state.vault.agenzie || []).map((a) => `<option>${escapeHtml(a)}</option>`).join("")
+      + `<option value="__new">＋ Nuova agenzia…</option>`;
     if (state.ag !== "Tutti" && (state.vault.agenzie || []).includes(state.ag)) $("cm-ag").value = state.ag;
   } else {
     const d = await (await fetch(`${BACKEND}/api/clients/${encodeURIComponent(c.id)}/params`)).json();
@@ -1260,12 +1337,14 @@ async function openClientModal(c) {
       .map((n) => `<option ${n === d.base ? "selected" : ""}>${escapeHtml(n)}</option>`).join("");
   }
   $("client-modal").hidden = false;
+  updateStudyUI();
 }
 
 async function saveClientModal() {
   let col = $("cm-col").value.trim();
   if (col && !col.startsWith("#")) col = "#" + col;
   const c = state.editing;
+  if (!c && ($("cm-ag").value === "__new" || hasStudyMaterial())) return startStudy(col);
   let r;
   try {
     if (!c) {
@@ -1286,6 +1365,43 @@ async function saveClientModal() {
   const fresh = state.clients.find((x) => x.id === id);
   if (fresh) await chooseClient(fresh);
   addLog("✏️ " + r.msg, "ok");
+}
+
+async function startStudy(col) {
+  const nuova = $("cm-ag").value === "__new";
+  const ag = (nuova ? $("cm-ag-new").value : $("cm-ag").value).trim().toUpperCase();
+  if (!ag) { $("cm-msg").focus(); $("cm-save").textContent = "Scrivi il nome dell'agenzia"; return; }
+  const body = { agenzia: ag, cliente: $("cm-name").value.trim(), colore: col.toUpperCase(), font: $("cm-font").value.trim(),
+                 video: state.study.video, link: $("cm-links").value, messaggio: $("cm-msg").value,
+                 screenshot: state.study.shots.map((a) => a.path), note: $("cm-note").value, ai_model: $("ai-model").value };
+  let jobId;
+  try { jobId = (await (await fetch(`${BACKEND}/api/study`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                             body: JSON.stringify(body) })).json()).job_id; }
+  catch (e) { $("cm-msg").value += `\n(errore: ${e})`; return; }
+  $("client-modal").hidden = true;
+  document.body.classList.remove("modal-open");
+  showView("editor");
+  $("console").innerHTML = "";
+  setStatus("Claude sta studiando…");
+  addLog(`✦ Studio di ${ag}${body.cliente ? " / " + body.cliente.toUpperCase() : ""}: ${body.video.length} video · `
+    + `${body.link.trim() ? body.link.trim().split("\n").length : 0} link · ${body.screenshot.length} screenshot`, "step");
+  let shown = 0;
+  const poll = setInterval(async () => {
+    try {
+      const job = await (await fetch(`${BACKEND}/api/jobs/${jobId}`)).json();
+      const logs = job.logs || [];
+      for (; shown < logs.length; shown++) addLog(logs[shown]);
+      if (job.status === "done" || job.status === "error") {
+        clearInterval(poll);
+        setStatus(job.status === "done" ? "studio finito" : "interrotto");
+        if (job.status === "error") addLog(job.error || "errore", "err");
+        await loadClients();
+        const fresh = state.clients.find((x) => x.agenzia === ag && (!body.cliente || x.nome === body.cliente.toUpperCase()));
+        if (fresh) chooseClient(fresh);
+        if (job.status === "done") addLog("— finito: il cliente è pronto in “Nuovo video” —", "ok");
+      }
+    } catch (_) { /* backend busy: next tick */ }
+  }, 2500);
 }
 
 function escapeHtml(s) {

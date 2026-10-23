@@ -198,6 +198,14 @@ ipcMain.handle("select-video", async () => {
   return r.canceled ? null : r.filePaths[0];
 });
 
+ipcMain.handle("select-videos", async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile", "openDirectory", "multiSelections"],
+    filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "webm", "m4v"] }],
+  });
+  return r.canceled ? [] : r.filePaths;
+});
+
 ipcMain.handle("select-script", async () => {
   const r = await dialog.showOpenDialog(mainWindow, {
     properties: ["openFile"],

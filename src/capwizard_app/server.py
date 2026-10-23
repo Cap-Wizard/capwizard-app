@@ -361,6 +361,38 @@ class ClientParams(BaseModel):
     regola: str = ""
 
 
+class StudyRequest(BaseModel):
+    agenzia: str
+    cliente: str = ""
+    colore: str = ""
+    font: str = ""
+    video: list[str] = []
+    link: str = ""
+    messaggio: str = ""
+    screenshot: list[str] = []
+    note: str = ""
+    ai_model: str = "opus"
+
+
+def _run_study(job: Job, req: StudyRequest) -> None:
+    job.status = "running"
+    try:
+        agent.run_study(job, req.model_dump())
+        job.status = "done"
+    except Exception as e:  # noqa: BLE001
+        job.error = str(e)
+        job.status = "error"
+        job.log(f"ERRORE: {e}")
+
+
+@app.post("/api/study")
+def study(req: StudyRequest) -> dict:
+    """New agency/client with material to study (reference videos, Instagram links, the agency's message, chat screenshots)."""
+    job = manager.create()
+    threading.Thread(target=_run_study, args=(job, req), daemon=True).start()
+    return {"job_id": job.id}
+
+
 @app.post("/api/clients")
 def client_new(req: NewClientRequest) -> dict:
     """A new client of an agency already in the vault: colour (and font only if the client wants one)."""

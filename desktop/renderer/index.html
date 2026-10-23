@@ -203,7 +203,8 @@
         <div id="cm-new">
           <label>Agenzia</label>
           <select id="cm-ag"></select>
-          <label>Nome del cliente</label>
+          <input type="text" id="cm-ag-new" placeholder="Nome della nuova agenzia (es. STUDIO ROSSI)" hidden />
+          <label>Nome del cliente <span class="opt" id="cm-name-opt">vuoto = aggiungo solo l'agenzia</span></label>
           <input type="text" id="cm-name" placeholder="es. PIZZERIA DA MARIO" />
         </div>
         <label>Colore</label>
@@ -218,6 +219,22 @@
           <label>Base tecnica CapCut</label>
           <select id="cm-base"></select>
         </div>
+        <details class="adv" id="cm-study">
+          <summary id="cm-study-sum">✦ Fai studiare a Claude <span class="opt">video di esempio, link Instagram, messaggio dell'agenzia</span></summary>
+          <div class="drop drop2" id="cm-drop">
+            <b>🎞️ Trascina qui alcuni loro video (o una cartella)</b>
+            <span>o clicca per sceglierli: Claude li guarda e impara lo stile</span>
+          </div>
+          <div id="cm-refs" class="reflist"></div>
+          <label>Link Instagram / TikTok <span class="opt">uno per riga: profilo o singoli reel</span></label>
+          <textarea id="cm-links" placeholder="https://www.instagram.com/…"></textarea>
+          <label>Messaggio dell'agenzia <span class="opt">font, colori, ombre, cosa vuole… (puoi incollare gli screenshot con ⌘V)</span></label>
+          <textarea id="cm-msg" style="min-height:90px"></textarea>
+          <div class="att" id="cm-shots"></div>
+          <button class="btn-link mini" id="cm-shot-btn">📎 Screenshot della chat</button>
+          <label>Note per Claude <span class="opt">facoltativo</span></label>
+          <textarea id="cm-note" placeholder="es. guarda soprattutto i titoli, i video di settembre sono i più nuovi"></textarea>
+        </details>
         <label id="cm-reg-label">Nuova regola <span class="opt">facoltativo</span></label>
         <textarea id="cm-reg" placeholder="es. da ora vuole i sottotitoli più grandi"></textarea>
         <div class="missing" id="cm-msg" style="text-align:left"></div>

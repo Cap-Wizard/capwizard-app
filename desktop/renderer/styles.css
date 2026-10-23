@@ -95,6 +95,12 @@ h1 span { color: var(--accent-hover); }
 .drop2 { padding: 13px; } .drop2 b { font-size: 12.5px; }
 .drop.hover { border-color: var(--c) !important; background: color-mix(in srgb, var(--c) 16%, var(--bg2)) !important; }
 .color-row { grid-template-columns: auto 1fr; align-items: center; }
+.reflist { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.reflist .ref { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 9px; background: var(--panel2); border: 1px solid var(--line); font-size: 12px; }
+.reflist .ref em { flex: 1; font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reflist .ref button { border: 0; background: transparent; color: var(--dim); cursor: pointer; }
+#cm-study { margin-top: 14px; } #cm-study[open] summary { margin-bottom: 8px; }
+body.dragging.modal-open::after { content: "Rilascia qui video o screenshot"; }
 .color-row input[type=color] { width: 46px; height: 40px; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg2); padding: 3px; cursor: pointer; }
 
 input[type=text], input[type=password], select, textarea {
