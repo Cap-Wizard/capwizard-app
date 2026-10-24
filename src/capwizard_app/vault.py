@@ -165,12 +165,26 @@ def stile_for(cliente: str) -> str:
     return next((k for k in st if norm(k).startswith(ag) or ag.startswith(norm(k))), next(iter(st), ""))
 
 
+def base_name(text: str) -> str:
+    """The note's "Base tecnica CapCut" project, if it exists in CapCut.
+
+    "0929 (1)" is a project name; "r4 (base dell'agenzia: …)" is a name plus a comment."""
+    m = re.search(r"Base tecnica CapCut:\*\*\s*([^\n]+)", text or "")
+    if not m:
+        return ""
+    line = m.group(1).strip()
+    for cand in (line, re.sub(r"\s*\([^)]*\)\s*$", "", line), line.split(" (")[0].strip()):
+        if cand and (CAPCUT_PROJECTS_DIR / cand / "draft_info.json").exists():
+            return cand
+    return ""
+
+
 def base_for(cliente: str) -> str:
     """Technical CapCut base project: the client's note, else the agency's."""
     for name in (cliente.split(" / ")[-1], cliente.split(" / ")[0] if " / " in cliente else ""):
-        m = re.search(r"Base tecnica CapCut:\*\*\s*([^\n(]+)", read_note(name) or "") if name else None
-        if m and (CAPCUT_PROJECTS_DIR / m.group(1).strip() / "draft_info.json").exists():
-            return m.group(1).strip()
+        base = base_name(read_note(name)) if name else ""
+        if base:
+            return base
     return ""
 
 
@@ -562,10 +576,10 @@ def dati_cliente(client_id: str) -> dict:
     s = open(f).read()
     col = re.search(r"^- \*\*Colori:\*\*(.*)$", s, re.M)
     font = re.search(r"^- \*\*Font:\*\*\s*(.*)$", s, re.M)
-    base = re.search(r"Base tecnica CapCut:\*\*\s*([^\n(]+)", s)
+    base = base_name(s)
     hexm = re.search(r"#[0-9A-Fa-f]{6}", col.group(1)) if col else None
     return {"ok": True, "colore": hexm.group(0).upper() if hexm else "", "colori": col.group(1).strip() if col else "",
-            "font": font.group(1).strip() if font else "", "base": base.group(1).strip() if base else ""}
+            "font": font.group(1).strip() if font else "", "base": base}
 
 
 def salva_cliente(client_id: str, col: str = "", font: str = "", base: str = "", regola: str = "") -> dict:
