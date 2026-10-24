@@ -12,7 +12,11 @@ const state = {
   aiReady: false,          // Claude verified with a real request — required to edit
   ffmpeg: false,
   running: false,
-  clients: [],             // client profiles (skills with one client's rules)
+  clients: [],             // client profiles (skills with one client's rules) and clients of the Obsidian vault
+  vault: { enabled: false, agenzie: [] },
+  study: { video: [], shots: [] },   // material for "fai studiare a Claude" in the client modal
+  ag: "Tutti",             // agency filter of the client chips
+  editing: null,           // client being edited in the modal, or null for a new one
   client: null,            // chosen client, or null
   otherTemplate: false,    // "Altro template…": no client, template picked by hand
   steps: [],               // progress steps of an editing run
@@ -167,6 +171,8 @@ async function loadClients() {
     const data = await (await fetch(`${BACKEND}/api/clients`)).json();
     state.clients = data.clients || [];
     state.steps = data.steps || [];
+    state.vault = data.vault || state.vault;
+    $("v-client").hidden = !state.vault.enabled;
   } catch (e) { console.error("clients", e); }
   renderChips();
   renderSteps(0);
@@ -179,13 +185,38 @@ async function loadClients() {
 function renderChips() {
   const box = $("chips");
   box.innerHTML = "";
-  for (const c of state.clients) {
+  // with many clients: agency tabs + search
+  const ags = [...new Set(state.clients.map((c) => c.agenzia || "Profili"))];
+  const many = state.clients.length > 12;
+  $("ag-tabs").hidden = !many || ags.length < 2;
+  $("csearch").hidden = !many;
+  if (many && ags.length > 1) {
+    $("ag-tabs").innerHTML = "";
+    for (const a of ["Tutti", ...ags]) {
+      const t = document.createElement("button");
+      t.className = "tab" + (a === state.ag ? " on" : "");
+      t.textContent = a;
+      t.onclick = () => { state.ag = a; renderChips(); };
+      $("ag-tabs").appendChild(t);
+    }
+  }
+  const q = $("csearch").value.trim().toLowerCase();
+  const shown = state.clients.filter((c) => (state.ag === "Tutti" || (c.agenzia || "Profili") === state.ag)
+                                            && (!q || c.nome.toLowerCase().includes(q)));
+  for (const c of shown) {
     const chip = document.createElement("button");
     chip.className = "chip" + (state.client && state.client.id === c.id ? " on" : "");
     chip.style.setProperty("--c", c.colore);
     chip.innerHTML = `<i style="background:${c.colore}"></i>${escapeHtml(c.nome)}`;
     chip.onclick = () => chooseClient(c);
     box.appendChild(chip);
+  }
+  if (state.vault.enabled) {
+    const add = document.createElement("button");
+    add.className = "chip add";
+    add.textContent = "＋ Cliente";
+    add.onclick = () => openClientModal(null);
+    box.appendChild(add);
   }
   const other = document.createElement("button");
   other.className = "chip other" + (state.otherTemplate ? " on" : "");
@@ -216,6 +247,7 @@ async function chooseClient(c) {
 
   $("rules-title").textContent = c ? `Regole · ${c.nome}` : "Regole del cliente";
   $("btn-client-open").hidden = !c;
+  $("btn-client-edit").hidden = !(c && c.source === "vault");
   if (!c) {
     $("rules").innerHTML = '<div class="empty">Senza profilo cliente Claude segue solo le regole generali e il template.</div>';
     return;
@@ -253,6 +285,23 @@ async function loadKit() {
 // Step 2: clips
 // ---------------------------------------------------------------------------
 
+let brTok = 0;
+async function setBroll(path) {
+  const tok = ++brTok;
+  $("broll-path").value = path;
+  $("broll-label").innerHTML = path ? `${escapeHtml(path)} <button class="btn-link mini" id="br-clear">✕ togli</button>` : "";
+  $("thumbs-broll").innerHTML = "";
+  $("br-info").textContent = path ? "carico…" : "";
+  if (!path) return;
+  $("br-clear").onclick = (e) => { e.stopPropagation(); setBroll(""); };
+  try {
+    const i = await (await fetch(`${BACKEND}/api/folder-info?path=${encodeURIComponent(path)}`)).json();
+    if (tok !== brTok) return;
+    $("br-info").textContent = i.ok && i.n ? `${i.n} b-roll${i.lenti ? " · 🐢 " + i.lenti + " slow-mo" : ""}` : "nessun video";
+    for (const t of i.thumbs || []) { const img = document.createElement("img"); img.src = t; $("thumbs-broll").appendChild(img); }
+  } catch (_) { $("br-info").textContent = ""; }
+}
+
 async function setFolder(path) {
   $("input-path").value = path;
   $("input-path-label").textContent = path;
@@ -265,7 +314,7 @@ async function setFolder(path) {
     const i = await (await fetch(`${BACKEND}/api/folder-info?path=${encodeURIComponent(path)}`)).json();
     if ($("input-path").value !== path) return;
     $("s2-info").textContent = i.ok && i.n
-      ? `${i.n} clip · ${Math.floor(i.durata / 60)}:${String(i.durata % 60).padStart(2, "0")} min` : "nessuna clip trovata";
+      ? `${i.n} clip · ${Math.floor(i.durata / 60)}:${String(i.durata % 60).padStart(2, "0")} min${i.lenti ? " · 🐢 " + i.lenti + " slow-mo" : ""}` : "nessuna clip trovata";
     for (const t of i.thumbs || []) {
       const img = document.createElement("img");
       img.src = t;
@@ -329,6 +378,8 @@ function check() {
   if (!hasName) miss.push("nome del progetto");
   const ready = state.backendReady && state.aiReady && !state.running && !state.modRunning && !miss.length;
   $("btn-generate").disabled = !ready;
+  // the queue takes new videos even while another one is being edited
+  $("btn-queue").disabled = !(state.backendReady && state.aiReady && !state.batch && !miss.length);
   $("missing").textContent = state.running ? "Montaggio in corso…"
     : !state.backendReady ? "Avvio del motore dell'app…"
     : miss.length ? `Manca: ${miss.join(", ")}`
@@ -345,20 +396,46 @@ function isOn(id) { return $(id).classList.contains("on"); }
 function wireEditor() {
   $("v-new").onclick = () => showView("editor");
   $("v-proj").onclick = () => showView("home");
+  $("v-client").onclick = () => openClientModal(null);
 
   $("drop").onclick = async () => {
     const p = window.api && await window.api.selectFolder();
     if (p) setFolder(p);
   };
-  // dropping a folder (or a clip: its folder) anywhere on the window
+  $("drop-broll").onclick = async () => {
+    const p = window.api && await window.api.selectFolder();
+    if (p) setBroll(p);
+  };
+  $("csearch").oninput = renderChips;
+  $("btn-client-edit").onclick = () => { if (state.client) openClientModal(state.client); };
+  wireClientModal();
+  // dropping a folder (or a clip: its folder) anywhere on the window. WebKit fires dragleave with no
+  // relatedTarget all the time (the overlay flickered and could stay stuck): keep it while dragover keeps coming.
+  let dragT = null, dropZone = null;
+  const endDrag = () => {
+    clearTimeout(dragT);
+    document.body.classList.remove("dragging");
+    document.querySelectorAll(".drop").forEach((d) => d.classList.remove("hover"));
+  };
   document.addEventListener("dragover", (e) => {
     e.preventDefault();
+    const z = e.target.closest && e.target.closest(".drop");
+    dropZone = z ? z.id : null;
+    document.querySelectorAll(".drop").forEach((d) => d.classList.toggle("hover", d === z));
     if (!$("view-editor").hidden || state.currentProject) document.body.classList.add("dragging");
+    clearTimeout(dragT);
+    dragT = setTimeout(endDrag, 250);
   });
-  document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
   document.addEventListener("drop", (e) => {
     e.preventDefault();
-    document.body.classList.remove("dragging");
+    endDrag();
+    if (!$("client-modal").hidden) {          // videos / screenshots for a new client to study
+      for (const f of e.dataTransfer.files) {
+        const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
+        if (p) addStudyPath(p);
+      }
+      return;
+    }
     if (!$("view-home").hidden) {          // screenshots for a change request
       for (const f of e.dataTransfer.files) {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
@@ -370,7 +447,8 @@ function wireEditor() {
     const f = e.dataTransfer.files[0];
     const p = f && window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
     if (!p) return;
-    setFolder(/\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(p) ? p.replace(/\/[^/]+$/, "") : p);
+    const dir = /\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(p) ? p.replace(/\/[^/]+$/, "") : p;
+    if (dropZone === "drop-broll") setBroll(dir); else setFolder(dir);
   });
 
   $("template").onchange = () => { loadKit(); check(); };
@@ -389,6 +467,9 @@ function wireEditor() {
   $("kit-guide-close").onclick = $("kit-guide-done").onclick = () => { $("kit-guide").hidden = true; };
 
   $("btn-generate").onclick = onGenerate;
+  $("btn-queue").onclick = addToQueue;
+  $("btn-queue-clear").onclick = async () => { await fetch(`${BACKEND}/api/queue/clear`, { method: "POST" }); loadQueue(); };
+  loadQueue();
   $("btn-stop").onclick = async () => {
     if (!state.jobId) return;
     $("btn-stop").disabled = true;
@@ -424,6 +505,8 @@ function buildRequest() {
     ai_zoom: isOn("sw-zoom"),
     sentence_transitions: isOn("sw-transitions"),
     aggressive_fillers: isOn("sw-aggr"),
+    broll_path: $("broll-path").value.trim() || null,
+    cine: isOn("sw-cine"),
   };
 }
 
@@ -447,7 +530,7 @@ async function onGenerate() {
     delete body.name;
   }
   addLog(`Lavoro: ${state.batch ? "un video per sottocartella" : body.name} · `
-    + `${state.client ? state.client.nome : body.template}`, "step");
+    + `${state.client ? state.client.nome : body.template}` + (body.cine ? " · 🎬 cine" : "") + (body.broll_path ? " · con b-roll" : ""), "step");
 
   let jobId;
   try {
@@ -510,6 +593,79 @@ async function onGenerate() {
     else if (msg.type === "status") end(msg);
     else if (msg.type === "error") end({ status: "error", error: msg.message });
   };
+}
+
+// ---------------------------------------------------------------------------
+// Queue: add videos one after the other, they are edited one at a time; a sound when all are done
+// ---------------------------------------------------------------------------
+
+let queueTimer = null, queueSel = null;
+
+async function addToQueue() {
+  const body = buildRequest();
+  $("btn-queue").disabled = true;
+  try {
+    const r = await (await fetch(`${BACKEND}/api/queue`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                         body: JSON.stringify(body) })).json();
+    if (r.error) { $("missing").textContent = "⚠️ " + r.error; check(); return; }
+    addLog(`＋ In coda: ${body.name} · ${state.client ? state.client.nome : body.template}`, "step");
+    // ready for the next video of the same client: clear folder, b-roll, name and notes
+    $("input-path").value = ""; $("input-path-label").textContent = ""; $("thumbs").innerHTML = ""; $("s2-info").textContent = "";
+    setBroll(""); $("name").value = ""; $("name").dataset.auto = "1"; $("notes").value = "";
+  } catch (e) { addLog(`Il motore dell'app non risponde (${e}).`, "err"); }
+  check();
+  loadQueue();
+}
+
+const Q_LABEL = { "in coda": "⏳ in coda", "in corso": "▶ in corso", "fatto": "✓ pronto", "errore": "✕ errore", "tolto": "fermato" };
+
+async function loadQueue() {
+  clearTimeout(queueTimer);
+  let items = [];
+  try { items = (await (await fetch(`${BACKEND}/api/queue`)).json()).items || []; } catch (_) { queueTimer = setTimeout(loadQueue, 4000); return; }
+  $("queue-card").hidden = !items.length;
+  const waiting = items.filter((i) => i.status === "in coda").length, running = items.find((i) => i.status === "in corso");
+  $("queue-tag").textContent = running ? `${waiting + 1} da fare` : waiting ? `${waiting} in attesa` : "finita";
+  const box = $("queue-list");
+  box.innerHTML = "";
+  for (const it of items) {
+    const row = document.createElement("div");
+    row.className = "qitem" + (queueSel === it.id ? " sel" : "");
+    const cls = it.status === "in corso" ? "run" : it.status === "fatto" ? "ok" : it.status === "errore" ? "err" : "";
+    const step = it.status === "in corso" && it.step ? ` ${it.step}/${state.steps.length || 6}` : "";
+    row.innerHTML = `<div style="min-width:0"><div class="qn"></div><div class="ql"></div></div><span class="qs ${cls}">${Q_LABEL[it.status] || it.status}${step}</span>`
+      + `<button class="qx" title="${it.status === "in corso" ? "Ferma" : "Togli"}">✕</button>`;
+    row.querySelector(".qn").textContent = `${it.name} · ${it.cliente}`;
+    row.querySelector(".ql").textContent = it.status === "errore" ? (it.error || "") : it.last || (it.status === "in coda" ? "aspetta il suo turno" : "");
+    row.querySelector(".qx").onclick = async (e) => {
+      e.stopPropagation();
+      if (it.status === "in corso" && !confirm(`Fermo il montaggio di «${it.name}»?`)) return;
+      await fetch(`${BACKEND}/api/queue/${it.id}`, { method: "DELETE" }); loadQueue();
+    };
+    row.onclick = () => showQueueLog(it);
+    box.appendChild(row);
+  }
+  if (running || waiting) {
+    if (queueSel) { const s = items.find((i) => i.id === queueSel); if (s) showQueueLog(s, true); }
+    queueTimer = setTimeout(loadQueue, 3000);
+  } else if (state.queueWasRunning) {
+    loadProjects();
+  }
+  state.queueWasRunning = !!(running || waiting);
+}
+
+// the log of a queued video in the "Dettagli" box (when no single edit is running)
+async function showQueueLog(it, refresh = false) {
+  if (state.running || !it.job_id) { queueSel = it.id; return; }
+  queueSel = it.id;
+  try {
+    const job = await (await fetch(`${BACKEND}/api/jobs/${it.job_id}`)).json();
+    $("console").innerHTML = "";
+    for (const l of job.logs || []) addLog(l);
+    renderSteps(job.step || 0, job.status === "done");
+    setStatus(`${it.name}: ${Q_LABEL[it.status] || it.status}`);
+  } catch (_) { /* try at the next refresh */ }
+  if (!refresh) loadQueue();
 }
 
 function finishRun() {
@@ -627,13 +783,14 @@ function renderProjects() {
     }
     box.appendChild(g);
   }
-  if (!list.length) box.innerHTML = '<div class="empty">Ancora nessun progetto montato dall\'app</div>';
+  if (!list.length) box.innerHTML = '<div class="empty">Nessun progetto CapCut su questo Mac</div>';
 }
 
 function badge(p) {
   if (state.modRunning === p.id) return '<span class="badge run">⏳ modifiche in corso</span>';
   if (!p.exists) return '<span class="badge err">non più in CapCut</span>';
-  return '<span class="badge ok">montato</span>';
+  if (p.source === "capcut") return '<span class="badge">in CapCut</span>';
+  return '<span class="badge ok">montato con l\'app</span>';
 }
 
 async function openProject(p) {
@@ -643,7 +800,7 @@ async function openProject(p) {
   renderProjects();
   const s = p.settings || {};
   let mods = [];
-  try { mods = (await (await fetch(`${BACKEND}/api/projects/${p.id}/mods`)).json()).mods || []; } catch (_) {}
+  try { mods = (await (await fetch(`${BACKEND}/api/projects/${encodeURIComponent(p.id)}/mods`)).json()).mods || []; } catch (_) {}
   if (state.currentProject !== p) return;
   const running = state.modRunning === p.id;
   const thread = mods.map((m, i) => {
@@ -661,7 +818,7 @@ async function openProject(p) {
     <div class="phead">${p.cover ? `<img src="${p.cover}">` : ""}
       <div style="flex:1;min-width:0"><div class="m">${escapeHtml(p.cliente)} · template «${escapeHtml(s.template || "—")}»</div>
         <h2>${escapeHtml(p.name)}</h2>
-        <div class="m">Montato il ${fmtDate(p.created_at)}${mods.length ? ` · ${mods.length} ${mods.length > 1 ? "modifiche" : "modifica"}` : ""}</div>
+        <div class="m">${p.source === "capcut" ? "Ultima modifica in CapCut" : "Montato"} il ${fmtDate(p.created_at)}${mods.length ? ` · ${mods.length} ${mods.length > 1 ? "modifiche" : "modifica"}` : ""}</div>
         <div class="sum">${escapeHtml(p.riassunto || "")}</div></div>
       <div class="acts">
         <button class="btn2" id="pd-folder" ${p.exists ? "" : "disabled"}>Apri in Finder</button>
@@ -738,7 +895,7 @@ async function sendChange() {
   $("send").textContent = "Avvio…";
   let r;
   try {
-    r = await (await fetch(`${BACKEND}/api/projects/${p.id}/modify`, {
+    r = await (await fetch(`${BACKEND}/api/projects/${encodeURIComponent(p.id)}/modify`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ testo, immagini: state.att.map((a) => a.path), ai_model: $("ai-model").value }),
     })).json();
@@ -748,6 +905,9 @@ async function sendChange() {
     $("send").disabled = false;
     alert(r.error || "Modifica non avviata.");
     return;
+  }
+  if (r.project_id && r.project_id !== p.id) {   // a CapCut project changed from the app for the first time now has its record
+    p.id = r.project_id; p.source = "app";
   }
   state.modRunning = p.id;
   state.att = [];
@@ -1076,6 +1236,179 @@ function openExternal(url) {
 // ---------------------------------------------------------------------------
 // utils
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Client of the Obsidian vault: new (agency + name + colour, font only if wanted) or edit (colour/font/base/rule)
+// ---------------------------------------------------------------------------
+
+function wireClientModal() {
+  $("cm-close").onclick = $("cm-cancel").onclick = () => { $("client-modal").hidden = true; document.body.classList.remove("modal-open"); };
+  $("cm-ag").onchange = updateStudyUI;
+  ["cm-name", "cm-links", "cm-msg", "cm-ag-new"].forEach((i) => { $(i).oninput = updateStudyUI; });
+  $("cm-drop").onclick = async () => { for (const p of (window.api && await window.api.selectVideos()) || []) addStudyPath(p); };
+  $("cm-shot-btn").onclick = async () => { for (const p of (window.api && await window.api.selectImages()) || []) addStudyPath(p); };
+  $("cm-msg").addEventListener("paste", (e) => {
+    for (const it of e.clipboardData.items) if (it.type.startsWith("image/")) {
+      e.preventDefault();
+      const r = new FileReader();
+      r.onload = () => addStudyShot({ data_url: r.result });
+      r.readAsDataURL(it.getAsFile());
+    }
+  });
+  $("cm-pick").oninput = () => { $("cm-col").value = $("cm-pick").value.toUpperCase(); };
+  $("cm-col").oninput = () => {
+    const v = $("cm-col").value.trim().replace(/^#?/, "#");
+    if (/^#[0-9a-f]{6}$/i.test(v)) $("cm-pick").value = v.toLowerCase();
+  };
+  $("cm-save").onclick = saveClientModal;
+}
+
+async function addStudyShot(body) {
+  try {
+    const a = await (await fetch(`${BACKEND}/api/attachments`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                                body: JSON.stringify(body) })).json();
+    if (a.path) { state.study.shots.push(a); renderStudy(); }
+  } catch (_) { /* not an image */ }
+}
+
+function addStudyPath(p) {
+  if (/\.(jpe?g|png|heic|webp|gif)$/i.test(p)) return addStudyShot({ path: p });
+  if (!state.study.video.includes(p)) state.study.video.push(p);
+  $("cm-study").open = true;
+  renderStudy();
+}
+
+function renderStudy() {
+  $("cm-refs").innerHTML = "";
+  state.study.video.forEach((p, i) => {
+    const d = document.createElement("div");
+    d.className = "ref";
+    d.innerHTML = `🎞️ <em></em><button>✕</button>`;
+    d.querySelector("em").textContent = p.split("/").slice(-2).join("/");
+    d.querySelector("button").onclick = () => { state.study.video.splice(i, 1); renderStudy(); };
+    $("cm-refs").appendChild(d);
+  });
+  $("cm-shots").innerHTML = "";
+  state.study.shots.forEach((a, i) => {
+    const d = document.createElement("div");
+    d.innerHTML = `<img src="${a.thumb}"><span>✕</span>`;
+    d.querySelector("span").onclick = () => { state.study.shots.splice(i, 1); renderStudy(); };
+    $("cm-shots").appendChild(d);
+  });
+  updateStudyUI();
+}
+
+function hasStudyMaterial() {
+  return !!(state.study.video.length || state.study.shots.length || $("cm-links").value.trim() || $("cm-msg").value.trim());
+}
+
+// new agency → Claude studies it; existing agency + colour → the client is written right away (study only if material is given)
+function updateStudyUI() {
+  if (state.editing) return;
+  const nuova = $("cm-ag").value === "__new";
+  $("cm-ag-new").hidden = !nuova;
+  if (nuova) $("cm-study").open = true;
+  $("cm-name-opt").hidden = !nuova;
+  const study = nuova || hasStudyMaterial();
+  $("cm-save").textContent = study ? "✦ STUDIA E SALVA" : "SALVA";
+}
+
+async function openClientModal(c) {
+  state.editing = c;
+  state.study = { video: [], shots: [] };
+  ["cm-links", "cm-msg", "cm-note", "cm-ag-new"].forEach((i) => { $(i).value = ""; });
+  $("cm-study").hidden = !!c;
+  $("cm-study").open = false;
+  renderStudy();
+  document.body.classList.add("modal-open");
+  $("cm-title").textContent = c ? `✏️ ${c.nome}` : "Nuovo cliente";
+  $("cm-new").hidden = !!c;
+  $("cm-edit-only").hidden = !c;
+  $("cm-reg-label").hidden = $("cm-reg").hidden = !c;
+  $("cm-msg").textContent = "";
+  ["cm-name", "cm-col", "cm-font", "cm-reg"].forEach((i) => { $(i).value = ""; });
+  $("cm-now").textContent = "";
+  if (!c) {
+    $("cm-ag").innerHTML = (state.vault.agenzie || []).map((a) => `<option>${escapeHtml(a)}</option>`).join("")
+      + `<option value="__new">＋ Nuova agenzia…</option>`;
+    if (state.ag !== "Tutti" && (state.vault.agenzie || []).includes(state.ag)) $("cm-ag").value = state.ag;
+  } else {
+    const d = await (await fetch(`${BACKEND}/api/clients/${encodeURIComponent(c.id)}/params`)).json();
+    $("cm-col").value = d.colore || "";
+    if (d.colore) $("cm-pick").value = d.colore.toLowerCase();
+    $("cm-font").value = d.font || "";
+    $("cm-now").textContent = `Ora: ${d.colori || "—"}`;
+    const tpl = await (await fetch(`${BACKEND}/api/templates`)).json();
+    $("cm-base").innerHTML = ["", ...tpl.templates.map((t) => t.name)]
+      .map((n) => `<option ${n === d.base ? "selected" : ""}>${escapeHtml(n)}</option>`).join("");
+  }
+  $("client-modal").hidden = false;
+  updateStudyUI();
+}
+
+async function saveClientModal() {
+  let col = $("cm-col").value.trim();
+  if (col && !col.startsWith("#")) col = "#" + col;
+  const c = state.editing;
+  if (!c && ($("cm-ag").value === "__new" || hasStudyMaterial())) return startStudy(col);
+  let r;
+  try {
+    if (!c) {
+      r = await (await fetch(`${BACKEND}/api/clients`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agenzia: $("cm-ag").value, nome: $("cm-name").value.trim(), colore: col.toUpperCase(),
+                               font: $("cm-font").value.trim() }) })).json();
+    } else {
+      r = await (await fetch(`${BACKEND}/api/clients/${encodeURIComponent(c.id)}/params`, { method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ colore: col.toUpperCase(), font: $("cm-font").value.trim(), base: $("cm-base").value,
+                               regola: $("cm-reg").value.trim() }) })).json();
+    }
+  } catch (e) { r = { ok: false, msg: String(e) }; }
+  if (!r.ok) { $("cm-msg").textContent = "⚠️ " + r.msg; return; }
+  $("client-modal").hidden = true;
+  const id = c ? c.id : r.id;
+  await loadClients();
+  const fresh = state.clients.find((x) => x.id === id);
+  if (fresh) await chooseClient(fresh);
+  addLog("✏️ " + r.msg, "ok");
+}
+
+async function startStudy(col) {
+  const nuova = $("cm-ag").value === "__new";
+  const ag = (nuova ? $("cm-ag-new").value : $("cm-ag").value).trim().toUpperCase();
+  if (!ag) { $("cm-msg").focus(); $("cm-save").textContent = "Scrivi il nome dell'agenzia"; return; }
+  const body = { agenzia: ag, cliente: $("cm-name").value.trim(), colore: col.toUpperCase(), font: $("cm-font").value.trim(),
+                 video: state.study.video, link: $("cm-links").value, messaggio: $("cm-msg").value,
+                 screenshot: state.study.shots.map((a) => a.path), note: $("cm-note").value, ai_model: $("ai-model").value };
+  let jobId;
+  try { jobId = (await (await fetch(`${BACKEND}/api/study`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                             body: JSON.stringify(body) })).json()).job_id; }
+  catch (e) { $("cm-msg").value += `\n(errore: ${e})`; return; }
+  $("client-modal").hidden = true;
+  document.body.classList.remove("modal-open");
+  showView("editor");
+  $("console").innerHTML = "";
+  setStatus("Claude sta studiando…");
+  addLog(`✦ Studio di ${ag}${body.cliente ? " / " + body.cliente.toUpperCase() : ""}: ${body.video.length} video · `
+    + `${body.link.trim() ? body.link.trim().split("\n").length : 0} link · ${body.screenshot.length} screenshot`, "step");
+  let shown = 0;
+  const poll = setInterval(async () => {
+    try {
+      const job = await (await fetch(`${BACKEND}/api/jobs/${jobId}`)).json();
+      const logs = job.logs || [];
+      for (; shown < logs.length; shown++) addLog(logs[shown]);
+      if (job.status === "done" || job.status === "error") {
+        clearInterval(poll);
+        setStatus(job.status === "done" ? "studio finito" : "interrotto");
+        if (job.status === "error") addLog(job.error || "errore", "err");
+        await loadClients();
+        const fresh = state.clients.find((x) => x.agenzia === ag && (!body.cliente || x.nome === body.cliente.toUpperCase()));
+        if (fresh) chooseClient(fresh);
+        if (job.status === "done") addLog("— finito: il cliente è pronto in “Nuovo video” —", "ok");
+      }
+    } catch (_) { /* backend busy: next tick */ }
+  }, 2500);
+}
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>

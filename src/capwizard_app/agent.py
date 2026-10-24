@@ -22,7 +22,7 @@ import threading
 import time
 from pathlib import Path
 
-from capwizard_app import registry
+from capwizard_app import registry, vault
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, clean_env, find_claude_cli
 
 SKILLS_DIR = Path.home() / ".claude/skills"
@@ -141,7 +141,9 @@ def list_clients() -> list[dict]:
             "descrizione": fm.get("description", ""),
             "path": str(f),
         })
-    return sorted(out, key=lambda c: c["nome"].lower())
+    out.sort(key=lambda c: c["nome"].lower())
+    # clients kept in an Obsidian vault (Daniel's VIDEO EDIT BRAIN), after the profile skills
+    return out + [c for c in vault.list_clients() if c["nome"] not in seen]
 
 
 def get_client(client_id: str | None) -> dict | None:
@@ -161,6 +163,8 @@ def client_rules(client_id: str) -> str:
     c = get_client(client_id)
     if not c:
         return ""
+    if c.get("source") == "vault":
+        return vault.rules_text(client_id)
     text = Path(c["path"]).read_text()
     return re.sub(r"\A---\n.*?\n---\n", "", text, flags=re.S).strip()
 
@@ -228,7 +232,7 @@ def _slug(s: str) -> str:
     return re.sub(r"[^\w\- ]", "_", s).strip() or "video"
 
 
-def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcript: list[str]) -> str | None:
+def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcript: list[str], step_of=None) -> str | None:
     """Run Claude Code on `prompt`, streaming its messages into the job's log.
     Returns why it stopped badly, if it did."""
     cmd = [find_claude_cli(), "-p", "--output-format", "stream-json", "--verbose",
@@ -264,7 +268,7 @@ def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcr
                             job.log(ln)
                 elif c.get("type") == "tool_use":
                     tool, inp = c.get("name", ""), c.get("input") or {}
-                    job.set_step(_step_of(tool, inp))
+                    job.set_step((step_of or _step_of)(tool, inp))
                     job.log(f"⚙ {_describe(tool, inp)}")
         elif ev.get("type") == "result":
             if ev.get("is_error"):
@@ -299,11 +303,13 @@ def check_request(req) -> str | None:
 
 def run_agent(job, req) -> tuple[str, str]:
     """Edit one reel with Claude Code. Returns (project path, report path)."""
+    client = get_client(getattr(req, "client", None))
+    if client and client.get("source") == "vault":
+        return run_vault(job, req, client)
     problem = check_request(req)
     if problem:
         raise RuntimeError(problem)
     skill_md = editor_skill()
-    client = get_client(getattr(req, "client", None))
     work = WORK_DIR / f"{_slug(req.name)} {time.strftime('%m%d-%H%M')}"
     work.mkdir(parents=True, exist_ok=True)
     result = work / "risultato.json"
@@ -467,6 +473,8 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
         raise RuntimeError("Il progetto è aperto in CapCut: torna alla home dei progetti di CapCut e riprova.")
     settings = project.get("settings") or {}
     client = client_for(settings)
+    if client and client.get("source") == "vault":
+        return run_vault_modify(job, project, client, text, images, model)
     profile = writable_profile(client) if client else None
     skill_md = editor_skill()
 
@@ -528,6 +536,322 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
     job.log("✓ " + (res.get("riassunto") or "Modifiche fatte.").replace("\n", " "))
     if res.get("lezione"):
         job.log(f"📒 Lezione salvata{' nel profilo di ' + client['nome'] if client else ''}: {res['lezione']}")
+    return res
+
+
+# ---------------------------------------------------------------------------
+# Clients from the Obsidian vault: Daniel's workflow (rules general → agency → client, base tecnica cloned,
+# b-roll, video cine, music rotation, automatic cut-out, media copied for CapCut's sandbox)
+# ---------------------------------------------------------------------------
+
+VAULT_PROMPT = """Sei l'assistente di montaggio di Daniel (videomaker). Lavori in automatico dall'app CapWizard: NON fare domande,
+decidi tu seguendo le regole. Qui sotto c'è il BRIEF del lavoro con le clip e TUTTE le regole dal vault Obsidian
+VIDEO EDIT BRAIN (`{vault}`): regole generali → stile dell'agenzia → regole del cliente (vince la più specifica).
+Il "progetto base" «{base}» è solo una base tecnica da clonare (font, preset, formati): NON copiarne contenuti o scelte.
+
+{brief}
+
+Procedura:
+1. Trascrivi le clip (parola per parola):
+   "{py}" "{tools}/trascrivi.py" "{clips}" "{work}/words.json"
+   (se c'è la cartella b-roll, guarda i fotogrammi dei b-roll con ffmpeg `{ff}` per capire cosa mostrano).
+2. Costruisci il progetto CapCut clonando la base tecnica «{base}» (`{capcut}/{base}`) in `{staging}` (cartella NUOVA, copia tutta la
+   cartella della base e poi riscrivi la timeline), applicando le regole. Scrivi gli script in `{work}/`. Se in
+   ~/Desktop/VIDEO CLAUDE/720 STUDI0 ci sono script di video simili (work_*/), riusali e adattali.
+   Tagli, titolo, sottotitoli, suoni, musica, b-roll, foto: tutto secondo le regole del cliente.
+3. Controlla il risultato (JSON valido, nessun riferimento rotto, durata giusta) e in particolare:
+   - tagli STRETTI: ogni clip finisce ~0,05–0,1 s dopo l'ultima parola (niente code di silenzio) e INIZIA sull'attacco reale
+     della voce misurato sull'energia dell'audio (0–0,05 s prima), non sull'inizio della parola di Whisper, che dopo il "vai!" è 0,2–0,4 s in anticipo;
+   - clip senza parlato vero nella cartella delle clip (trascrizione vuota, assurda o "Grazie a tutti"): spesso sono B-ROLL del posto,
+     guarda i fotogrammi prima di scartarle; quando si nomina il posto mettine uno (esterno poi interno); b-roll solo pertinenti e leggibili;
+   - QUANTITÀ dei suoni: quella dello stile dell'agenzia, che vince (Exodia dal 22/10: pochi e con senso — parole grandi animate
+     all'inizio dell'animazione, swish su transizioni e zoom, pochi ding, niente bong né riser in mezzo);
+   - ogni suono ha il colpo all'INIZIO di un sottotitolo (quando compare la parola chiave), riser che finiscono su un sottotitolo o su un taglio;
+   - niente transizione subito dopo il titolo;
+   - titolo dietro la testa: copia della clip su una traccia video SOPRA i testi del titolo, stesso tempo e stessa sorgente; lo scontorno
+     lo fa l'app quando installa il progetto (non scrivere a Daniel di premere "Rimuovi sfondo");
+   - take ripetute: tieni l'ultima take completa, mai doppioni;
+   - b-roll solo quando servono, quelli 🐢 rallentati; se è un VIDEO CINE segui anche la nota "Video cine";
+   - musica DIVERSA dagli ultimi video (lista nel brief).
+4. NON aprire né chiudere CapCut e NON installare il progetto: lo fa l'app. Alla fine scrivi il file `{result}` con:
+   {{"staging": "{staging}", "nome": "{name}", "durata": <secondi>, "riassunto": "<cosa hai fatto, in italiano, 5-8 righe>",
+    "da_fare_a_mano": ["<cosa resta da fare in CapCut>", ...]}}
+   Se non riesci scrivi lo stesso il file con "staging": null e il motivo nel riassunto.
+Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
+
+VAULT_MOD_PROMPT = """Sei l'assistente di montaggio di Daniel (videomaker). Lavori in automatico dall'app CapWizard: NON fare domande.
+Devi applicare delle MODIFICHE a un video già montato, direttamente sul progetto CapCut esistente (in place: niente copie v2).
+
+Progetto: «{name}» → `{folder}`
+Copia di sicurezza fatta dall'app: `{backup}`
+Cliente: {cliente} — regole nel vault `{vault}` (nota del cliente: `{note}`)
+Cosa avevi fatto quando l'hai montato: {summary}
+Versione generata da te (se c'è ancora): `{staging}`
+Modifiche già fatte in passato su questo video:
+{history}
+
+MODIFICHE RICHIESTE ORA (da Daniel o dal cliente):
+{text}
+{images}
+
+Procedura:
+1. Leggi la nota del cliente, lo stile della sua agenzia e "Regole generali di montaggio" nel vault: le modifiche richieste vincono,
+   tutto il resto deve restare secondo le regole.
+2. Leggi lo stato ATTUALE di draft_info.json: Daniel può averlo ritoccato a mano. Confrontalo con la versione generata per capire cosa
+   ha cambiato lui e NON annullare le sue modifiche.
+3. Applica SOLO le modifiche richieste. Se togli o sposti un taglio risincronizza sottotitoli e suoni. Scrivi lo stesso risultato in
+   draft_info.json, template-2.tmp e Timelines/<id>/(draft_info.json, template.tmp, template-2.tmp) con lo stesso id timeline, poi elimina i *.bak.
+4. Verifica: JSON valido, nessun riferimento rotto, durata coerente.
+5. Aggiorna SEMPRE il vault: nella nota del cliente, sezione "## Lezioni" (creala in fondo se manca), aggiungi
+   "- {day}: <cosa voleva e come l'hai risolto>"; se è una preferenza che vale anche per i prossimi video scrivila anche come regola
+   nella nota del cliente (o nello stile dell'agenzia in 03 Stili se vale per tutta l'agenzia) e correggi le regole vecchie che contraddice.
+   Aggiungi una riga anche in "08 Feedback/Feedback e correzioni.md".
+6. NON aprire né chiudere CapCut. Alla fine scrivi `{result}` con: {{"riassunto": "<cosa hai cambiato, 2-5 righe>",
+   "lezione": "<la lezione per i prossimi video, una riga, o null>"}}.
+Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
+
+
+def _vault_step(tool: str, inp: dict) -> int:
+    cmd, path = str(inp.get("command", "")), str(inp.get("file_path", ""))
+    if "trascrivi.py" in cmd:
+        return 2
+    if "staging" in cmd + path or "draft_info" in cmd + path:
+        return 5
+    if tool in ("Write", "Edit") and path.endswith(".py"):
+        return 3
+    if "verific" in cmd or "json.load" in cmd:
+        return 4
+    return 1
+
+
+def _vault_projects_of(client_id: str) -> set[str]:
+    return {p["name"] for p in registry.list_projects() if (p.get("settings") or {}).get("client") == client_id}
+
+
+def run_vault(job, req, client: dict) -> tuple[str, str]:
+    """A new video for a client of the vault: Claude builds it in a staging folder with Daniel's rules, the app installs it."""
+    if not find_claude_cli():
+        raise RuntimeError("Non trovo Claude Code sul Mac: installalo e fai il login una volta (`claude` → `/login`).")
+    if not Path(req.input_path).is_dir():
+        raise RuntimeError(f"La cartella delle clip non esiste: {req.input_path}")
+    if getattr(req, "broll_path", None) and not Path(req.broll_path).is_dir():
+        raise RuntimeError(f"La cartella dei b-roll non esiste: {req.broll_path}")
+    base = req.template or client["template"]
+    if not base or not (CAPCUT_PROJECTS_DIR / base / "draft_info.json").exists():
+        raise RuntimeError(f"Manca la base tecnica CapCut di {client['nome']}: scrivila nella sua nota (✏️ Modifica cliente).")
+    if (CAPCUT_PROJECTS_DIR / req.name).exists():
+        raise RuntimeError(f"Esiste già un progetto CapCut «{req.name}»: scegli un altro nome.")
+    work = WORK_DIR / f"{_slug(req.name)} {time.strftime('%m%d-%H%M')}"
+    staging = work / "staging" / req.name
+    work.mkdir(parents=True, exist_ok=True)
+    result = work / "risultato.json"
+    job_data = {"client": client["id"], "name": req.name, "input_path": req.input_path, "broll_path": getattr(req, "broll_path", None),
+                "cine": bool(getattr(req, "cine", False)), "musica": True, "notes": req.notes, "stile": client.get("stile")}
+    job.log("📒 Leggo le regole dal vault (generali → agenzia → cliente) e preparo il brief…")
+    brief = vault.brief(job_data, _vault_projects_of(client["id"]))
+    (work / "brief.md").write_text(brief)
+    if req.intro_title:
+        brief += f"\n\nTitolo iniziale voluto da Daniel: «{req.intro_title}»"
+    if req.ai_target_duration:
+        brief += f"\nDurata voluta: {req.ai_target_duration:g} s"
+    prompt = VAULT_PROMPT.format(vault=vault.VAULT, base=base, brief=brief, py=vault.tools_python(), tools=vault.TOOLS,
+                                 clips=req.input_path, work=work, ff=vault.ffmpeg() or "ffmpeg", capcut=CAPCUT_PROJECTS_DIR,
+                                 staging=staging, result=result, name=req.name)
+    dirs = {str(Path(req.input_path)), str(CAPCUT_PROJECTS_DIR), str(work), str(vault.VAULT), str(vault.TOOLS)}
+    if getattr(req, "broll_path", None):
+        dirs.add(str(Path(req.broll_path)))
+    old_scripts = Path.home() / "Desktop/VIDEO CLAUDE/720 STUDI0"
+    if old_scripts.is_dir():
+        dirs.add(str(old_scripts))
+    job.log(f"🎬 Avvio Claude Code ({req.ai_model}) con le regole di {client['nome']} ({client['agenzia']})"
+            + (" · 🎬 video cine" if job_data["cine"] else "") + (" · con b-roll" if job_data["broll_path"] else ""))
+    job.set_step(1)
+    transcript = [f"# {req.name}\n"]
+    error = _run_claude(job, prompt, dirs, req.ai_model or "opus", work, transcript, step_of=_vault_step)
+    if job.stopped:
+        raise RuntimeError("Montaggio fermato.")
+    try:
+        res = json.loads(result.read_text())
+    except (OSError, ValueError):
+        raise RuntimeError(error or "Claude ha finito senza scrivere il risultato.")
+    if not res.get("staging") or not Path(res["staging"]).is_dir():
+        raise RuntimeError(res.get("riassunto") or error or "Progetto non creato.")
+    job.set_step(6)
+    msg = vault.install(res["staging"], req.name, job.log)
+    job.log(msg)
+    project = str(CAPCUT_PROJECTS_DIR / req.name)
+    todo = [t for t in res.get("da_fare_a_mano") or [] if t]
+    report = work / "report.md"
+    report.write_text(
+        f"# {req.name}\n\nCliente: {client['nome']} ({client['agenzia']}) · base tecnica «{base}» · durata {res.get('durata', '?')} s\n\n"
+        f"## Cosa ha fatto Claude\n{res.get('riassunto', '')}\n\n## DA FARE A MANO IN CAPCUT\n"
+        + ("\n".join(f"- {t}" for t in todo) or "- niente") + "\n\n## Messaggi di Claude\n\n" + "\n\n".join(transcript[1:]) + "\n")
+    job.log("✓ " + res.get("riassunto", "Progetto creato.").replace("\n", " "))
+    for t in todo:
+        job.log(f"☐ {t}")
+    try:
+        settings = req.model_dump()
+        settings.update(template=base, staging=res["staging"])
+        registry.add_project(name=req.name, result_path=project, settings=settings, report_path=str(report))
+    except Exception as reg_err:  # noqa: BLE001 — registry is best-effort
+        job.log(f"⚠ impossibile salvare nel registro progetti: {reg_err}")
+    try:
+        vault.video_note(req.name, client["id"], client.get("stile", ""), res.get("riassunto", ""))
+    except Exception as e:  # noqa: BLE001
+        job.log(f"⚠ nota Obsidian non creata: {e}")
+    if not vault.capcut_running():
+        vault.open_capcut()
+        job.log(f"🚀 CapCut aperto: «{req.name}» è il primo in alto nella lista.")
+    return project, str(report)
+
+
+def run_vault_modify(job, project: dict, client: dict, text: str, images: list[str], model: str = "opus") -> dict:
+    folder = Path(project["result_path"])
+    settings = project.get("settings") or {}
+    mods = list_mods(project["id"])
+    history = "\n".join(f"- {m['data']}: {m['testo']} → {m.get('riassunto') or m['stato']}" for m in mods) or "- nessuna"
+    entry = {"data": time.strftime("%Y-%m-%d %H:%M"), "testo": text, "immagini": images, "stato": "in corso", "riassunto": ""}
+    mods.append(entry)
+    _save_mods(project["id"], mods)
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup = BACKUP_DIR / f"{folder.name} {time.strftime('%m%d-%H%M%S')}"
+    shutil.copytree(folder, backup, ignore=shutil.ignore_patterns(".locked"))
+    job.log(f"🗂 Copia di sicurezza del progetto: {backup}")
+    work = WORK_DIR / f"{_slug(project['name'])} modifica {time.strftime('%m%d-%H%M')}"
+    work.mkdir(parents=True, exist_ok=True)
+    result = work / "risultato.json"
+    report = Path(project.get("report_path") or "")
+    try:
+        summary = re.search(r"## Cosa ha fatto Claude\n(.*?)(?:\n## |\Z)", report.read_text(), re.S).group(1).strip()
+    except (OSError, AttributeError):
+        summary = "—"
+    prompt = VAULT_MOD_PROMPT.format(
+        name=project["name"], folder=folder, backup=backup, cliente=f"{client['nome']} ({client['agenzia']})", vault=vault.VAULT,
+        note=client["path"], summary=summary, staging=settings.get("staging") or "non disponibile", history=history,
+        text=text or "(vedi gli screenshot)", day=time.strftime("%d/%m"), result=result,
+        images=("Screenshot allegati (di solito la chat del cliente): guardali TUTTI con Read, contengono le modifiche:\n"
+                + "\n".join(f"- {p}" for p in images)) if images else "")
+    dirs = {str(folder), str(CAPCUT_PROJECTS_DIR), str(work), str(backup), str(ATTACH_DIR), str(vault.VAULT)}
+    if settings.get("staging"):
+        dirs.add(str(Path(settings["staging"]).parent))
+    for d in (settings.get("input_path"), settings.get("broll_path")):
+        if d:
+            dirs.add(str(d))
+    job.log(f"🎬 Avvio Claude Code sulle modifiche · regole di {client['nome']} dal vault")
+    transcript: list[str] = []
+    try:
+        error = _run_claude(job, prompt, dirs, model, work, transcript)
+        if job.stopped:
+            raise RuntimeError("Modifiche fermate.")
+        try:
+            res = json.loads(result.read_text())
+        except (OSError, ValueError):
+            raise RuntimeError(error or "Claude ha finito senza scrivere il risultato.")
+    except Exception as e:
+        entry.update(stato="errore", riassunto=str(e))
+        _save_mods(project["id"], mods)
+        raise
+    entry.update(stato="fatto", riassunto=res.get("riassunto", ""), lezione=res.get("lezione") or "", profilo=client["nome"])
+    _save_mods(project["id"], mods)
+    job.log(vault.porta_media(str(folder), project["name"]))
+    try:
+        vault.video_note(project["name"], client["id"], client.get("stile", ""), line=
+                         f"- **{time.strftime('%d/%m')} · modifica:** {text or '(da screenshot)'}"
+                         + (f" _({len(images)} screenshot)_" if images else "") + f"\n  → {res.get('riassunto', '').strip()}\n")
+        job.log("📒 Obsidian aggiornato (storico del video + lezioni del cliente).")
+    except Exception as e:  # noqa: BLE001
+        job.log(f"⚠ storico Obsidian non aggiornato: {e}")
+    job.log("✓ " + (res.get("riassunto") or "Modifiche fatte.").replace("\n", " "))
+    if not vault.capcut_running():
+        vault.open_capcut()
+    return res
+
+
+STUDY_PROMPT = """Sei l'assistente di montaggio di Daniel (videomaker). Lavori in automatico dall'app CapWizard: NON fare domande.
+Daniel ha {cosa}. Devi STUDIARE i materiali e salvare tutto nel vault Obsidian VIDEO EDIT BRAIN (`{vault}`),
+così i prossimi video per loro escono già nel loro stile.
+
+Dati (JSON):
+{dati}
+
+Procedura:
+1. Se ci sono video o link lancia
+   "{py}" "{studia}" "{out}" '<JSON con "file": [...] e "link": [...]>'
+   (scarica i link Instagram/TikTok con yt-dlp, trascrive, trova i tagli, crea i fogli provini). Poi leggi {out}/analisi.json e GUARDA con
+   Read TUTTI i fogli provini e i fotogrammi grandi. Se un link non si scarica (Instagram a volte chiede il login) scrivilo nel riassunto e
+   suggerisci a Daniel di trascinare i video nell'app.
+2. Guarda con Read anche gli screenshot allegati (di solito la chat dell'agenzia con i dettagli del cliente) e leggi il messaggio incollato.
+3. Ricava lo stile in modo concreto e misurabile, come nelle note che già esistono (leggi prima "03 Stili/Stile Exodia.md",
+   una nota cliente in "02 Clienti/EXODIA/" e "01 Agenzie/EXODIA.md" come modello di formato):
+   - titolo/gancio: c'è? dove (dietro la testa?), quanto dura, font (aspetto e quale font CapCut gli somiglia), colori (hex stimati), grandezza,
+     animazione, emoji;
+   - sottotitoli: posizione, font, colori, parole chiave colorate/più grandi, quante parole per volta, maiuscolo, animazioni;
+   - ritmo: secondi per taglio, tagli stretti o no, zoom/punch-in, b-roll, transizioni;
+   - audio: musica (genere, volume), suoni (quanti e dove), voce;
+   - durata tipica, formato, chiusura/CTA.
+   Distingui ciò che è SICURO da ciò che è stimato ("da verificare").
+4. Scrivi/aggiorna le note (con frontmatter `cssclasses: [...]` come le altre, link [[ ]] tra loro):
+   {note}
+   Nella nota del cliente metti sempre: "Cliente di [[AGENZIA]]", "- **Base tecnica CapCut:** <progetto CapCut esistente più simile per
+   struttura, tra quelli in `{capcut}`>", la sezione "## Scritte" (Font, Grandezza, "- **Colori:** #HEX …", Ombre/bordi) e
+   "Stile generale: [[Stile <Agenzia>]]". Se l'agenzia c'è già NON riscrivere le sue regole: aggiungi solo ciò che è nuovo.
+5. Aggiungi una riga in "08 Feedback/Feedback e correzioni.md" con la data di oggi: cosa hai imparato e da quali materiali.
+6. Alla fine scrivi il file `{result}` con: {{"riassunto": "<cosa hai imparato e quali note hai creato, in italiano, 5-10 righe>"}}.
+Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
+
+
+def run_study(job, d: dict) -> dict:
+    """A new agency and/or client: Claude studies reference videos, links, the agency's message and chat screenshots,
+    then writes agency, style and client notes in the vault."""
+    if not find_claude_cli():
+        raise RuntimeError("Non trovo Claude Code sul Mac.")
+    if not vault.enabled():
+        raise RuntimeError("Nessun vault Obsidian trovato.")
+    ag = (d.get("agenzia") or "").strip().upper()
+    cl = re.sub(r"[/:]", "-", (d.get("cliente") or "").strip().upper())
+    if not ag:
+        raise RuntimeError("Scegli o scrivi l'agenzia.")
+    links = [l.strip() for l in (d.get("link") or "").splitlines() if l.strip()]
+    if not (d.get("video") or links or (d.get("messaggio") or "").strip() or d.get("screenshot")):
+        raise RuntimeError("Metti almeno dei video, un link o il messaggio dell'agenzia.")
+    work = WORK_DIR / f"studio {_slug(ag + ' ' + cl)} {time.strftime('%m%d-%H%M')}"
+    work.mkdir(parents=True, exist_ok=True)
+    shots = []
+    for i, p in enumerate(d.get("screenshot") or []):
+        if Path(p).is_file():
+            dst = work / f"screenshot_{i + 1}_{Path(p).name}"
+            shutil.copy2(p, dst)
+            shots.append(str(dst))
+    nuova = not (vault.VAULT / "01 Agenzie" / f"{ag}.md").exists()
+    dati = {"agenzia": ag, "agenzia_nuova": nuova, "cliente": cl or "(nessuno: solo l'agenzia)", "colore_cliente": d.get("colore") or "",
+            "font_cliente": d.get("font") or "", "video_di_riferimento": d.get("video") or [], "link": links,
+            "messaggio_agenzia": (d.get("messaggio") or "").strip(), "screenshot": shots, "note_di_daniel": (d.get("note") or "").strip()}
+    (work / "dati.json").write_text(json.dumps(dati, ensure_ascii=False, indent=1))
+    note = []
+    if nuova:
+        note += [f'"01 Agenzie/{ag}.md" (cssclasses: [agenzia]) — chi sono, come lavorano, link, cartelle',
+                 f'"03 Stili/Stile {ag.title()}.md" (cssclasses: [stile]) — lo stile completo dei loro video, regola per regola']
+    note.append(f'"02 Clienti/{ag}/{cl}.md" (cssclasses: [cliente]) — font, colori, dettagli del cliente' if cl
+                else "(nessun cliente nuovo: aggiorna solo agenzia e stile)")
+    cosa = (f"una NUOVA agenzia, {ag}" if nuova else f"l'agenzia {ag}") + (f", con il nuovo cliente {cl}" if cl else "")
+    result = work / "risultato.json"
+    prompt = STUDY_PROMPT.format(cosa=cosa, vault=vault.VAULT, dati=json.dumps(dati, ensure_ascii=False, indent=1), py=vault.tools_python(),
+                                 studia=vault.TOOLS / "studia_media.py", out=work / "analisi", capcut=CAPCUT_PROJECTS_DIR,
+                                 note="\n   ".join("- " + n for n in note), result=result)
+    dirs = {str(vault.VAULT), str(work), str(vault.TOOLS), str(CAPCUT_PROJECTS_DIR)}
+    for v in d.get("video") or []:
+        dirs.add(str(Path(v) if Path(v).is_dir() else Path(v).parent))
+    job.log(f"✦ Studio: {cosa} · {len(d.get('video') or [])} video · {len(links)} link · {len(shots)} screenshot")
+    transcript: list[str] = []
+    error = _run_claude(job, prompt, dirs, d.get("ai_model") or "opus", work, transcript,
+                        step_of=lambda t, i: 2 if "studia_media" in str(i.get("command", "")) else 4 if t in ("Write", "Edit") else 1)
+    if job.stopped:
+        raise RuntimeError("Studio fermato.")
+    try:
+        res = json.loads(result.read_text())
+    except (OSError, ValueError):
+        raise RuntimeError(error or "Claude ha finito senza scrivere il risultato.")
+    job.log("✅ Studiato e salvato su Obsidian: " + res.get("riassunto", "").replace("\n", " "))
     return res
 
 

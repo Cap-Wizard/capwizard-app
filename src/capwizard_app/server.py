@@ -38,7 +38,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent
+from capwizard_app import agent, vault
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +128,8 @@ class GenerateRequest(BaseModel):
     sentence_transitions: bool = True
     fmt: str = "vertical"
     projects_dir: str | None = None
+    broll_path: str | None = None     # b-roll the client gave in another folder
+    cine: bool = False                # "video cine": per-clip colour, b-roll on the cuts (vault clients)
 
 
 class BatchRequest(GenerateRequest):
@@ -177,7 +179,7 @@ def system() -> dict:
     return {
         "os": platform.system().lower(),          # darwin | windows | linux
         "os_version": platform.version(),
-        "ffmpeg": bool(shutil.which("ffmpeg")),
+        "ffmpeg": bool(vault.ffmpeg()),
         "ffprobe": bool(shutil.which("ffprobe")),
         "whisper_models_cached": _whisper_cached_models(),
         "ai": {
@@ -340,10 +342,78 @@ def generate(req: GenerateRequest) -> dict:
 def clients() -> dict:
     """Client profiles (skills with one client's rules) and the progress steps."""
     return {"clients": agent.list_clients(), "steps": agent.STEPS,
-            "editor_skill": bool(agent.editor_skill())}
+            "editor_skill": bool(agent.editor_skill()),
+            "vault": {"enabled": vault.enabled(), "path": str(vault.VAULT), "agenzie": vault.agenzie()}}
 
 
-@app.get("/api/clients/{client_id}/rules")
+class NewClientRequest(BaseModel):
+    agenzia: str
+    nome: str
+    colore: str
+    font: str = ""
+    note: str = ""
+
+
+class ClientParams(BaseModel):
+    colore: str = ""
+    font: str = ""
+    base: str = ""
+    regola: str = ""
+
+
+class StudyRequest(BaseModel):
+    agenzia: str
+    cliente: str = ""
+    colore: str = ""
+    font: str = ""
+    video: list[str] = []
+    link: str = ""
+    messaggio: str = ""
+    screenshot: list[str] = []
+    note: str = ""
+    ai_model: str = "opus"
+
+
+def _run_study(job: Job, req: StudyRequest) -> None:
+    job.status = "running"
+    try:
+        agent.run_study(job, req.model_dump())
+        job.status = "done"
+    except Exception as e:  # noqa: BLE001
+        job.error = str(e)
+        job.status = "error"
+        job.log(f"ERRORE: {e}")
+
+
+@app.post("/api/study")
+def study(req: StudyRequest) -> dict:
+    """New agency/client with material to study (reference videos, Instagram links, the agency's message, chat screenshots)."""
+    job = manager.create()
+    threading.Thread(target=_run_study, args=(job, req), daemon=True).start()
+    return {"job_id": job.id}
+
+
+@app.post("/api/clients")
+def client_new(req: NewClientRequest) -> dict:
+    """A new client of an agency already in the vault: colour (and font only if the client wants one)."""
+    if not vault.enabled():
+        return {"ok": False, "msg": "Nessun vault Obsidian trovato."}
+    return vault.crea_cliente(req.agenzia, req.nome, req.colore, req.font, req.note)
+
+
+@app.get("/api/clients/{client_id:path}/params")
+def client_params(client_id: str) -> dict:
+    return vault.dati_cliente(client_id) if client_id.startswith(vault.PREFIX) else {"ok": False}
+
+
+@app.put("/api/clients/{client_id:path}/params")
+def client_params_save(client_id: str, req: ClientParams) -> dict:
+    if not client_id.startswith(vault.PREFIX):
+        return {"ok": False, "msg": "Solo i clienti del vault si modificano da qui: per un profilo skill apri il file."}
+    return vault.salva_cliente(client_id, req.colore, req.font, req.base, req.regola)
+
+
+@app.get("/api/clients/{client_id:path}/rules")
 def client_rules(client_id: str) -> dict:
     return {"text": agent.client_rules(client_id)}
 
@@ -358,7 +428,7 @@ def _thumb(src: Path, height: int, at: float | None = None) -> str:
     key = hashlib.sha1(f"{src}|{src.stat().st_mtime}|{height}|{at}".encode()).hexdigest()[:16]
     out = THUMBS / f"{key}.jpg"
     if not out.exists():
-        args = ["ffmpeg", "-v", "error", "-y"] + (["-ss", str(at)] if at is not None else []) + \
+        args = [vault.ffmpeg() or "ffmpeg", "-v", "error", "-y"] + (["-ss", str(at)] if at is not None else []) + \
                ["-i", str(src), "-frames:v", "1", "-vf", f"scale=-2:{height}", str(out)]
         subprocess.run(args, capture_output=True, timeout=30)
     if not out.exists():
@@ -384,9 +454,13 @@ def folder_info(path: str) -> dict:
     clips = sorted(p for p in list(base.iterdir()) + [q for d in base.iterdir() if d.is_dir() and not d.name.startswith(".")
                                                      for q in d.iterdir()]
                    if p.is_file() and p.suffix.lower() in VIDEO_EXT and not p.name.startswith("._"))
-    lengths = [_duration(c) for c in clips]
-    thumbs = [_thumb(c, 160, min(1.0, d / 2)) for c, d in list(zip(clips, lengths))[:8]]
-    return {"ok": True, "n": len(clips), "durata": round(sum(lengths)), "thumbs": [t for t in thumbs if t]}
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(6) as ex:      # all clips in parallel: a big folder must not freeze the page
+        info = list(ex.map(lambda c: vault.probe(str(c)), clips))
+        lengths = [d or 0.0 for d, _ in info]
+        thumbs = list(ex.map(lambda cd: _thumb(cd[0], 160, min(1.0, cd[1] / 2)), list(zip(clips, lengths))[:8]))
+    return {"ok": True, "n": len(clips), "durata": round(sum(lengths)), "thumbs": [t for t in thumbs if t],
+            "lenti": sum(1 for _, f in info if vault.is_slowmo(f))}
 
 
 @app.post("/api/jobs/{job_id}/stop")
@@ -412,6 +486,137 @@ def batch(req: BatchRequest) -> dict:
     return {"job_id": job.id}
 
 
+# ---------------------------------------------------------------------------
+# Queue: several reels added one after the other, edited one at a time. When the
+# last one ends the Mac plays a sound and shows a notification.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class QueueItem:
+    id: str
+    req: GenerateRequest
+    cliente: str = ""
+    status: str = "in coda"           # in coda | in corso | fatto | errore | tolto
+    job_id: str | None = None
+    result_path: str | None = None
+    error: str | None = None
+    added: float = field(default_factory=lambda: __import__("time").time())
+
+    def view(self) -> dict:
+        job = manager.get(self.job_id) if self.job_id else None
+        last = ""
+        if job:
+            for line in reversed(job.logs):
+                if line.strip() and not line.startswith("⚙"):
+                    last = line.strip()[:160]
+                    break
+        return {"id": self.id, "name": self.req.name, "cliente": self.cliente, "status": self.status,
+                "job_id": self.job_id, "step": job.step if job else 0, "last": last,
+                "result_path": self.result_path, "error": self.error}
+
+
+class Queue:
+    def __init__(self) -> None:
+        self.items: list[QueueItem] = []
+        self.lock = threading.Lock()
+        self.worker: threading.Thread | None = None
+        self.current: QueueItem | None = None
+
+    def add(self, req: GenerateRequest) -> QueueItem:
+        c = agent.get_client(req.client)
+        item = QueueItem(id=uuid.uuid4().hex[:10], req=req, cliente=c["nome"] if c else (req.template or ""))
+        with self.lock:
+            self.items.append(item)
+            if not (self.worker and self.worker.is_alive()):
+                self.worker = threading.Thread(target=self._loop, daemon=True)
+                self.worker.start()
+        return item
+
+    def _next(self) -> QueueItem | None:
+        with self.lock:
+            return next((i for i in self.items if i.status == "in coda"), None)
+
+    def _loop(self) -> None:
+        done = []
+        while True:
+            item = self._next()
+            if not item:
+                break
+            job = manager.create()
+            item.job_id, item.status, self.current = job.id, "in corso", item
+            _run_job(job, item.req)
+            item.result_path, item.error = job.result_path, job.error
+            item.status = "fatto" if job.status == "done" else ("tolto" if job.stopped else "errore")
+            self.current = None
+            done.append(item)
+        if done:
+            _all_done([i for i in done if i.status == "fatto"], [i for i in done if i.status == "errore"])
+
+    def remove(self, item_id: str) -> bool:
+        with self.lock:
+            for i in self.items:
+                if i.id == item_id:
+                    if i.status == "in coda":
+                        i.status = "tolto"
+                        return True
+                    if i.status == "in corso" and i.job_id:
+                        job = manager.get(i.job_id)
+                        if job:
+                            job.stopped = True
+                            agent.stop(job)
+                        return True
+                    if i.status in ("fatto", "errore", "tolto"):
+                        self.items.remove(i)
+                        return True
+        return False
+
+    def clear_finished(self) -> None:
+        with self.lock:
+            self.items = [i for i in self.items if i.status in ("in coda", "in corso")]
+
+
+queue = Queue()
+
+
+def _all_done(ok: list, failed: list) -> None:
+    """The queue has emptied: a sound and a notification, so the user knows without watching the app."""
+    msg = f"{len(ok)} video pront{'o' if len(ok) == 1 else 'i'}" + (f" · {len(failed)} con errore" if failed else "")
+    try:
+        subprocess.Popen(["/bin/sh", "-c", "afplay /System/Library/Sounds/Glass.aiff; afplay /System/Library/Sounds/Hero.aiff"])
+        subprocess.Popen(["osascript", "-e", f'display notification "{msg}" with title "CapWizard" subtitle "Coda finita" sound name "Glass"'])
+    except OSError:
+        pass
+
+
+@app.post("/api/queue")
+def queue_add(req: GenerateRequest) -> dict:
+    if not req.name.strip():
+        return {"error": "Manca il nome del progetto."}
+    if not Path(req.input_path).is_dir():
+        return {"error": "La cartella delle clip non esiste."}
+    if (CAPCUT_PROJECTS_DIR / req.name).exists():
+        return {"error": f"Esiste già un progetto CapCut «{req.name}»."}
+    if any(i.req.name == req.name and i.status in ("in coda", "in corso") for i in queue.items):
+        return {"error": f"«{req.name}» è già in coda."}
+    return {"ok": True, "item": queue.add(req).view()}
+
+
+@app.get("/api/queue")
+def queue_list() -> dict:
+    return {"items": [i.view() for i in queue.items if i.status != "tolto" or i.job_id]}
+
+
+@app.delete("/api/queue/{item_id}")
+def queue_remove(item_id: str) -> dict:
+    return {"ok": queue.remove(item_id)}
+
+
+@app.post("/api/queue/clear")
+def queue_clear() -> dict:
+    queue.clear_finished()
+    return {"ok": True}
+
+
 @app.get("/api/jobs/{job_id}")
 def job_status(job_id: str) -> dict:
     job = manager.get(job_id)
@@ -430,12 +635,136 @@ def _summary(report: str | None) -> str:
     return m.group(1).strip() if m else ""
 
 
+OLD_PANEL_JOBS = Path.home() / "video-editor-mcp/jobs"   # Daniel's first panel (CapCut Editor), if it was used on this Mac
+
+
+def _old_job(name: str) -> tuple[dict, dict]:
+    """job.json and result.json the old panel kept for a project of this name, if any."""
+    d = OLD_PANEL_JOBS / re.sub(r"[^\w\- ]", "_", name)
+    out = []
+    for f in ("job.json", "result.json"):
+        try:
+            out.append(__import__("json").loads((d / f).read_text()))
+        except (OSError, ValueError):
+            out.append({})
+    return out[0], out[1]
+
+
+def _video_notes() -> dict[str, str]:
+    """CapCut project name → its video note in the vault ("**Progetto CapCut:** NAME" or a note named like the project)."""
+    out: dict[str, str] = {}
+    if not vault.enabled():
+        return out
+    for f in (vault.VAULT / "05 Video").rglob("*.md"):
+        try:
+            txt = f.read_text()
+        except OSError:
+            continue
+        out.setdefault(f.stem, str(f))
+        for m in re.finditer(r"Progetto CapCut:\*\*\s*([^·\n*]+)", txt):
+            out[m.group(1).strip()] = str(f)
+    return out
+
+
+def _guess_client(name: str, clients: list[dict], notes: dict | None = None) -> dict | None:
+    """The client of a CapCut project not made by this app: from the old panel's job, else a client name inside the project name."""
+    job, _ = _old_job(name)
+    if job.get("cliente"):
+        cid = vault.PREFIX + job["cliente"]
+        c = next((x for x in clients if x["id"] == cid or x["nome"] == job["cliente"].split(" / ")[-1]), None)
+        if c:
+            return c
+    # the video's note in the vault ("05 Video/<client or agency>/<project>.md" with "Cliente [[X]]" or a [[client]] link)
+    vn = (notes if notes is not None else _video_notes()).get(name)
+    if vn:
+        txt = open(vn).read()
+        names = re.findall(r"\[\[([^\]|#]+)", txt) + [Path(vn).parent.name]
+        for n in names:
+            c = next((x for x in clients if x["nome"].upper() == n.strip().upper()), None)
+            if c:
+                return c
+    up = name.upper()
+    hits = [c for c in clients if len(c["nome"]) >= 3 and c["nome"].upper() in up]
+    return max(hits, key=lambda c: len(c["nome"])) if hits else None
+
+
+def _capcut_drafts(known: set[str]) -> list[dict]:
+    """Every project in this Mac's CapCut that the app's registry doesn't list yet (each user sees only their own CapCut)."""
+    out = []
+    if not CAPCUT_PROJECTS_DIR.is_dir():
+        return out
+    for d in CAPCUT_PROJECTS_DIR.iterdir():
+        info = next((d / f for f in ("draft_info.json", "template-2.tmp", "draft_info.json.bak") if (d / f).exists()), None)
+        if not d.is_dir() or d.name.startswith(".") or not info or str(d) in known:
+            continue
+        job, res = _old_job(d.name)
+        out.append({"id": "capcut:" + d.name, "name": d.name, "result_path": str(d), "report_path": None, "exists": True,
+                    "created_at": info.stat().st_mtime, "source": "capcut", "riassunto_old": res.get("riassunto", ""),
+                    "settings": {"client": None, "template": job.get("progetto_reference"), "input_path": job.get("cartella_clip"),
+                                 "broll_path": job.get("cartella_broll"), "staging": res.get("staging")}})
+    return out
+
+
+def _shared_space(folder: str) -> str:
+    """Group of a project whose client is unknown: downloaded from a shared (team) space of CapCut, or just CapCut."""
+    try:
+        meta = __import__("json").loads((Path(folder) / "draft_meta_info.json").read_text())
+        if meta.get("tm_draft_cloud_space_id"):
+            return "Dallo spazio condiviso di CapCut"
+    except (OSError, ValueError):
+        pass
+    return "Altri progetti CapCut"
+
+
+def _project(project_id: str) -> dict | None:
+    if project_id.startswith("capcut:"):
+        name = project_id[len("capcut:"):]
+        return next((p for p in _capcut_drafts(set()) if p["name"] == name), None)
+    return registry.get_project(project_id)
+
+
+def _register_draft(p: dict) -> dict:
+    """A CapCut project picked in "I miei progetti" gets its own record the first time it is changed from the app."""
+    clients = agent.list_clients()
+    c = _guess_client(p["name"], clients)
+    settings = {**p["settings"], "client": c["id"] if c else None}
+    rec = registry.add_project(name=p["name"], result_path=p["result_path"], settings=settings, report_path=None)
+    if p.get("riassunto_old"):
+        rep = registry.app_data_dir() / "lavori" / f"{p['name']} importato"
+        rep.mkdir(parents=True, exist_ok=True)
+        (rep / "report.md").write_text(f"# {p['name']}\n\n## Cosa ha fatto Claude\n{p['riassunto_old']}\n")
+        rec = {**rec, "report_path": str(rep / "report.md")}
+        projects = registry._load()
+        for x in projects:
+            if x["id"] == rec["id"]:
+                x["report_path"] = rec["report_path"]
+        registry._save(projects)
+    return rec
+
+
 @app.get("/api/projects")
 def projects_list() -> dict:
-    """Projects made with the app, with their client's name and colour, summary and CapCut cover."""
-    clients = {c["id"]: c for c in agent.list_clients()}
+    """The projects of this Mac's CapCut: the ones made with the app (with their record) and all the others, each with its
+    client when it can be told, summary and CapCut cover. Only this computer's CapCut, never someone else's."""
+    clients_l = agent.list_clients()
+    clients = {c["id"]: c for c in clients_l}
     out = []
-    for p in registry.list_projects():
+    regs = registry.list_projects()
+    known = {p.get("result_path") for p in regs if p.get("result_path")}
+    notes = _video_notes()
+    for p in _capcut_drafts(known):
+        c = _guess_client(p["name"], clients_l, notes)
+        cover = Path(p["result_path"]) / "draft_cover.jpg"
+        out.append({**p, "cliente": c["nome"] if c else _shared_space(p["result_path"]), "colore": c["colore"] if c else "#6b7180",
+                    "riassunto": p.pop("riassunto_old", ""), "cover": ""})
+        out[-1]["_cover"] = str(cover) if cover.exists() else ""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(8) as ex:
+        covers = list(ex.map(lambda q: _thumb(Path(q["_cover"]), 320) if q["_cover"] else "", out))
+    for q, cv in zip(out, covers):
+        q["cover"] = cv
+        q.pop("_cover", None)
+    for p in regs:
         s = p.get("settings") or {}
         c = clients.get(s.get("client") or "") or next(
             (x for x in clients.values() if s.get("template") and x["template"] == s.get("template")), None)
@@ -464,9 +793,9 @@ def attachment(req: AttachmentRequest) -> dict:
     return a or {"error": "Non è un'immagine."}
 
 
-@app.get("/api/projects/{project_id}/mods")
+@app.get("/api/projects/{project_id:path}/mods")
 def project_mods(project_id: str) -> dict:
-    mods = agent.list_mods(project_id)
+    mods = [] if project_id.startswith("capcut:") else agent.list_mods(project_id)
     for m in mods:
         m["thumbs"] = [agent.image_thumb(Path(p)) for p in m.get("immagini", []) if Path(p).exists()]
     return {"mods": mods}
@@ -484,27 +813,30 @@ def _run_modify(job: Job, project: dict, req: ModifyRequest) -> None:
         job.log(f"ERRORE: {e}")
 
 
-@app.post("/api/projects/{project_id}/modify")
+@app.post("/api/projects/{project_id:path}/modify")
 def project_modify(project_id: str, req: ModifyRequest) -> dict:
-    project = registry.get_project(project_id)
+    project = _project(project_id)
     if not project:
         return {"error": "progetto non trovato"}
+    if project_id.startswith("capcut:"):
+        project = _register_draft(project)
     if not (req.testo.strip() or req.immagini):
         return {"error": "Scrivi cosa cambiare o allega uno screenshot."}
     job = manager.create()
     threading.Thread(target=_run_modify, args=(job, project, req), daemon=True).start()
-    return {"job_id": job.id}
+    return {"job_id": job.id, "project_id": project["id"]}
 
 
-@app.get("/api/projects/{project_id}")
+@app.get("/api/projects/{project_id:path}")
 def project_get(project_id: str) -> dict:
-    p = registry.get_project(project_id)
+    p = _project(project_id)
     return p or {"error": "progetto non trovato"}
 
 
-@app.delete("/api/projects/{project_id}")
+@app.delete("/api/projects/{project_id:path}")
 def project_delete(project_id: str) -> dict:
-    return {"removed": registry.remove_project(project_id)}
+    # only the app's record: a CapCut project is never deleted from here
+    return {"removed": False if project_id.startswith("capcut:") else registry.remove_project(project_id)}
 
 
 @app.get("/api/ai/status")

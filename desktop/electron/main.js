@@ -76,6 +76,8 @@ function startBackend() {
     pyProc = spawn(bin, ["--port", String(BACKEND_PORT)], { env });
   } else {
     env.CAPWIZARD_SKILL_DIR = path.join(repoRoot(), "skill", "reel-capcut-mac");
+    // the package from the repo even if the editable install's .pth is skipped (macOS can flag it hidden)
+    env.PYTHONPATH = [path.join(repoRoot(), "src"), env.PYTHONPATH].filter(Boolean).join(path.delimiter);
     pyProc = spawn(
       devPythonPath(),
       ["-m", "capwizard_app.server", "--port", String(BACKEND_PORT)],
@@ -194,6 +196,14 @@ ipcMain.handle("select-video", async () => {
     filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "webm", "m4v"] }],
   });
   return r.canceled ? null : r.filePaths[0];
+});
+
+ipcMain.handle("select-videos", async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile", "openDirectory", "multiSelections"],
+    filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "webm", "m4v"] }],
+  });
+  return r.canceled ? [] : r.filePaths;
 });
 
 ipcMain.handle("select-script", async () => {
