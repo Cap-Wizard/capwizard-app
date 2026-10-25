@@ -145,3 +145,13 @@ src/capwizard_app/
 Il formato `.draft` di CapCut non è ufficiale: i progetti si costruiscono clonando lo
 schema dal template del cliente, fatto con la tua versione di CapCut. Se aggiorni CapCut e qualcosa rompe, di solito basta
 ricreare il draft template nella nuova versione di CapCut e rilanciare.
+
+## Licenza
+
+CapWizard è distribuito con la [PolyForm Noncommercial License 1.0.0](LICENSE.md): il codice
+è visibile e si può usare, modificare e condividere **solo per scopi non commerciali**
+(studio, prove, progetti personali senza fini di lucro). Usarlo per lavoro, per esempio per
+montare video per i propri clienti, richiede una licenza commerciale di CapWizard: scrivi a
+[info@predanicola.it](mailto:info@predanicola.it).
+
+Required Notice: Copyright CapWizard (https://github.com/Cap-Wizard)

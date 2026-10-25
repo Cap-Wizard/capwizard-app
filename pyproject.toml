@@ -3,6 +3,7 @@ name = "capwizard-app"
 version = "0.2.0a2"
 description = "CapWizard desktop app backend: FastAPI server for the Electron UI. Reels are edited by Claude Code with the reel-capcut-mac skill."
 requires-python = ">=3.10"
+license = {text = "PolyForm-Noncommercial-1.0.0"}
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",

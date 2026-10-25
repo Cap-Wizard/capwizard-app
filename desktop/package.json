@@ -9,7 +9,7 @@
     "dist": "npm run build:backend && electron-builder --mac --arm64"
   },
   "author": "Nicola Preda",
-  "license": "UNLICENSED",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8"
