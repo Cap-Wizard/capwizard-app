@@ -232,12 +232,22 @@ def _slug(s: str) -> str:
     return re.sub(r"[^\w\- ]", "_", s).strip() or "video"
 
 
-def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcript: list[str], step_of=None) -> str | None:
+def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcript: list[str], step_of=None,
+                ai_media: bool = False) -> str | None:
     """Run Claude Code on `prompt`, streaming its messages into the job's log.
+    `ai_media` lets Claude use the AI services chosen in the app (b-roll, images…).
     Returns why it stopped badly, if it did."""
+    ai_tools: list[str] = []
+    if ai_media:
+        from capwizard_app import aiservices
+        ai_tools, ai_text = aiservices.for_run()
+        prompt += ai_text
+        if ai_tools:
+            job.log("✦ Servizi AI a disposizione di Claude: "
+                    + ", ".join(t.removeprefix("mcp__claude_ai_").removeprefix("mcp__") for t in ai_tools))
     cmd = [find_claude_cli(), "-p", "--output-format", "stream-json", "--verbose",
            "--model", model, "--permission-mode", "acceptEdits",
-           "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill",
+           "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill", *ai_tools,
            "--add-dir", *sorted(dirs)]
     proc = subprocess.Popen(cmd, cwd=cwd, env=clean_env(), text=True, bufsize=1,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -343,7 +353,8 @@ def run_agent(job, req) -> tuple[str, str]:
             + (f" e il profilo di {client['nome']}" if client else ""))
     job.set_step(1)
     transcript = [f"# {req.name}\n"]
-    error = _run_claude(job, prompt, dirs, req.ai_model or "opus", work, transcript)
+    error = _run_claude(job, prompt, dirs, req.ai_model or "opus", work, transcript,
+                        ai_media=getattr(req, "ai_media", True))
     if job.stopped:
         raise RuntimeError("Montaggio fermato.")
 
@@ -451,11 +462,16 @@ def add_attachment(path: str | None = None, data_url: str | None = None) -> dict
 
 
 def writable_profile(client: dict) -> Path:
-    """The client's profile to write lessons into. A profile synced from claude.ai is
-    copied into ~/.claude/skills first (the local copy then wins), so a sync can't drop them."""
+    """The client's profile to write lessons into. A profile synced from claude.ai is copied
+    into the shared brain repo (or, without it, into ~/.claude/skills): the copy then wins, so a
+    sync can't drop the lessons."""
     p = Path(client["path"])
     if "synced" not in p.parts:
         return p
+    from capwizard_app import brain
+    shared = brain.adopt_profile(p.parent)
+    if shared:
+        return shared
     local = SKILLS_DIR / p.parent.name
     if not (local / "SKILL.md").exists():
         shutil.copytree(p.parent, local, dirs_exist_ok=True)
@@ -519,7 +535,7 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
     job.log("🎬 Avvio Claude Code sulle modifiche" + (f" · profilo di {client['nome']}" if client else ""))
     transcript: list[str] = []
     try:
-        error = _run_claude(job, prompt, dirs, model, work, transcript)
+        error = _run_claude(job, prompt, dirs, model, work, transcript, ai_media=True)
         if job.stopped:
             raise RuntimeError("Modifiche fermate.")
         try:
@@ -667,7 +683,8 @@ def run_vault(job, req, client: dict) -> tuple[str, str]:
             + (" · 🎬 video cine" if job_data["cine"] else "") + (" · con b-roll" if job_data["broll_path"] else ""))
     job.set_step(1)
     transcript = [f"# {req.name}\n"]
-    error = _run_claude(job, prompt, dirs, req.ai_model or "opus", work, transcript, step_of=_vault_step)
+    error = _run_claude(job, prompt, dirs, req.ai_model or "opus", work, transcript, step_of=_vault_step,
+                        ai_media=getattr(req, "ai_media", True))
     if job.stopped:
         raise RuntimeError("Montaggio fermato.")
     try:
@@ -740,7 +757,7 @@ def run_vault_modify(job, project: dict, client: dict, text: str, images: list[s
     job.log(f"🎬 Avvio Claude Code sulle modifiche · regole di {client['nome']} dal vault")
     transcript: list[str] = []
     try:
-        error = _run_claude(job, prompt, dirs, model, work, transcript)
+        error = _run_claude(job, prompt, dirs, model, work, transcript, ai_media=True)
         if job.stopped:
             raise RuntimeError("Modifiche fermate.")
         try:
