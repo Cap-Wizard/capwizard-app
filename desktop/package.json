@@ -1,6 +1,6 @@
 {
   "name": "capwizard-desktop",
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "CapWizard — desktop app (Electron shell + Python sidecar)",
   "main": "electron/main.js",
   "scripts": {

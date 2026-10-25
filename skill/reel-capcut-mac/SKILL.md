@@ -1,7 +1,7 @@
 ---
 name: reel-capcut-mac
 metadata:
-  version: "0.2.0-alpha.1"
+  version: "0.2.0-alpha.2"
 description: Monta reel verticali (Instagram/TikTok) in CapCut direttamente sul Mac di Nicola con Claude Code - analisi delle clip con Whisper sul chip Apple, tagli secondo le sue regole, progetto CapCut generato dal template del cliente, b-roll Magnific, profilo del cliente e lezioni. Usala quando Nicola chiede di montare reel da una cartella di clip o di correggere un reel già montato (anche da screenshot della chat del cliente).
 ---
 

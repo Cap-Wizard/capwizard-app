@@ -146,7 +146,7 @@ class BatchRequest(GenerateRequest):
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="CapWizard API", version="0.2.0-alpha.1")
+app = FastAPI(title="CapWizard API", version="0.2.0-alpha.2")
 
 # The Electron renderer runs from a file:// or localhost origin; allow all in
 # this local-only server (it binds 127.0.0.1, never exposed to the network).
