@@ -70,15 +70,19 @@ def tools_python() -> str:
     global _TOOLS_PY
     if _TOOLS_PY:
         return _TOOLS_PY
+    # in the packaged app sys.executable is the backend binary, not a Python: the user's python3
+    # (where the skill's installa.sh puts mlx-whisper) stands in for it
+    own = shutil.which("python3") if getattr(sys, "frozen", False) else sys.executable
     cands = [os.environ.get("CAPWIZARD_TOOLS_PYTHON"), str(HOME / "Desktop/VIDEO CLAUDE/720 STUDI0/tools/venv/bin/python"),
-             str(HOME / "video-editor-mcp/work/tools/venv/bin/python"), str(HOME / "video-editor-mcp/.venv/bin/python"), sys.executable]
-    for c in cands:
-        if c and os.path.exists(c):
-            r = subprocess.run([c, "-c", "import mlx_whisper, Vision"], capture_output=True)
-            if r.returncode == 0:
+             str(HOME / "video-editor-mcp/work/tools/venv/bin/python"), str(HOME / "video-editor-mcp/.venv/bin/python"),
+             shutil.which("python3"), own]
+    cands = [c for c in dict.fromkeys(cands) if c and os.path.exists(c)]
+    for need in ("import mlx_whisper, Vision", "import mlx_whisper"):   # the cut-out also needs Vision
+        for c in cands:
+            if subprocess.run([c, "-c", need], capture_output=True).returncode == 0:
                 _TOOLS_PY = c
                 return c
-    _TOOLS_PY = sys.executable
+    _TOOLS_PY = own or "python3"
     return _TOOLS_PY
 
 
