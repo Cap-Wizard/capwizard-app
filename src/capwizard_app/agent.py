@@ -158,6 +158,27 @@ def client_for(settings: dict) -> dict | None:
         (c for c in list_clients() if settings.get("template") and c["template"] == settings.get("template")), None)
 
 
+def reference_section(paths: list[str], work: Path) -> str:
+    """What Claude must do with the reference videos dropped in «Nuovo video»."""
+    refs = [p for p in paths or [] if Path(p).is_file()]
+    if not refs:
+        return ""
+    ff = vault.ffmpeg() or "ffmpeg"
+    lines = ["", "## Video di riferimento: monta in questo stile",
+             "Prima di decidere il montaggio studia questi video (non sono clip da usare):"]
+    lines += [f"- `{p}`" for p in refs]
+    lines += [
+        f"Come: fotogrammi ogni 0,5 s in un mosaico (`{ff} -i <video> -vf fps=2,scale=270:-1,tile=8x4 "
+        f"\"{work}/ref_<n>_%d.jpg\"`) e guardali con Read; audio con `{ff} -i <video> -ac 1 -ar 22050 \"{work}/ref_<n>.wav\"` "
+        "e trova dove cadono gli effetti (picchi brevi sopra la voce, soprattutto acuti) e quanto è alta la musica rispetto alla voce.",
+        "Prendi dal riferimento: ritmo dei tagli, dove e quanti suoni (ai cambi scena, sui titoletti, sulla CTA), "
+        "transizioni, come entrano titoli e titoletti, lunghezza e posizione dei sottotitoli, b-roll e zoom.",
+        "Restano del cliente: colori, font, preset dei sottotitoli e i suoni della libreria CapCut del template. "
+        "Nel risultato scrivi in una riga cosa hai preso dal riferimento.",
+    ]
+    return "\n".join(lines)
+
+
 def client_rules(client_id: str) -> str:
     """The profile's text, without its frontmatter: what the app shows as the client's rules."""
     c = get_client(client_id)
@@ -339,6 +360,8 @@ def run_agent(job, req) -> tuple[str, str]:
         extra.append("- Togli anche gli intercalari cioè / tipo / diciamo.")
     if getattr(req, "notes", None):
         extra.append(f"- Note di Nicola (vincolanti): {req.notes}")
+    if getattr(req, "reference", None):
+        extra.append(reference_section(req.reference, work))
     prompt = PROMPT.format(
         skill=EDITOR_SKILL, skill_md=skill_md, skill_dir=skill_md.parent,
         client=(f"2. Profilo del cliente **{client['nome']}**: leggi `{client['path']}`. Prevale sulla skill "
@@ -355,6 +378,7 @@ def run_agent(job, req) -> tuple[str, str]:
         dirs.add(str(Path(client["path"]).parent))
     if req.script_path:
         dirs.add(str(Path(req.script_path).parent))
+    dirs.update(str(Path(p).parent) for p in getattr(req, "reference", None) or [] if Path(p).is_file())
     job.log(f"🎬 Avvio Claude Code ({req.ai_model}) con la skill {EDITOR_SKILL}"
             + (f" e il profilo di {client['nome']}" if client else ""))
     job.set_step(1)
@@ -677,12 +701,16 @@ def run_vault(job, req, client: dict) -> tuple[str, str]:
         brief += f"\n\nTitolo iniziale voluto da Daniel: «{req.intro_title}»"
     if req.ai_target_duration:
         brief += f"\nDurata voluta: {req.ai_target_duration:g} s"
+    brief += reference_section(getattr(req, "reference", None) or [], work)
     prompt = VAULT_PROMPT.format(vault=vault.VAULT, base=base, brief=brief, py=vault.tools_python(), tools=vault.TOOLS,
                                  clips=req.input_path, work=work, ff=vault.ffmpeg() or "ffmpeg", capcut=CAPCUT_PROJECTS_DIR,
                                  staging=staging, result=result, name=req.name)
     dirs = {str(Path(req.input_path)), str(CAPCUT_PROJECTS_DIR), str(work), str(vault.VAULT), str(vault.TOOLS)}
     if getattr(req, "broll_path", None):
         dirs.add(str(Path(req.broll_path)))
+    dirs.update(str(Path(p).parent) for p in getattr(req, "reference", None) or [] if Path(p).is_file())
+    if getattr(req, "reference", None):
+        job.log(f"🎯 Video di riferimento: {', '.join(Path(p).name for p in req.reference)}")
     old_scripts = Path.home() / "Desktop/VIDEO CLAUDE/720 STUDI0"
     if old_scripts.is_dir():
         dirs.add(str(old_scripts))

@@ -26,6 +26,7 @@ const state = {
   client: null,            // chosen client, or null
   otherTemplate: false,    // no client, a template picked by hand
   templates: [],           // every CapCut project usable as a template
+  refs: [],                // reference videos Claude imitates
   favTemplates: loadFavTemplates(),   // the ones pinned next to the clients
   steps: [],               // progress steps of an editing run
   jobId: null,
@@ -388,6 +389,20 @@ async function setBroll(path) {
   } catch (_) { $("br-info").textContent = ""; }
 }
 
+function addRef(path) {
+  if (!/\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(path) || state.refs.includes(path)) return;
+  state.refs.push(path);
+  renderRefs();
+}
+
+function renderRefs() {
+  $("ref-list").innerHTML = state.refs.map((p, i) =>
+    `<div><span>🎯 ${escapeHtml(p.split("/").pop())}</span><button class="btn-link mini" data-i="${i}">✕ togli</button></div>`).join("");
+  $("ref-list").querySelectorAll("button").forEach((b) => {
+    b.onclick = () => { state.refs.splice(+b.dataset.i, 1); renderRefs(); };
+  });
+}
+
 async function setFolder(path) {
   $("input-path").value = path;
   $("input-path-label").textContent = path;
@@ -497,6 +512,9 @@ function wireEditor() {
     const p = window.api && await window.api.selectFolder();
     if (p) setBroll(p);
   };
+  $("drop-ref").onclick = async () => {
+    for (const p of (window.api && await window.api.selectVideos()) || []) addRef(p);
+  };
   $("csearch").oninput = renderChips;
   $("btn-client-edit").onclick = () => { if (state.client) openClientModal(state.client); };
   wireClientModal();
@@ -542,6 +560,13 @@ function wireEditor() {
       return;
     }
     if ($("view-editor").hidden || state.running) return;
+    if (dropZone === "drop-ref") {           // reference videos to imitate
+      for (const f of e.dataTransfer.files) {
+        const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
+        if (p) addRef(p);
+      }
+      return;
+    }
     const f = e.dataTransfer.files[0];
     const p = f && window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
     if (!p) return;
@@ -609,6 +634,7 @@ function buildRequest() {
     sentence_transitions: isOn("sw-transitions"),
     aggressive_fillers: isOn("sw-aggr"),
     broll_path: $("broll-path").value.trim() || null,
+    reference: state.refs.slice(),
     cine: isOn("sw-cine"),
     ai_media: isOn("sw-aimedia"),
   };
@@ -1183,7 +1209,7 @@ function boardCard(it) {
       else if (a === "next") setBoardStatus(it.id, next);
     };
   });
-  card.ondblclick = () => (isTodo ? openTodo(it) : openFromBoard(it));
+  card.onclick = () => (isTodo ? openTodo(it) : openFromBoard(it));    // the whole card opens the project's chat
   return card;
 }
 

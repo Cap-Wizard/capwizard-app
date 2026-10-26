@@ -131,6 +131,7 @@ class GenerateRequest(BaseModel):
     fmt: str = "vertical"
     projects_dir: str | None = None
     broll_path: str | None = None     # b-roll the client gave in another folder
+    reference: list[str] = []         # videos to imitate (rhythm, sounds, titles, subtitles)
     cine: bool = False                # "video cine": per-clip colour, b-roll on the cuts (vault clients)
     ai_media: bool = True             # Claude may use the AI services chosen in the app (b-roll, images…)
 

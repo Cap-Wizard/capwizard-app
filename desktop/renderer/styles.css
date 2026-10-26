@@ -472,3 +472,10 @@ body.projs-view.dragging::after { content: "Rilascia qui gli screenshot della ch
 .ag-field label { margin-top: 12px; }
 @media (max-width: 760px) { .ag-grid { grid-template-columns: 1fr; } }
 #cm-err.ok, #ag-err.ok { color: var(--ok); }
+
+/* reference videos */
+#ref-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+#ref-list div { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text);
+  padding: 6px 10px; border-radius: 9px; background: var(--panel2); border: 1px solid var(--line); }
+#ref-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bcard { cursor: pointer; }
