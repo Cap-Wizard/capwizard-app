@@ -2,6 +2,12 @@
 
 const BACKEND = "http://127.0.0.1:8765";
 const WS_BACKEND = "ws://127.0.0.1:8765";
+// every backend call carries the token Electron gave this window (web pages don't have it)
+const BACKEND_TOKEN = window.api?.backendToken || "";
+const _fetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => String(url).startsWith(BACKEND)
+  ? _fetch(url, { ...opts, headers: { ...(opts.headers || {}), "X-CapWizard-Token": BACKEND_TOKEN } })
+  : _fetch(url, opts);
 
 // LOCAL_MODE = true → nessun login né controllo abbonamento (uso privato).
 // Metti false quando il backend cloud è pronto per la vendita.
@@ -604,7 +610,7 @@ async function onGenerate() {
     } catch (_) { /* backend busy: try again at the next tick */ }
   }, 4000);
 
-  const ws = new WebSocket(`${WS_BACKEND}/api/ws/jobs/${jobId}`);
+  const ws = new WebSocket(`${WS_BACKEND}/api/ws/jobs/${jobId}?t=${BACKEND_TOKEN}`);
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === "log") showLines([msg.line], msg.i ?? shown);

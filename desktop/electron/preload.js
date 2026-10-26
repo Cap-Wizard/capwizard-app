@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   backendUrl: () => ipcRenderer.invoke("backend-url"),
+  backendToken: ipcRenderer.sendSync("backend-token"),
   cloudUrl: () => ipcRenderer.invoke("cloud-url"),
   selectFolder: () => ipcRenderer.invoke("select-folder"),
   selectVideo: () => ipcRenderer.invoke("select-video"),

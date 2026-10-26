@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import base64
 import hashlib
+import hmac
 import os
 import platform
 import re
@@ -31,8 +32,9 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from capwizard_app import registry
@@ -148,12 +150,28 @@ class BatchRequest(GenerateRequest):
 
 app = FastAPI(title="CapWizard API", version="0.2.0-alpha.2")
 
-# The Electron renderer runs from a file:// or localhost origin; allow all in
-# this local-only server (it binds 127.0.0.1, never exposed to the network).
+# Only the CapWizard window may drive this API. 127.0.0.1 alone is not enough: any web page open
+# in a browser on this Mac can call it. Electron hands the backend a random token at launch
+# (CAPWIZARD_TOKEN) and the renderer sends it on every request; a web page can't know it.
+# The renderer loads from file://, whose origin is "null".
+TOKEN = os.environ.get("CAPWIZARD_TOKEN", "")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["null"], allow_methods=["*"], allow_headers=["*"],
 )
+
+
+def _token_ok(given: str | None) -> bool:
+    return not TOKEN or hmac.compare_digest(given or "", TOKEN)
+
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    path = request.url.path
+    if (path.startswith("/api/") and path != "/api/health" and request.method != "OPTIONS"
+            and not _token_ok(request.headers.get("x-capwizard-token"))):
+        return JSONResponse({"detail": "non autorizzato"}, status_code=403)
+    return await call_next(request)
 
 
 @app.get("/api/health")
@@ -987,6 +1005,9 @@ def ai_test_endpoint() -> dict:
 
 @app.websocket("/api/ws/jobs/{job_id}")
 async def job_logs(websocket: WebSocket, job_id: str) -> None:
+    if not _token_ok(websocket.query_params.get("t")):   # websockets skip CORS and the http middleware
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     job = manager.get(job_id)
     if not job:

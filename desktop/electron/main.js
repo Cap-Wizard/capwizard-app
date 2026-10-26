@@ -4,11 +4,14 @@ const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require("ele
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const crypto = require("crypto");
 const { spawn, execFileSync } = require("child_process");
 
 // Fixed local port. The backend binds 127.0.0.1 only (never exposed).
 const BACKEND_PORT = 8765;
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
+// Secret the window sends with every backend call, so web pages open in a browser can't drive it.
+const BACKEND_TOKEN = crypto.randomBytes(24).toString("hex");
 
 // Cloud licensing backend (accounts + Stripe subscription check).
 // Override with CAPWIZARD_CLOUD_URL; defaults to local dev server.
@@ -67,7 +70,7 @@ function userPath() {
 }
 
 function startBackend() {
-  const env = { ...process.env, PATH: userPath() };
+  const env = { ...process.env, PATH: userPath(), CAPWIZARD_TOKEN: BACKEND_TOKEN };
   if (app.isPackaged) {
     // Packaged sidecar (PyInstaller onefile) lives in resources/backend/
     const exe = process.platform === "win32" ? "capwizard-server.exe" : "capwizard-server";
@@ -184,6 +187,7 @@ app.on("quit", () => {
 // ---------------------------------------------------------------------------
 
 ipcMain.handle("backend-url", () => BACKEND_URL);
+ipcMain.on("backend-token", (e) => { e.returnValue = BACKEND_TOKEN; });
 
 ipcMain.handle("select-folder", async () => {
   const r = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] });

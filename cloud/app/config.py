@@ -6,7 +6,7 @@ import os
 
 class Settings:
     # Auth
-    JWT_SECRET: str = os.environ.get("JWT_SECRET", "dev-only-change-me")
+    JWT_SECRET: str = os.environ.get("JWT_SECRET", "")
     JWT_ALG: str = "HS256"
     JWT_TTL_DAYS: int = int(os.environ.get("JWT_TTL_DAYS", "30"))
 
@@ -33,3 +33,6 @@ class Settings:
 
 
 settings = Settings()
+# a default secret would let anyone who reads this repo sign tokens: refuse to start without one
+if not settings.JWT_SECRET:
+    raise RuntimeError("JWT_SECRET non impostato: mettilo nell'ambiente (vedi .env.example)")
