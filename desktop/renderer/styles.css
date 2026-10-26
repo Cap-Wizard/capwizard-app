@@ -473,9 +473,14 @@ body.projs-view.dragging::after { content: "Rilascia qui gli screenshot della ch
 @media (max-width: 760px) { .ag-grid { grid-template-columns: 1fr; } }
 #cm-err.ok, #ag-err.ok { color: var(--ok); }
 
-/* reference videos */
-#ref-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-#ref-list div { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text);
-  padding: 6px 10px; border-radius: 9px; background: var(--panel2); border: 1px solid var(--line); }
-#ref-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* reference videos: three slots */
+.ref-hint { font-size: 12px; color: var(--mute); line-height: 1.5; margin: -2px 0 10px; }
+.ref-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ref-slot { padding: 14px 8px; min-height: 92px; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+.ref-slot b { font-size: 12px; }
+.ref-slot span { font-size: 11px; line-height: 1.35; }
+.ref-slot.full { border-style: solid; border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, var(--bg2)); }
+.ref-slot .ref-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* in Nuovo video a drag lights up the boxes instead of veiling the window */
+body.dragging.editor-drag::after { display: none; }
 .bcard { cursor: pointer; }

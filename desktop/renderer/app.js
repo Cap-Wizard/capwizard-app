@@ -26,7 +26,7 @@ const state = {
   client: null,            // chosen client, or null
   otherTemplate: false,    // no client, a template picked by hand
   templates: [],           // every CapCut project usable as a template
-  refs: [],                // reference videos Claude imitates
+  refs: [null, null, null], // up to 3 reference videos Claude imitates
   favTemplates: loadFavTemplates(),   // the ones pinned next to the clients
   steps: [],               // progress steps of an editing run
   jobId: null,
@@ -389,18 +389,29 @@ async function setBroll(path) {
   } catch (_) { $("br-info").textContent = ""; }
 }
 
-function addRef(path) {
+// Reference videos: three slots. A video goes in the slot it was dropped on (or the first free one).
+function addRef(path, slot) {
   if (!/\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(path) || state.refs.includes(path)) return;
-  state.refs.push(path);
+  let i = slot != null && !state.refs[slot] ? slot : state.refs.indexOf(null);
+  if (slot != null && state.refs[slot]) i = slot;        // dropped on a full slot: replace it
+  if (i < 0) return;
+  state.refs[i] = path;
   renderRefs();
 }
 
 function renderRefs() {
-  $("ref-list").innerHTML = state.refs.map((p, i) =>
-    `<div><span>🎯 ${escapeHtml(p.split("/").pop())}</span><button class="btn-link mini" data-i="${i}">✕ togli</button></div>`).join("");
-  $("ref-list").querySelectorAll("button").forEach((b) => {
-    b.onclick = () => { state.refs.splice(+b.dataset.i, 1); renderRefs(); };
+  state.refs.forEach((p, i) => {
+    const box = $(`ref-${i}`);
+    box.classList.toggle("full", !!p);
+    box.innerHTML = p
+      ? `<b>🎯 Reference ${i + 1}</b><span class="ref-name" title="${escapeHtml(p)}">${escapeHtml(p.split("/").pop())}</span>
+         <button class="btn-link mini" data-i="${i}">✕ togli</button>`
+      : `<b>🎯 Reference ${i + 1}</b><span>trascina qui un video<br>o clicca</span>`;
+    const x = box.querySelector("button");
+    if (x) x.onclick = (e) => { e.stopPropagation(); state.refs[i] = null; renderRefs(); };
   });
+  const n = state.refs.filter(Boolean).length;
+  $("ref-info").textContent = n ? `${n} di 3` : "facoltativo";
 }
 
 async function setFolder(path) {
@@ -512,9 +523,13 @@ function wireEditor() {
     const p = window.api && await window.api.selectFolder();
     if (p) setBroll(p);
   };
-  $("drop-ref").onclick = async () => {
-    for (const p of (window.api && await window.api.selectVideos()) || []) addRef(p);
-  };
+  for (let i = 0; i < 3; i++) {
+    $(`ref-${i}`).onclick = async () => {
+      const picked = (window.api && await window.api.selectVideos()) || [];
+      picked.forEach((p, k) => addRef(p, k ? null : i));
+    };
+  }
+  renderRefs();
   $("csearch").oninput = renderChips;
   $("btn-client-edit").onclick = () => { if (state.client) openClientModal(state.client); };
   wireClientModal();
@@ -523,7 +538,7 @@ function wireEditor() {
   let dragT = null, dropZone = null;
   const endDrag = () => {
     clearTimeout(dragT);
-    document.body.classList.remove("dragging");
+    document.body.classList.remove("dragging", "editor-drag");
     document.querySelectorAll(".drop").forEach((d) => d.classList.remove("hover"));
   };
   document.addEventListener("dragover", (e) => {
@@ -532,6 +547,7 @@ function wireEditor() {
     dropZone = z ? z.id : null;
     document.querySelectorAll(".drop").forEach((d) => d.classList.toggle("hover", d === z));
     if (!$("view-editor").hidden || state.currentProject) document.body.classList.add("dragging");
+    document.body.classList.toggle("editor-drag", !$("view-editor").hidden);   // there: light up the boxes, no veil
     clearTimeout(dragT);
     dragT = setTimeout(endDrag, 250);
   });
@@ -560,13 +576,16 @@ function wireEditor() {
       return;
     }
     if ($("view-editor").hidden || state.running) return;
-    if (dropZone === "drop-ref") {           // reference videos to imitate
-      for (const f of e.dataTransfer.files) {
+    if (dropZone && dropZone.startsWith("ref-")) {    // reference videos to imitate
+      [...e.dataTransfer.files].forEach((f, k) => {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
-        if (p) addRef(p);
-      }
+        if (p) addRef(p, k ? null : +dropZone.slice(4));
+      });
       return;
     }
+    if (!dropZone && /\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(
+      (e.dataTransfer.files[0] && window.api && window.api.pathForFile ? window.api.pathForFile(e.dataTransfer.files[0]) : ""))
+      && e.dataTransfer.files.length === 1 && $("input-path").value) return;   // a stray video outside the boxes: ignore
     const f = e.dataTransfer.files[0];
     const p = f && window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
     if (!p) return;
@@ -634,7 +653,7 @@ function buildRequest() {
     sentence_transitions: isOn("sw-transitions"),
     aggressive_fillers: isOn("sw-aggr"),
     broll_path: $("broll-path").value.trim() || null,
-    reference: state.refs.slice(),
+    reference: state.refs.filter(Boolean),
     cine: isOn("sw-cine"),
     ai_media: isOn("sw-aimedia"),
   };

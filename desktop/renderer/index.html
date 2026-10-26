@@ -113,20 +113,24 @@
           </div>
           <input type="hidden" id="broll-path" />
           <div class="thumbs" id="thumbs-broll"></div>
-          <label>Video di riferimento <span class="opt">facoltativo: Claude ne prende ritmo, suoni, titoli e sottotitoli</span></label>
-          <div class="drop drop2" id="drop-ref">
-            <b>🎯 Trascina qui il video da imitare</b>
-            <span>oppure clicca per sceglierlo (anche più di uno)</span>
-          </div>
-          <div class="reflist" id="ref-list"></div>
           <div class="switch" id="row-batch">
             <span>Un progetto per ogni sottocartella</span><div class="tgl" id="sw-batch"></div>
           </div>
           <div class="hint" id="batch-preview" hidden></div>
         </div>
 
+        <div class="step" id="sref">
+          <h2><span class="num">3</span>Video di riferimento<small id="ref-info">facoltativo</small></h2>
+          <p class="ref-hint">Video da imitare: Claude ne prende ritmo, suoni, transizioni, titoli e sottotitoli. Colori, font e suoni restano quelli del cliente.</p>
+          <div class="ref-slots">
+            <div class="drop ref-slot" id="ref-0" data-i="0"></div>
+            <div class="drop ref-slot" id="ref-1" data-i="1"></div>
+            <div class="drop ref-slot" id="ref-2" data-i="2"></div>
+          </div>
+        </div>
+
         <div class="step" id="s3">
-          <h2><span class="num">3</span>Il progetto CapCut</h2>
+          <h2><span class="num">4</span>Il progetto CapCut</h2>
           <label id="name-label">Nome del nuovo progetto</label>
           <input type="text" id="name" placeholder="es. CLIENTE - Video 1" />
           <label>Copione <span class="opt">facoltativo</span></label>
@@ -139,7 +143,7 @@
         </div>
 
         <div class="step" id="s4">
-          <h2><span class="num">4</span>Extra <small>facoltativo</small></h2>
+          <h2><span class="num">5</span>Extra <small>facoltativo</small></h2>
           <div class="switch" data-sw="sw-transitions"><span>🎬 A fine frase: zoom, transizione e woosh</span><div class="tgl on" id="sw-transitions"></div></div>
           <div class="switch" data-sw="sw-zoom"><span>🔍 Zoom leggeri sulle frasi chiave</span><div class="tgl" id="sw-zoom"></div></div>
           <div class="switch" data-sw="sw-cine"><span>🎬 Video cine <span class="opt">colori clip per clip, b-roll sui tagli</span></span><div class="tgl" id="sw-cine"></div></div>
