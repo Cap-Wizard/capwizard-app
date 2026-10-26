@@ -88,6 +88,16 @@ h1 span { color: var(--accent-hover); }
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 18%, transparent); }
 .chip.other { color: var(--mute); border-style: dashed; }
 .chip.add { color: var(--text); border-style: dashed; }
+.chip.tpl i { border-radius: 3px; background: var(--dim); }
+.chip.tpl.on i { background: var(--c); }
+.chip .x { margin-left: 2px; color: var(--dim); font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 4px; }
+.chip .x:hover { color: var(--text); background: var(--panel3); }
+.tpl-picker { margin-top: 8px; padding: 10px; border-radius: 12px; background: var(--panel2); border: 1px solid var(--line2); }
+.tpl-picker .search { margin-bottom: 8px; }
+.tpl-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.tpl-item { text-align: left; padding: 7px 10px; border-radius: 8px; background: transparent; border: 0; color: var(--text); font-size: 12.5px; cursor: pointer; }
+.tpl-item:hover { background: var(--panel3); }
+.tpl-list .empty { padding: 10px; font-size: 12px; color: var(--dim); }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .tab { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line2); background: transparent; color: var(--mute); cursor: pointer; font-size: 12px; }
 .tab.on { background: var(--text); color: #0b0c0f; border-color: transparent; font-weight: 700; }

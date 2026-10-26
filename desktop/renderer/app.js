@@ -24,7 +24,9 @@ const state = {
   ag: "Tutti",             // agency filter of the client chips
   editing: null,           // client being edited in the modal, or null for a new one
   client: null,            // chosen client, or null
-  otherTemplate: false,    // "Altro template…": no client, template picked by hand
+  otherTemplate: false,    // no client, a template picked by hand
+  templates: [],           // every CapCut project usable as a template
+  favTemplates: loadFavTemplates(),   // the ones pinned next to the clients
   steps: [],               // progress steps of an editing run
   jobId: null,
   batch: false,
@@ -163,6 +165,15 @@ async function loadSystem() {
   } catch (e) { console.error("system", e); }
 }
 
+// Templates pinned among the clients: kept in this Mac's browser storage (they are this Mac's CapCut projects).
+function loadFavTemplates() {
+  try { return JSON.parse(localStorage.getItem("capwizard.favTemplates") || "[]"); } catch (_) { return []; }
+}
+
+function saveFavTemplates() {
+  try { localStorage.setItem("capwizard.favTemplates", JSON.stringify(state.favTemplates)); } catch (_) {}
+}
+
 async function loadTemplates() {
   try {
     const data = await (await fetch(`${BACKEND}/api/templates`)).json();
@@ -171,6 +182,7 @@ async function loadTemplates() {
     const none = document.createElement("option");
     none.value = ""; none.textContent = "Scegli il template…";
     sel.appendChild(none);
+    state.templates = data.templates.map((t) => t.name);
     for (const t of data.templates) {
       const o = document.createElement("option");
       o.value = t.name; o.textContent = t.name;
@@ -231,13 +243,64 @@ function renderChips() {
     add.onclick = () => openClientModal(null);
     box.appendChild(add);
   }
-  const other = document.createElement("button");
-  other.className = "chip other" + (state.otherTemplate ? " on" : "");
-  other.textContent = "Altro template…";
-  other.onclick = () => chooseClient(null);
-  box.appendChild(other);
-  $("client-hint").textContent = state.clients.length ? ""
-    : "Nessun profilo cliente: è una skill reel-<cliente> che nomina il suo TEMPLATE. Intanto scegli un template a mano.";
+  const cur = state.otherTemplate ? $("template").value : "";
+  for (const name of state.favTemplates) {
+    const chip = document.createElement("button");
+    chip.className = "chip tpl" + (cur === name ? " on" : "");
+    chip.title = "Template CapCut";
+    chip.innerHTML = `<i></i>${escapeHtml(name)}<span class="x" title="Togli dai predefiniti">×</span>`;
+    chip.onclick = () => chooseTemplate(name);
+    chip.querySelector(".x").onclick = (e) => {
+      e.stopPropagation();
+      state.favTemplates = state.favTemplates.filter((n) => n !== name);
+      saveFavTemplates();
+      if (cur === name) chooseClient(null); else renderChips();
+    };
+    box.appendChild(chip);
+  }
+  const addT = document.createElement("button");
+  addT.className = "chip other" + ($("tpl-picker").hidden ? "" : " on");
+  addT.textContent = "＋ Aggiungi template";
+  addT.onclick = () => toggleTemplatePicker();
+  box.appendChild(addT);
+  $("client-hint").textContent = state.clients.length || state.favTemplates.length ? ""
+    : "Nessun profilo cliente: è una skill reel-<cliente> che nomina il suo TEMPLATE. Intanto aggiungi un template.";
+}
+
+function toggleTemplatePicker(open = $("tpl-picker").hidden) {
+  $("tpl-picker").hidden = !open;
+  if (open) {
+    $("tpl-search").value = "";
+    renderTemplatePicker();
+    $("tpl-search").focus();
+  }
+  renderChips();
+}
+
+function renderTemplatePicker() {
+  const q = $("tpl-search").value.trim().toLowerCase();
+  const list = state.templates.filter((n) => !state.favTemplates.includes(n) && (!q || n.toLowerCase().includes(q)));
+  $("tpl-list").innerHTML = list.length
+    ? list.map((n) => `<button class="tpl-item" data-n="${escapeHtml(n)}">${escapeHtml(n)}</button>`).join("")
+    : `<div class="empty">${state.templates.length ? "Nessun progetto con questo nome" : "Nessun progetto CapCut trovato"}</div>`;
+  for (const b of $("tpl-list").querySelectorAll(".tpl-item")) {
+    b.onclick = () => {
+      state.favTemplates.push(b.dataset.n);
+      saveFavTemplates();
+      $("tpl-picker").hidden = true;
+      chooseTemplate(b.dataset.n);
+    };
+  }
+}
+
+async function chooseTemplate(name) {
+  await chooseClient(null);
+  $("template").value = name;
+  $("s1-sel").textContent = name;
+  renderChips();
+  loadKit();
+  suggestName();
+  check();
 }
 
 async function chooseClient(c) {
@@ -245,7 +308,6 @@ async function chooseClient(c) {
   state.otherTemplate = !c;
   document.documentElement.style.setProperty("--c", c ? c.colore : "#7c6cff");
   $("s1-sel").textContent = c ? c.nome : "template a mano";
-  $("template-box").hidden = !!c;
   if (c) {
     $("template").value = c.template_ok ? c.template : "";
     $("client-hint").textContent = c.template_ok ? ""
@@ -476,6 +538,11 @@ function wireEditor() {
   });
 
   $("template").onchange = () => { loadKit(); check(); };
+  $("tpl-search").oninput = renderTemplatePicker;
+  $("tpl-search").onkeydown = (e) => {
+    if (e.key === "Escape") toggleTemplatePicker(false);
+    if (e.key === "Enter") $("tpl-list").querySelector(".tpl-item")?.click();
+  };
   $("name").oninput = () => { $("name").dataset.auto = ""; check(); };
   $("btn-script").onclick = async () => {
     const p = window.api && await window.api.selectScript();
@@ -1274,7 +1341,7 @@ function redoProject(p) {
   const c = state.clients.find((x) => x.id === s.client);
   showView("editor");
   chooseClient(c || null);
-  if (!c && s.template) { $("template").value = s.template; loadKit(); }
+  if (!c && s.template) chooseTemplate(s.template);
   $("name").value = `${p.name} v2`;
   $("name").dataset.auto = "";
   $("notes").value = s.notes || "";
