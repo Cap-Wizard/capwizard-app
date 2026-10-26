@@ -308,9 +308,9 @@ def da_video(video: str, template: str) -> dict:
     subdraft/ folders) with the main track's clips and their materials removed. The template keeps its draft
     id, so it stays where it is in CapCut's list; the old one is backed up first. Both must be closed in CapCut."""
     src, dst = CAPCUT_PROJECTS_DIR / video, CAPCUT_PROJECTS_DIR / template
+    from capwizard_app import vault
     for p in (src, dst):
-        if (p / ".locked").exists():
-            raise RuntimeError(f"«{p.name}» è aperto in CapCut: torna alla home dei progetti e riprova.")
+        vault.libera(p)
     old_id = None
     if dst.exists():
         old_id = json.load(open(dst / "draft_meta_info.json")).get("draft_id")
@@ -391,9 +391,9 @@ def con_stile(stile: str, template: str, struttura: str = STRUTTURA) -> dict:
     dressed with the graphics of «stile», a video or template of the client: its subtitle preset, the look of
     its titles and labels, its filters and its music. Emojis and the structure's sounds stay as they are."""
     src, sty, dst = (CAPCUT_PROJECTS_DIR / n for n in (struttura, stile, template))
+    from capwizard_app import vault
     for p in (src, sty, dst):
-        if (p / ".locked").exists():
-            raise RuntimeError(f"«{p.name}» è aperto in CapCut: torna alla home dei progetti e riprova.")
+        vault.libera(p)
     S = load_template(stile)
     six = _materials_index(S)
     texts = [(t, s) for t in S["tracks"] if t["type"] == "text" for s in t["segments"]]

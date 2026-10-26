@@ -308,7 +308,10 @@ def check_request(req) -> str | None:
     if not tdir.is_dir():
         return f"Il template «{req.template}» non c'è tra i progetti CapCut."
     if (tdir / ".locked").exists():
-        return f"Il template «{req.template}» è aperto in CapCut: torna alla home dei progetti e riprova."
+        try:
+            vault.libera(tdir)
+        except RuntimeError as e:
+            return str(e)
     if (CAPCUT_PROJECTS_DIR / req.name).exists():
         return f"Esiste già un progetto CapCut «{req.name}»: scegli un altro nome."
     return None
@@ -488,8 +491,7 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
         raise RuntimeError("Non trovo Claude Code sul Mac.")
     if not folder.is_dir():
         raise RuntimeError("Il progetto non c'è più tra i progetti CapCut.")
-    if (folder / ".locked").exists():
-        raise RuntimeError("Il progetto è aperto in CapCut: torna alla home dei progetti di CapCut e riprova.")
+    vault.libera(folder, job.log)
     settings = project.get("settings") or {}
     client = client_for(settings)
     if client and client.get("source") == "vault":
@@ -555,6 +557,8 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
     job.log("✓ " + (res.get("riassunto") or "Modifiche fatte.").replace("\n", " "))
     if res.get("lezione"):
         job.log(f"📒 Lezione salvata{' nel profilo di ' + client['nome'] if client else ''}: {res['lezione']}")
+    if not vault.capcut_running():
+        vault.open_capcut()          # back on CapCut's home, the changed project in the list
     return res
 
 

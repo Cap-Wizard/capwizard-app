@@ -1027,6 +1027,8 @@ def project_as_template(project_id: str) -> dict:
     if client.get("source") == "vault" and client.get("template") != template:
         vault.salva_cliente(client["id"], base=template)
     brain.push_soon(f"Template di {client['nome']} rifatto da {video}")
+    if not vault.capcut_running():
+        vault.open_capcut()              # back on CapCut's home, with the new template in the list
     return out
 
 

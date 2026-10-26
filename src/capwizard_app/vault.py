@@ -518,6 +518,27 @@ def open_capcut() -> None:
     subprocess.run(["open", CAPCUT_APP])
 
 
+def libera(folder, log=print) -> None:
+    """A project open in CapCut (its .locked file) is closed for the app: CapCut is asked to quit, which saves
+    the open project, and the app waits for it to let go. A lock left by a CapCut that is not running is stale.
+    At the end of the job CapCut is reopened on its home (open_capcut)."""
+    lock = Path(folder) / ".locked"
+    if not lock.exists():
+        return
+    if capcut_running():
+        log(f"⏏ «{Path(folder).name}» è aperto in CapCut: chiudo CapCut (salva da solo) e lo riapro alla fine.")
+        subprocess.run(["osascript", "-e", 'tell application "CapCut" to quit'], capture_output=True, timeout=30)
+        for _ in range(60):
+            if not capcut_running():
+                break
+            time.sleep(0.5)
+        if capcut_running():
+            raise RuntimeError("CapCut non si è chiuso (forse ha una finestra aperta che chiede qualcosa): "
+                               "chiudilo tu e riprova.")
+        time.sleep(1)
+    lock.unlink(missing_ok=True)
+
+
 # ---------------------------------------------------------------------------
 # Notes the app writes: video history, new client, client's colour/font
 # ---------------------------------------------------------------------------
