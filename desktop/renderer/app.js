@@ -142,19 +142,30 @@ function setPill(id, cls, label) {
 // ---------------------------------------------------------------------------
 
 // Claude is mandatory: verify it with a real request and gate editing on it.
+// A failed check (Claude slow to answer while the Mac starts up, network hiccup) is retried on its own:
+// otherwise every "Applica modifiche" / "Inizia a editare" stays off until the app is reopened.
+let claudeRetry = null;
 async function checkClaude() {
-  setPill("pill-ai", "warn", "Claude…");
+  clearTimeout(claudeRetry);
+  if (!state.aiReady) setPill("pill-ai", "warn", "Claude…");
+  let why = "";
   try {
     const r = await (await fetch(`${BACKEND}/api/ai/test`, { method: "POST" })).json();
     state.aiReady = !!r.ok;
-    setPill("pill-ai", r.ok ? "ok" : "err", r.ok ? "Claude collegato" : "Claude da collegare");
-    if (!r.ok) addLog(`Claude non è collegato: ${r.message}. Clicca «Claude» in alto per collegarlo.`, "err");
-  } catch (_) {
+    why = r.ok ? "" : r.message || "";
+  } catch (e) {
     state.aiReady = false;
-    setPill("pill-ai", "err", "Claude da collegare");
+    why = String(e);
+  }
+  setPill("pill-ai", state.aiReady ? "ok" : "err", state.aiReady ? "Claude collegato" : "Claude da collegare");
+  $("pill-ai").title = why ? `${why} (riprovo da solo tra 20 secondi)` : "Collegamento a Claude";
+  if (!state.aiReady) {
+    addLog(`Claude non risponde: ${why}. Riprovo da solo tra 20 secondi.`, "err");
+    claudeRetry = setTimeout(checkClaude, 20000);
   }
   check();
   checkScarico();
+  if ($("send")) renderAtt();          // the project page's «Applica modifiche» follows Claude's state
 }
 
 async function loadSystem() {
