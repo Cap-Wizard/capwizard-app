@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 from capwizard_app import registry, vault
-from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, clean_env, find_claude_cli
+from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, claude_launch, find_claude_cli
 
 SKILLS_DIR = Path.home() / ".claude/skills"
 EDITOR_SKILL = "reel-capcut-mac"
@@ -235,11 +235,14 @@ def _slug(s: str) -> str:
 def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcript: list[str], step_of=None) -> str | None:
     """Run Claude Code on `prompt`, streaming its messages into the job's log.
     Returns why it stopped badly, if it did."""
-    cmd = [find_claude_cli(), "-p", "--output-format", "stream-json", "--verbose",
+    extra, env, note = claude_launch()
+    if note:
+        job.log(f"⚠ {note}")
+    cmd = [find_claude_cli(), "-p", "--output-format", "stream-json", "--verbose", *extra,
            "--model", model, "--permission-mode", "acceptEdits",
            "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill",
            "--add-dir", *sorted(dirs)]
-    proc = subprocess.Popen(cmd, cwd=cwd, env=clean_env(), text=True, bufsize=1,
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, text=True, bufsize=1,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     job.proc = proc
     proc.stdin.write(prompt)

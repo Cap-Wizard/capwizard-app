@@ -38,7 +38,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent, vault
+from capwizard_app import agent, scarico, vault
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +390,55 @@ def study(req: StudyRequest) -> dict:
     """New agency/client with material to study (reference videos, Instagram links, the agency's message, chat screenshots)."""
     job = manager.create()
     threading.Thread(target=_run_study, args=(job, req), daemon=True).start()
+    return {"job_id": job.id}
+
+
+class ScaricoRequest(BaseModel):
+    clip: list[str] = []
+    output: str = ""
+    codice: str = ""
+    pdp: str = ""
+    note: str = ""
+    ai_model: str = "sonnet"
+
+
+class ScaricoExecRequest(BaseModel):
+    piano: dict
+    output: str
+    shooting: str = ""
+    mmaa: str = ""
+    modo: str = "copia"           # copia | sposta
+
+
+def _run_scarico(job: Job, fn, d: dict) -> None:
+    job.status = "running"
+    try:
+        job.results = [fn(job, d)]
+        job.status = "done"
+    except Exception as e:  # noqa: BLE001
+        job.error = str(e)
+        job.status = "error"
+        job.log(f"ERRORE: {e}")
+
+
+@app.get("/api/scarico/codici")
+def scarico_codici() -> dict:
+    return {"codici": scarico.client_codes(), "skill": str(scarico.skill_md() or "")}
+
+
+@app.post("/api/scarico/analizza")
+def scarico_analizza(req: ScaricoRequest) -> dict:
+    """Smistamento clip, step 1: inventory + transcription, then Claude's plan. Touches no clip."""
+    job = manager.create()
+    threading.Thread(target=_run_scarico, args=(job, scarico.analyse, req.model_dump()), daemon=True).start()
+    return {"job_id": job.id}
+
+
+@app.post("/api/scarico/esegui")
+def scarico_esegui(req: ScaricoExecRequest) -> dict:
+    """Smistamento clip, step 2: rename and file the clips as in the confirmed plan."""
+    job = manager.create()
+    threading.Thread(target=_run_scarico, args=(job, scarico.execute, req.model_dump()), daemon=True).start()
     return {"job_id": job.id}
 
 

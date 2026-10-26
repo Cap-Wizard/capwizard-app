@@ -100,13 +100,14 @@ async function bootBackend() {
 // ---------------------------------------------------------------------------
 
 function showView(name) {
-  for (const v of ["view-auth", "view-subscribe", "view-home", "view-editor"]) {
+  for (const v of ["view-auth", "view-subscribe", "view-home", "view-editor", "view-scarico"]) {
     $(v).hidden = v !== `view-${name}`;
   }
-  const inApp = name === "home" || name === "editor";
+  const inApp = name === "home" || name === "editor" || name === "scarico";
   $("views").hidden = !inApp;
   $("v-new").classList.toggle("on", name === "editor");
   $("v-proj").classList.toggle("on", name === "home");
+  $("v-scarico").classList.toggle("on", name === "scarico");
   document.body.classList.toggle("projs-view", name === "home");
   // account controls only when past the gate (and not in local/private mode)
   const authed = inApp && !LOCAL_MODE;
@@ -115,6 +116,7 @@ function showView(name) {
   $("tb-logout").hidden = !authed;
   if (state.email) $("tb-email").textContent = state.email;
   if (name === "home" && state.backendReady) loadProjects();
+  if (name === "scarico" && state.backendReady) loadScaricoCodes();
 }
 
 function setPill(id, cls, label) {
@@ -140,6 +142,7 @@ async function checkClaude() {
     setPill("pill-ai", "err", "Claude da collegare");
   }
   check();
+  checkScarico();
 }
 
 async function loadSystem() {
@@ -397,6 +400,8 @@ function wireEditor() {
   $("v-new").onclick = () => showView("editor");
   $("v-proj").onclick = () => showView("home");
   $("v-client").onclick = () => openClientModal(null);
+  $("v-scarico").onclick = () => showView("scarico");
+  wireScarico();
 
   $("drop").onclick = async () => {
     const p = window.api && await window.api.selectFolder();
@@ -429,6 +434,13 @@ function wireEditor() {
   document.addEventListener("drop", (e) => {
     e.preventDefault();
     endDrag();
+    if (!$("view-scarico").hidden) {          // clips of a shooting to sort
+      for (const f of e.dataTransfer.files) {
+        const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
+        if (p) addScaricoPath(p);
+      }
+      return;
+    }
     if (!$("client-modal").hidden) {          // videos / screenshots for a new client to study
       for (const f of e.dataTransfer.files) {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
@@ -1408,6 +1420,174 @@ async function startStudy(col) {
       }
     } catch (_) { /* backend busy: next tick */ }
   }, 2500);
+}
+
+// ---------------------------------------------------------------------------
+// Smistamento clip (skill scarico): analyse → plan shown here → confirm → the app renames and files the clips
+// ---------------------------------------------------------------------------
+
+const sc = { clips: [], plan: null, job: null, codesLoaded: false };
+
+function wireScarico() {
+  $("sc-mmaa").value = new Date().toLocaleDateString("it-IT", { month: "2-digit", year: "2-digit" }).replace("/", "");
+  $("sc-drop").onclick = async () => { for (const p of (window.api && await window.api.selectVideos()) || []) addScaricoPath(p); };
+  $("sc-out-btn").onclick = async () => {
+    const p = window.api && await window.api.selectFolder();
+    if (p) { $("sc-out").value = p; checkScarico(); }
+  };
+  $("sc-code").onchange = () => { $("sc-code-new").hidden = $("sc-code").value !== "__new"; checkScarico(); };
+  ["sc-out", "sc-code-new", "sc-shoot", "sc-mmaa"].forEach((i) => { $(i).oninput = checkScarico; });
+  $("sc-go").onclick = startScarico;
+  $("sc-exec").onclick = execScarico;
+  $("sc-stop").onclick = () => { if (sc.job) fetch(`${BACKEND}/api/jobs/${sc.job}/stop`, { method: "POST" }); };
+}
+
+async function loadScaricoCodes() {
+  if (sc.codesLoaded) return;
+  try {
+    const d = await (await fetch(`${BACKEND}/api/scarico/codici`)).json();
+    $("sc-code").innerHTML = `<option value="">Scegli il cliente…</option>`
+      + d.codici.map((c) => `<option value="${escapeHtml(c.codice)}">${escapeHtml(c.codice)} — ${escapeHtml(c.cliente)}</option>`).join("")
+      + `<option value="__new">＋ Altro codice…</option>`;
+    sc.codesLoaded = true;
+  } catch (_) { /* backend busy: retried next time the view opens */ }
+  checkScarico();
+}
+
+function scaricoCode() {
+  return ($("sc-code").value === "__new" ? $("sc-code-new").value : $("sc-code").value).trim().toUpperCase();
+}
+
+function addScaricoPath(p) {
+  if (!sc.clips.includes(p)) sc.clips.push(p);
+  renderScaricoClips();
+}
+
+function renderScaricoClips() {
+  $("sc-refs").innerHTML = "";
+  sc.clips.forEach((p, i) => {
+    const d = document.createElement("div");
+    d.className = "ref";
+    d.innerHTML = `${/\.[a-z0-9]{2,4}$/i.test(p) ? "🎞️" : "📁"} <em></em><button>✕</button>`;
+    d.querySelector("em").textContent = p.split("/").slice(-2).join("/");
+    d.querySelector("button").onclick = () => { sc.clips.splice(i, 1); renderScaricoClips(); };
+    $("sc-refs").appendChild(d);
+  });
+  $("sc-count").textContent = sc.clips.length ? `${sc.clips.length} ${sc.clips.length === 1 ? "elemento" : "elementi"}` : "";
+  checkScarico();
+}
+
+function scaricoDest() {
+  const out = $("sc-out").value.trim().replace(/\/$/, "");
+  const n = $("sc-shoot").value.trim().replace(/°$/, "");
+  return out && n ? `${out}/${scaricoCode() || "CODICE"} - ${n}° Shooting - ${$("sc-mmaa").value.trim()}` : out;
+}
+
+function checkScarico() {
+  const busy = !!sc.job;
+  const miss = [];
+  if (!sc.clips.length) miss.push("clip");
+  if (!$("sc-out").value.trim()) miss.push("cartella di destinazione");
+  if (!scaricoCode()) miss.push("cliente");
+  $("sc1").classList.toggle("done", !!sc.clips.length);
+  $("sc2").classList.toggle("done", !!$("sc-out").value.trim() && !!scaricoCode());
+  $("sc-dest").textContent = scaricoDest() ? `Le cartelle dei video andranno in: ${scaricoDest()}` : "";
+  $("sc-go").disabled = busy || !!miss.length || !state.backendReady || !state.aiReady;
+  $("sc-missing").textContent = busy ? "" : miss.length ? `Manca: ${miss.join(", ")}`
+    : !state.aiReady ? "Claude non è collegato: premi ⚙ in alto" : "Analizzo e ti mostro il piano: nessun file viene toccato finché non confermi";
+  $("sc-exec").disabled = busy || !sc.plan;
+}
+
+function scLog(text, kind) {
+  const box = $("sc-console");
+  const div = document.createElement("div");
+  div.className = `k-${kind || kindOf(text)}`;
+  div.textContent = text;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+// run a scarico job and follow its log; resolves with its result (or null if it failed)
+async function scaricoJob(url, body, label) {
+  let jobId;
+  try {
+    jobId = (await (await fetch(`${BACKEND}${url}`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                    body: JSON.stringify(body) })).json()).job_id;
+  } catch (e) { scLog(`ERRORE: ${e}`, "err"); return null; }
+  sc.job = jobId;
+  $("sc-stop").hidden = false;
+  $("sc-status").textContent = label;
+  checkScarico();
+  let shown = 0;
+  return new Promise((resolve) => {
+    const poll = setInterval(async () => {
+      try {
+        const job = await (await fetch(`${BACKEND}/api/jobs/${jobId}`)).json();
+        const logs = job.logs || [];
+        for (; shown < logs.length; shown++) scLog(logs[shown]);
+        if (job.status !== "done" && job.status !== "error") return;
+        clearInterval(poll);
+        sc.job = null;
+        $("sc-stop").hidden = true;
+        $("sc-status").textContent = job.status === "done" ? "finito" : "interrotto";
+        if (job.status === "error" && !logs.some((l) => l.startsWith("ERRORE"))) scLog(job.error || "errore", "err");
+        checkScarico();
+        resolve(job.status === "done" ? (job.results || [])[0] : null);
+      } catch (_) { /* backend busy: next tick */ }
+    }, 1500);
+  });
+}
+
+async function startScarico() {
+  sc.plan = null;
+  $("sc-plan-card").hidden = true;
+  $("sc-console").innerHTML = "";
+  scLog(`🗂️ Smistamento ${scaricoCode()}: ${sc.clips.length} elementi → ${scaricoDest()}`, "step");
+  const plan = await scaricoJob("/api/scarico/analizza", { clip: sc.clips, output: $("sc-out").value.trim(), codice: scaricoCode(),
+    pdp: $("sc-pdp").value, note: $("sc-note").value, ai_model: "sonnet" }, "Claude sta analizzando…");
+  if (!plan) return;
+  sc.plan = plan;
+  renderScaricoPlan();
+  scLog("— controlla il piano qui sopra: puoi correggere i titoli, poi premi Conferma e smista —", "ok");
+}
+
+function renderScaricoPlan() {
+  const p = sc.plan;
+  const list = (title, items) => items.length ? `<div class="sc-list"><b>${title}:</b> ${items.map(escapeHtml).join(" · ")}</div>` : "";
+  const span = (clips) => clips.length ? `${clips[0].nuovo} → ${clips[clips.length - 1].nuovo}` : "";
+  $("sc-plan").innerHTML = p.gruppi.map((g, i) => `
+    <div class="sc-group">
+      <input type="text" data-g="${i}" value="${escapeHtml(g.titolo)}" />
+      <div class="meta"><b>${g.clip.length} clip</b><span>${escapeHtml(span(g.clip))}</span>
+        <span>${escapeHtml(g.clip[0].nome)} → ${escapeHtml(g.clip[g.clip.length - 1].nome)}</span></div>
+      ${g.estratto ? `<div class="quote">“${escapeHtml(g.estratto)}”</div>` : ""}
+      ${g.dubbio ? `<div class="doubt">⚠ ${escapeHtml(g.dubbio)}</div>` : ""}
+    </div>`).join("")
+    + list("Clip nere → _CLIP NERE", p.nere.map((c) => c.nome))
+    + list("⚠ Non smistate → _NON SMISTATE", p.non_smistate.map((c) => c.nome))
+    + list("Nel PDP ma non trovati", p.mancanti)
+    + list("Girati ma non nel PDP", p.fuori_pdp)
+    + (p.note ? `<div class="sc-list">${escapeHtml(p.note)}</div>` : "");
+  $("sc-plan").querySelectorAll("input[data-g]").forEach((inp) => {
+    inp.oninput = () => { sc.plan.gruppi[+inp.dataset.g].titolo = inp.value; };
+  });
+  $("sc-plan-tag").textContent = `${p.gruppi.length} video · ${p.totale} clip`;
+  $("sc-exec").textContent = isOn("sc-move") ? "CONFERMA E SPOSTA" : "CONFERMA E COPIA";
+  $("sc-plan-card").hidden = false;
+  checkScarico();
+}
+
+async function execScarico() {
+  if (!sc.plan) return;
+  const res = await scaricoJob("/api/scarico/esegui", { piano: sc.plan, output: $("sc-out").value.trim(), shooting: $("sc-shoot").value,
+    mmaa: $("sc-mmaa").value, modo: isOn("sc-move") ? "sposta" : "copia" }, "smisto le clip…");
+  if (!res) return;
+  sc.plan = null;
+  $("sc-plan-card").hidden = true;
+  for (const r of res.riepilogo) scLog(`${r.cartella}: ${r.clip} clip (${r.da} → ${r.a})`, "info");
+  scLog(`— finito: ${res.cartella} —`, "ok");
+  if (window.api) window.api.openPath(res.cartella);
+  checkScarico();
 }
 
 function escapeHtml(s) {

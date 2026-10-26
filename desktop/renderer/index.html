@@ -19,6 +19,7 @@
       <button class="vbtn on" id="v-new">＋ Nuovo video</button>
       <button class="vbtn" id="v-proj">📂 I miei progetti<b id="n-proj">0</b></button>
       <button class="vbtn" id="v-client" hidden>👥 Nuovo cliente</button>
+      <button class="vbtn" id="v-scarico">🗂️ Smistamento clip</button>
     </nav>
     <div class="pills">
       <span class="tb-email" id="tb-email" hidden></span>
@@ -178,6 +179,59 @@
             <button class="btn2" id="btn-open">Apri in Finder</button>
           </div>
         </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== SMISTAMENTO CLIP (skill scarico) ==================== -->
+  <main id="view-scarico" class="view split" hidden>
+    <section class="left">
+      <div class="lscroll">
+        <div class="step" id="sc1">
+          <h2><span class="num">1</span>Le clip dello shooting<small id="sc-count"></small></h2>
+          <div class="drop" id="sc-drop">
+            <b>🎞️ Trascina qui le clip (o la cartella)</b>
+            <span>oppure clicca per sceglierle dal Finder</span>
+          </div>
+          <div id="sc-refs" class="reflist"></div>
+        </div>
+        <div class="step" id="sc2">
+          <h2><span class="num">2</span>Dove le metto</h2>
+          <div class="row2">
+            <input type="text" id="sc-out" placeholder="/Volumes/Extreme SSD/_KORA/GISE - [Giappugliese]/GISE - [Shooting]" />
+            <button class="btn2" id="sc-out-btn">Scegli…</button>
+          </div>
+          <label>Cliente</label>
+          <select id="sc-code"></select>
+          <input type="text" id="sc-code-new" placeholder="Codice di 4 lettere (es. ABCD)" hidden />
+          <div class="row2 pair">
+            <div><label>N° shooting <span class="opt">facoltativo</span></label><input type="text" id="sc-shoot" placeholder="es. 10" /></div>
+            <div><label>Mese/anno <span class="opt">MMAA</span></label><input type="text" id="sc-mmaa" maxlength="4" /></div>
+          </div>
+          <div class="hint" id="sc-dest"></div>
+          <div class="switch" data-sw="sc-move"><span>Sposta invece di copiare <span class="opt">solo sullo stesso disco, altrimenti copia</span></span><div class="tgl" id="sc-move"></div></div>
+        </div>
+        <div class="step" id="sc3">
+          <h2><span class="num">3</span>PDP <small>facoltativo</small></h2>
+          <textarea id="sc-pdp" style="min-height:120px" placeholder="Incolla qui il piano editoriale (titoli e script dei video): Claude abbina le clip ai titoli. Senza PDP divide con le clip nere e dà un titolo provvisorio."></textarea>
+          <label>Note per Claude <span class="opt">facoltativo</span></label>
+          <textarea id="sc-note" placeholder="es. il video della fiorentina è stato girato con la costata"></textarea>
+        </div>
+      </div>
+      <div class="lfoot">
+        <button class="go" id="sc-go" disabled>ANALIZZA</button>
+        <div class="missing" id="sc-missing"></div>
+      </div>
+    </section>
+    <section class="right">
+      <div class="card" id="sc-plan-card" hidden>
+        <h3>Piano <span class="status-tag" id="sc-plan-tag"></span></h3>
+        <div id="sc-plan"></div>
+        <button class="go" id="sc-exec">CONFERMA E SMISTA</button>
+      </div>
+      <div class="card logcard">
+        <h3>Dettagli <span class="status-tag" id="sc-status">in attesa</span> <button class="stopbtn" id="sc-stop" hidden>Ferma</button></h3>
+        <div id="sc-console" ><div class="k-tool">Trascina le clip, scegli dove metterle e premi Analizza. Prima di toccare qualsiasi file ti mostro il piano.</div></div>
       </div>
     </section>
   </main>

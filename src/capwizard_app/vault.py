@@ -71,15 +71,24 @@ def tools_python() -> str:
     if _TOOLS_PY:
         return _TOOLS_PY
     cands = [os.environ.get("CAPWIZARD_TOOLS_PYTHON"), str(HOME / "Desktop/VIDEO CLAUDE/720 STUDI0/tools/venv/bin/python"),
-             str(HOME / "video-editor-mcp/work/tools/venv/bin/python"), str(HOME / "video-editor-mcp/.venv/bin/python"), sys.executable]
+             str(HOME / "video-editor-mcp/work/tools/venv/bin/python"), str(HOME / "video-editor-mcp/.venv/bin/python"), *_system_pythons()]
     for c in cands:
         if c and os.path.exists(c):
             r = subprocess.run([c, "-c", "import mlx_whisper, Vision"], capture_output=True)
             if r.returncode == 0:
                 _TOOLS_PY = c
                 return c
-    _TOOLS_PY = sys.executable
+    # no interpreter has both: the first real one (the built app's own executable is the server, not a Python)
+    _TOOLS_PY = next((c for c in cands if c and os.path.exists(c)), sys.executable)
     return _TOOLS_PY
+
+
+def _system_pythons() -> list[str]:
+    found = [shutil.which("python3"), "/opt/homebrew/bin/python3", "/usr/local/bin/python3",
+             *sorted(glob.glob("/Library/Frameworks/Python.framework/Versions/3.*/bin/python3"), reverse=True), "/usr/bin/python3"]
+    if not getattr(sys, "frozen", False):
+        found.insert(0, sys.executable)
+    return [p for p in dict.fromkeys(found) if p]
 
 
 def probe(path: str) -> tuple[float | None, int | None]:
