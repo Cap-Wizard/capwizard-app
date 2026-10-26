@@ -435,3 +435,19 @@ body.projs-view.dragging::after { content: "Rilascia qui gli screenshot della ch
 .sc-group .doubt { font-size: 11.5px; color: var(--warn); margin-top: 3px; }
 .sc-list { font-size: 12px; color: var(--mute); margin-top: 8px; line-height: 1.5; }
 .sc-list b { color: var(--text); }
+
+/* AI nel video */
+.modal.wide { width: 760px; }
+.btn2.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.btn2.primary:disabled { opacity: .45; }
+#ai-log { max-height: 180px; overflow-y: auto; margin-top: 12px; font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.console.mini { max-height: 180px; overflow-y: auto; margin-top: 12px; font-size: 12px; }
+.ai-pt { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 10px; margin-top: 10px; }
+.ai-pt.off { opacity: .45; }
+.ai-pt img { width: 96px; height: 64px; object-fit: cover; border-radius: 6px; flex: none; }
+.ai-pt .t { font-weight: 600; }
+.ai-pt .f { color: var(--mute); font-size: 12.5px; margin-top: 2px; }
+.ai-pt select, .ai-pt textarea { width: 100%; margin-top: 6px; font-size: 12px; }
+.ai-pt textarea { min-height: 44px; }
+.ai-pt input[type=checkbox] { margin-top: 4px; transform: scale(1.3); }
+.ai-note { margin-top: 12px; font-size: 13px; color: var(--mute); }

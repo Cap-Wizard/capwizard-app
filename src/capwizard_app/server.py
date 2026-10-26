@@ -38,7 +38,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent, aiservices, board, brain, scarico, vault
+from capwizard_app import agent, ai_render, aiservices, board, brain, scarico, vault
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +422,57 @@ def _run_scarico(job: Job, fn, d: dict) -> None:
         job.error = str(e)
         job.status = "error"
         job.log(f"ERRORE: {e}")
+
+
+# ---------------------------------------------------------------------------
+# AI nel video: animated renders (propose points → tick → photos and videos through the Higgsfield API)
+# ---------------------------------------------------------------------------
+
+class AiProposeRequest(BaseModel):
+    project_id: str
+    renders: str
+    ai_model: str = "opus"
+
+
+class AiGenerateRequest(BaseModel):
+    project_id: str
+    renders: str
+    punti: list[dict] = []
+
+
+def _ai_project(project_id: str) -> dict:
+    p = _project(project_id)
+    if not p:
+        raise RuntimeError("Progetto non trovato.")
+    p = dict(p)
+    settings = dict(p.get("settings") or {})
+    if not settings.get("client"):           # a CapCut draft: guess the client from its name, for its rules
+        c = _guess_client(p["name"], agent.list_clients())
+        settings["client"] = c["id"] if c else None
+    p["settings"] = settings
+    return p
+
+
+@app.get("/api/ai-video/key")
+def ai_video_key() -> dict:
+    """Only whether the Higgsfield API key is configured; the value never leaves the backend."""
+    return {"ok": ai_render.load_key(), "file": str(registry.app_data_dir() / "higgsfield.env")}
+
+
+@app.post("/api/ai-video/propose")
+def ai_video_propose(req: AiProposeRequest) -> dict:
+    job = manager.create()
+    threading.Thread(target=_run_scarico, daemon=True,
+                     args=(job, lambda j, r: ai_render.propose(j, _ai_project(r.project_id), r.renders, r.ai_model), req)).start()
+    return {"job_id": job.id}
+
+
+@app.post("/api/ai-video/generate")
+def ai_video_generate(req: AiGenerateRequest) -> dict:
+    job = manager.create()
+    threading.Thread(target=_run_scarico, daemon=True,
+                     args=(job, lambda j, r: ai_render.generate(j, _ai_project(r.project_id), r.punti, r.renders), req)).start()
+    return {"job_id": job.id}
 
 
 @app.get("/api/scarico/codici")

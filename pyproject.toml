@@ -7,6 +7,8 @@ license = {text = "PolyForm-Noncommercial-1.0.0"}
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
+    "higgsfield-client>=0.1",
+    "python-dotenv>=1.0",
 ]
 
 [project.scripts]

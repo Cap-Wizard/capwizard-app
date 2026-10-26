@@ -127,6 +127,11 @@
           <div class="switch" data-sw="sw-transitions"><span>🎬 A fine frase: zoom, transizione e woosh</span><div class="tgl on" id="sw-transitions"></div></div>
           <div class="switch" data-sw="sw-zoom"><span>🔍 Zoom leggeri sulle frasi chiave</span><div class="tgl" id="sw-zoom"></div></div>
           <div class="switch" data-sw="sw-cine"><span>🎬 Video cine <span class="opt">colori clip per clip, b-roll sui tagli</span></span><div class="tgl" id="sw-cine"></div></div>
+          <div class="switch" data-sw="sw-airender"><span>🏗️ AI nel video <span class="opt">render animati come Torre de Roveri: dopo il montaggio scegli tu i punti</span></span><div class="tgl" id="sw-airender"></div></div>
+          <div class="row2" id="airender-row" hidden>
+            <input type="text" id="airender-path" placeholder="Cartella con le foto render (jpg, png)" />
+            <button class="btn2" id="airender-btn">Scegli…</button>
+          </div>
           <div class="switch" data-sw="sw-aimedia"><span>✦ Contenuti AI se servono <span class="opt">b-roll e immagini con i servizi collegati</span></span><div class="tgl on" id="sw-aimedia"></div></div>
           <label>Note per Claude</label>
           <textarea id="notes" placeholder="es. tieni la seconda versione del gancio, niente musica, metti il prezzo a schermo"></textarea>
@@ -324,6 +329,32 @@
   </div>
 
   <!-- ==================== CLIENTE: NUOVO / MODIFICA (vault Obsidian) ==================== -->
+  <div id="ai-modal" class="modal-overlay" hidden>
+    <div class="modal wide">
+      <div class="modal-head">
+        <h2 id="ai-title">🏗️ AI nel video</h2>
+        <button class="modal-close" id="ai-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="hint" id="ai-sub"></div>
+        <label>Cartella delle foto render</label>
+        <div class="row2">
+          <input type="text" id="ai-renders" placeholder="/Volumes/…/RENDER FOTO" />
+          <button class="btn2" id="ai-renders-btn">Scegli…</button>
+        </div>
+        <div class="hint" id="ai-key"></div>
+        <div id="ai-points"></div>
+        <div id="ai-log" class="console mini" hidden></div>
+      </div>
+      <div class="modal-foot">
+        <span class="hint" id="ai-cost"></span>
+        <span style="flex:1"></span>
+        <button class="btn2" id="ai-analyse">1 · Trova i punti</button>
+        <button class="btn2 primary" id="ai-go" disabled>2 · Genera foto e video</button>
+      </div>
+    </div>
+  </div>
+
   <div id="client-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-head">

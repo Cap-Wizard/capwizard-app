@@ -476,8 +476,16 @@ function wireEditor() {
     if (p) $("script-path").value = p;
   };
   document.querySelectorAll(".switch[data-sw]").forEach((row) => {
-    row.onclick = () => $(row.dataset.sw).classList.toggle("on");
+    row.onclick = () => {
+      $(row.dataset.sw).classList.toggle("on");
+      if (row.dataset.sw === "sw-airender") $("airender-row").hidden = !isOn("sw-airender");
+    };
   });
+  $("airender-btn").onclick = async () => {
+    const p = window.api && await window.api.selectFolder();
+    if (p) $("airender-path").value = p;
+  };
+  wireAiModal();
   $("row-batch").onclick = () => { state.batch = !state.batch; updateBatchUI(); };
 
   $("btn-client-open").onclick = () => { if (state.client) window.api.openPath(state.client.path); };
@@ -587,6 +595,10 @@ async function onGenerate() {
       if (msg.results && msg.results.length) showBatchResult(msg.results);
       else showResult(msg.result_path, msg.report_path);
       loadProjects();
+      if (isOn("sw-airender") && msg.result_path) {        // AI nel video: next step right away
+        const name = msg.result_path.split("/").filter(Boolean).pop();
+        openAiModal({ id: `capcut:${name}`, name }, $("airender-path").value.trim(), true);
+      }
     } else {
       setStatus("interrotto");
       addLog(msg.error || "errore sconosciuto", "err");
@@ -867,6 +879,7 @@ async function openProject(p) {
         <button class="btn2" id="pd-folder" ${p.exists ? "" : "disabled"}>Apri in Finder</button>
         <button class="btn2" id="pd-report" ${p.report_path ? "" : "disabled"}>Leggi il report</button>
         <button class="btn2" id="pd-again">Rifai con questi dati</button>
+        <button class="btn2" id="pd-ai" ${p.exists ? "" : "disabled"}>🏗️ AI nel video</button>
         ${p.exists ? "" : '<button class="btn2 danger" id="pd-remove">Rimuovi dall\'elenco</button>'}
       </div>
     </div>
@@ -882,6 +895,7 @@ async function openProject(p) {
   $("pd-folder").onclick = () => window.api.openPath(p.result_path);
   $("pd-report").onclick = () => window.api.openPath(p.report_path);
   $("pd-again").onclick = () => redoProject(p);
+  $("pd-ai").onclick = () => openAiModal({ id: p.id, name: p.name }, "", false);
   if (!p.exists) $("pd-remove").onclick = () => removeProjects([p]);
   renderProjectStatus(p);
   $("btn-attach").onclick = async () => {
@@ -1941,4 +1955,128 @@ async function execScarico() {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+
+// ---------------------------------------------------------------------------
+// AI nel video: renders → points to tick → vertical photos + Kling videos through the Higgsfield API → CapCut
+// ---------------------------------------------------------------------------
+
+const ai = { project: null, points: [], renders: [], job: null };
+
+function wireAiModal() {
+  $("ai-close").onclick = () => { if (!ai.job) { $("ai-modal").hidden = true; document.body.classList.remove("modal-open"); } };
+  $("ai-renders-btn").onclick = async () => {
+    const p = window.api && await window.api.selectFolder();
+    if (p) { $("ai-renders").value = p; aiCheck(); }
+  };
+  $("ai-renders").oninput = aiCheck;
+  $("ai-analyse").onclick = aiPropose;
+  $("ai-go").onclick = aiGenerate;
+}
+
+async function openAiModal(project, renders, autoStart) {
+  ai.project = project;
+  ai.points = [];
+  $("ai-title").textContent = `🏗️ AI nel video · ${project.name}`;
+  $("ai-sub").textContent = "1) Claude guarda il video e i render e propone dove metterli · 2) spunti quelli che vuoi · "
+    + "3) per ognuno: foto verticale (Qwen Image 3) → video 5 s (Kling 3.0 Pro) → inserito nel progetto a taglio netto.";
+  $("ai-renders").value = renders || $("ai-renders").value || "";
+  $("ai-points").innerHTML = "";
+  $("ai-log").hidden = true;
+  $("ai-log").innerHTML = "";
+  $("ai-modal").hidden = false;
+  document.body.classList.add("modal-open");
+  try {
+    const k = await (await fetch(`${BACKEND}/api/ai-video/key`)).json();
+    $("ai-key").textContent = k.ok ? "" : `⚠ Manca la chiave dell'API Higgsfield: mettila in ${k.file} come HF_KEY=key-id:key-secret.`;
+  } catch (_) { /* informative only */ }
+  aiCheck();
+  if (autoStart && $("ai-renders").value.trim()) aiPropose();
+}
+
+function aiCheck() {
+  const busy = !!ai.job;
+  const sel = ai.points.filter((p) => p.on);
+  $("ai-analyse").disabled = busy || !$("ai-renders").value.trim();
+  $("ai-go").disabled = busy || !sel.length;
+  $("ai-cost").textContent = sel.length
+    ? `${sel.length} ${sel.length > 1 ? "punti" : "punto"} · ~$${(sel.length * 5 * 0.112).toFixed(2)} di video (Kling 3.0 Pro) + ${sel.length} foto Qwen` : "";
+}
+
+function aiLog(text, kind) {
+  $("ai-log").hidden = false;
+  const d = document.createElement("div");
+  if (kind) d.className = kind === "err" ? "k-err" : "k-ok";
+  d.textContent = text;
+  $("ai-log").appendChild(d);
+  $("ai-log").scrollTop = $("ai-log").scrollHeight;
+}
+
+// run a backend job and stream its log into the modal; resolves with its result or null
+async function aiJob(url, body) {
+  ai.job = true;
+  aiCheck();
+  let shown = 0;
+  try {
+    const r = await (await fetch(`${BACKEND}${url}`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body) })).json();
+    if (!r.job_id) throw new Error(r.error || "il motore non ha accettato la richiesta");
+    for (;;) {
+      await new Promise((res) => setTimeout(res, 2500));
+      const job = await (await fetch(`${BACKEND}/api/jobs/${r.job_id}`)).json();
+      (job.logs || []).slice(shown).forEach((l) => aiLog(l));
+      shown = (job.logs || []).length;
+      if (job.status === "done") return (job.results || [])[0] || null;
+      if (job.status === "error") { aiLog(job.error || "errore", "err"); return null; }
+    }
+  } catch (e) {
+    aiLog(String(e.message || e), "err");
+    return null;
+  } finally {
+    ai.job = null;
+    aiCheck();
+  }
+}
+
+async function aiPropose() {
+  $("ai-points").innerHTML = "";
+  ai.points = [];
+  const res = await aiJob("/api/ai-video/propose", { project_id: ai.project.id, renders: $("ai-renders").value.trim() });
+  if (!res) return;
+  ai.renders = res.renders || [];
+  ai.points = (res.punti || []).map((p) => ({ ...p, on: true }));
+  renderAiPoints(res.note);
+}
+
+function renderAiPoints(note) {
+  const box = $("ai-points");
+  box.innerHTML = ai.points.length ? "" : '<div class="ai-note">Nessun punto adatto trovato.</div>';
+  ai.points.forEach((p, i) => {
+    const row = document.createElement("div");
+    row.className = "ai-pt" + (p.on ? "" : " off");
+    const opts = ai.renders.map((r) => `<option value="${escapeHtml(r)}" ${r === p.render ? "selected" : ""}>${escapeHtml(r.split("/").pop())}</option>`).join("");
+    row.innerHTML = `<input type="checkbox" ${p.on ? "checked" : ""}>
+      ${p.thumb ? `<img src="${p.thumb}">` : ""}
+      <div style="flex:1;min-width:0">
+        <div class="t">${Number(p.inizio).toFixed(2)} → ${Number(p.fine).toFixed(2)} s · ${escapeHtml(p.ambiente || "")}</div>
+        <div class="f">«${escapeHtml(p.frase || "")}» — ${escapeHtml(p.perche || "")}</div>
+        <select>${opts}</select>
+        <textarea>${escapeHtml(p.prompt || "")}</textarea>
+      </div>`;
+    row.querySelector("input").onchange = (e) => { p.on = e.target.checked; row.classList.toggle("off", !p.on); aiCheck(); };
+    row.querySelector("select").onchange = (e) => { p.render = e.target.value; };
+    row.querySelector("textarea").oninput = (e) => { p.prompt = e.target.value; };
+    box.appendChild(row);
+  });
+  if (note) box.insertAdjacentHTML("beforeend", `<div class="ai-note">${escapeHtml(note)}</div>`);
+  aiCheck();
+}
+
+async function aiGenerate() {
+  const sel = ai.points.filter((p) => p.on).map(({ on, thumb, ...p }) => p);
+  if (!sel.length) return;
+  if (!confirm(`Genero ${sel.length} foto e ${sel.length} video con l'API Higgsfield (~$${(sel.length * 5 * 0.112).toFixed(2)} di video + le foto). Procedo?`)) return;
+  const res = await aiJob("/api/ai-video/generate", { project_id: ai.project.id, renders: $("ai-renders").value.trim(), punti: sel });
+  if (res) aiLog(`✅ Fatto: ${res.inseriti} video nel progetto. Riapri «${ai.project.name}» in CapCut. File in ${res.cartella}`, "ok");
 }
