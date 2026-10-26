@@ -479,6 +479,7 @@ body.projs-view.dragging::after { content: "Rilascia qui gli screenshot della ch
 .ref-slot { padding: 14px 8px; min-height: 92px; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
 .ref-slot b { font-size: 12px; }
 .ref-slot span { font-size: 11px; line-height: 1.35; }
+#ref-add { grid-column: 1 / -1; min-height: 76px; }      /* the add box takes the whole row */
 .ref-slot.full { border-style: solid; border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, var(--bg2)); }
 .ref-slot .ref-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* in Nuovo video a drag lights up the boxes instead of veiling the window */

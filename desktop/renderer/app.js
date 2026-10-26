@@ -410,7 +410,7 @@ function renderRefs() {
       <b>🎯 Reference ${i + 1}</b><span class="ref-name" title="${escapeHtml(p)}">${escapeHtml(p.split("/").pop())}</span>
       <button class="btn-link mini" data-i="${i}">✕ togli</button></div>`).join("")
     + `<div class="drop ref-slot" id="ref-add"><b>＋ ${state.refs.length ? "Aggiungi reference" : "Reference"}</b>
-      <span>trascina qui uno o più video<br>o clicca</span></div>`;
+      <span>trascina qui uno o più video, o clicca per sceglierli</span></div>`;
   state.refs.forEach((_, i) => { $(`ref-${i}`).onclick = pickRefs(i); });
   $("ref-add").onclick = pickRefs(null);
   box.querySelectorAll("button").forEach((b) => {
