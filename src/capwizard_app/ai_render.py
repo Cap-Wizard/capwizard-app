@@ -91,7 +91,12 @@ def timeline(folder: Path) -> dict:
                 texts.append({"inizio": round(s["target_timerange"]["start"] / US, 2),
                               "fine": round((s["target_timerange"]["start"] + s["target_timerange"]["duration"]) / US, 2),
                               "testo": txt})
-    return {"durata": round(d["duration"] / US, 2), "tagli": cuts, "scritte": sorted(texts, key=lambda x: x["inizio"])}
+    over = [{"inizio": round(s["target_timerange"]["start"] / US, 2),
+             "fine": round((s["target_timerange"]["start"] + s["target_timerange"]["duration"]) / US, 2),
+             "clip": byid[s["material_id"]].get("material_name") or Path(byid[s["material_id"]].get("path", "")).name}
+            for t in d["tracks"] if t["type"] == "video" and t is not main for s in t["segments"]]
+    return {"durata": round(d["duration"] / US, 2), "tagli": cuts, "scritte": sorted(texts, key=lambda x: x["inizio"]),
+            "b_roll_gia_presenti": sorted(over, key=lambda x: x["inizio"])}
 
 
 PROPOSE_PROMPT = """Sei l'assistente di montaggio di Daniel. Lavori in automatico dall'app CapWizard: NON fare domande e NON modificare niente.
@@ -106,6 +111,7 @@ Regole:
 - Solo dove c'è un render VERO di quel posto nella cartella: non inventare ambienti (se dice "piscina" e non c'è un render della piscina, niente).
 - Inizio e fine sui confini delle frasi o dei tagli, durata 2,4–3,0 s. Non sovrapporre due inserti.
 - Ogni render al massimo una volta. Preferisci il render più bello e leggibile per quell'ambiente.
+- Non sovrapporti ai "b_roll_gia_presenti" (riprese vere già messe sopra): il render va in un altro momento, o subito prima/dopo.
 {regole_cliente}
 
 Cosa si dice e quando (tagli del video e scritte a schermo, in secondi sulla timeline):
