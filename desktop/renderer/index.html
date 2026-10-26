@@ -17,18 +17,24 @@
       <button class="vbtn" id="v-proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>I miei progetti</span><b id="n-proj">0</b></button>
       <button class="vbtn" id="v-scarico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.5"/><rect x="3" y="11" width="18" height="5" rx="1.5"/><path d="M7 20h10"/></svg><span>Smistamento clip</span></button>
     </nav>
-    <div class="sb-secs" id="creates" hidden>
-      <div class="sb-head"><span>Clienti</span><button class="sb-add" id="v-client" title="Nuovo template (nuovo cliente)">＋</button></div>
-      <div class="sb-list" id="sb-clients"></div>
-      <div class="sb-head"><span>Agenzie</span><button class="sb-add" id="v-agency" title="Nuova agenzia">＋</button></div>
-      <div class="sb-list" id="sb-agencies"></div>
+    <div class="sb-label">Archivio</div>
+    <nav class="views views2" id="creates" hidden>
+      <button class="vbtn" id="v-clients"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.8-3.2 3-5 5.5-5s4.7 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 14.2c2.3.2 4 1.8 4.8 4.8"/></svg><span>Clienti</span><b id="n-clients">0</b></button>
+      <button class="vbtn" id="v-agencies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V7l8-4 8 4v14"/><path d="M9 21v-5h6v5M8 10h.01M12 10h.01M16 10h.01"/></svg><span>Agenzie</span><b id="n-agencies">0</b></button>
+    </nav>
+    <div class="pills" hidden>
+      <div class="pill" id="pill-backend"><i></i>backend</div>
+      <button class="pill pill-btn" id="pill-ai"><i></i>Claude</button>
     </div>
-    <div class="sb-foot">
-      <span class="sb-av" id="sb-av">G</span>
-      <div class="sb-who"><b id="sb-name">Questo Mac</b><small id="tb-email" hidden></small></div>
+  </header>
+  <div class="mainbar" id="mainbar">
+    <span class="mb-title" id="mb-title">Home</span>
+    <span class="mb-date" id="mb-date"></span>
+    <div class="mb-right">
+      <span class="tb-email" id="tb-email" hidden></span>
       <div class="menu-wrap">
         <button class="icon-btn" id="btn-settings" title="Impostazioni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg></button>
-        <div class="menu up" id="settings-menu" hidden>
+        <div class="menu" id="settings-menu" hidden>
           <button id="btn-config-ai">Collegamento a Claude</button>
           <button id="btn-ai-services">✦ Servizi AI <small id="ai-count"></small></button>
           <button id="tb-account" hidden>Gestisci abbonamento</button>
@@ -36,12 +42,7 @@
         </div>
       </div>
     </div>
-    <div class="pills" hidden>
-      <div class="pill" id="pill-backend"><i></i>backend</div>
-      <button class="pill pill-btn" id="pill-ai"><i></i>Claude</button>
-    </div>
-  </header>
-  <div class="dragbar"></div>
+  </div>
   <aside class="notices" id="notices"></aside>
 
   <!-- ==================== LOGIN ==================== -->
@@ -175,6 +176,7 @@
       </div>
     </section>
 
+    <div class="gutter" title="Trascina per allargare una delle due parti · doppio clic per tornare com'era"></div>
     <section class="right">
       <div class="card">
         <h3><i></i><span id="rules-title">Regole del cliente</span>
@@ -246,6 +248,7 @@
         <div class="missing" id="sc-missing"></div>
       </div>
     </section>
+    <div class="gutter" title="Trascina per allargare una delle due parti · doppio clic per tornare com'era"></div>
     <section class="right">
       <div class="card" id="sc-plan-card" hidden>
         <h3>Piano <span class="status-tag" id="sc-plan-tag"></span></h3>
@@ -261,6 +264,28 @@
 
   <!-- ==================== I MIEI PROGETTI ==================== -->
   <!-- ==================== HOME: dove sta ogni video ==================== -->
+  <!-- ==================== CLIENTI ==================== -->
+  <div id="view-clients" class="view lib" hidden>
+    <div class="lib-head">
+      <div><h2>Clienti</h2><p class="lib-sub" id="cl-sub"></p></div>
+      <div class="lib-actions">
+        <input type="search" class="hsearch" id="cl-search" placeholder="Cerca cliente, agenzia o template…" autocomplete="off" />
+        <button class="btn-primary-sm" id="v-client">＋ Nuovo template</button>
+      </div>
+    </div>
+    <div class="lib-tabs" id="cl-tabs"></div>
+    <div class="lib-grid" id="cl-grid"></div>
+  </div>
+
+  <!-- ==================== AGENZIE ==================== -->
+  <div id="view-agencies" class="view lib" hidden>
+    <div class="lib-head">
+      <div><h2>Agenzie</h2><p class="lib-sub" id="ag-sub"></p></div>
+      <div class="lib-actions"><button class="btn-primary-sm" id="v-agency">＋ Nuova agenzia</button></div>
+    </div>
+    <div class="lib-grid" id="ag-grid"></div>
+  </div>
+
   <div id="view-dash" class="view dash" hidden>
     <div class="dash-head">
       <div>

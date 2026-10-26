@@ -142,11 +142,18 @@ function dropNotice(id) {
 // ---------------------------------------------------------------------------
 
 function showView(name) {
-  for (const v of ["view-auth", "view-subscribe", "view-dash", "view-home", "view-editor", "view-scarico"]) {
+  for (const v of ["view-auth", "view-subscribe", "view-dash", "view-home", "view-editor", "view-scarico",
+                   "view-clients", "view-agencies"]) {
     $(v).hidden = v !== `view-${name}`;
   }
-  const inApp = name === "home" || name === "editor" || name === "dash" || name === "scarico";
+  const inApp = ["home", "editor", "dash", "scarico", "clients", "agencies"].includes(name);
   $("views").hidden = !inApp;
+  $("v-clients").classList.toggle("on", name === "clients");
+  $("v-agencies").classList.toggle("on", name === "agencies");
+  $("mb-title").textContent = { dash: "Home", editor: "Nuovo video", home: "I miei progetti", scarico: "Smistamento clip",
+                                clients: "Clienti", agencies: "Agenzie" }[name] || "";
+  if (name === "clients") renderClientsView();
+  if (name === "agencies") renderAgenciesView();
   $("v-dash").classList.toggle("on", name === "dash");
   $("v-new").classList.toggle("on", name === "editor");
   $("v-proj").classList.toggle("on", name === "home");
@@ -158,8 +165,6 @@ function showView(name) {
   $("tb-account").hidden = !authed;
   $("tb-logout").hidden = !authed;
   if (state.email) $("tb-email").textContent = state.email;
-  $("sb-name").textContent = state.email ? state.email.split("@")[0] : "Questo Mac";
-  $("sb-av").textContent = ($("sb-name").textContent[0] || "C").toUpperCase();
   if (name === "home" && state.backendReady) loadProjects();
   if (name === "dash" && state.backendReady) loadBoard();
   if (name === "scarico" && state.backendReady) loadScaricoCodes();
@@ -562,6 +567,9 @@ function wireEditor() {
   $("v-proj").onclick = () => showView("home");
   $("v-client").onclick = () => openClientModal(null);
   $("v-agency").onclick = openAgencyModal;
+  $("v-clients").onclick = () => showView("clients");
+  $("v-agencies").onclick = () => showView("agencies");
+  $("cl-search").oninput = renderClientsView;
   $("v-scarico").onclick = () => showView("scarico");
   wireScarico();
 
@@ -1188,33 +1196,115 @@ function followChange(jobId, p) {
 const DASH = { items: [], stati: [], todo: null, loaded: false };
 const STATI = [["da_fare", "Da fare"], ["in_lavorazione", "Da finire"], ["da_revisionare", "Da revisionare"], ["fatto", "Fatto"]];
 
-// Sidebar: the clients (colour, videos in the app) and the agencies. A client opens its projects;
-// an agency narrows the client list to its own.
+// Clienti and Agenzie: the archive sections of the sidebar (counts there, a page each).
 function renderSidebar() {
-  const counts = {};
-  for (const p of state.projects || []) counts[p.cliente] = (counts[p.cliente] || 0) + 1;
-  const ag = state.sbAg || "";
-  const clients = state.clients.filter((c) => !ag || (c.agenzia || "") === ag);
-  $("sb-clients").innerHTML = clients.length ? clients.map((c) => `<div class="sb-item" data-id="${escapeHtml(c.id)}" style="--c:${c.colore}">
-      <i>${escapeHtml((c.nome.match(/[A-Za-zÀ-ÿ0-9]/) || ["?"])[0])}</i><span>${escapeHtml(c.nome)}</span>${counts[c.nome] ? `<small>${counts[c.nome]}</small>` : ""}</div>`).join("")
-    : '<div class="sb-empty">Nessun cliente</div>';
-  $("sb-clients").querySelectorAll(".sb-item").forEach((el) => {
-    el.onclick = () => {
-      const c = state.clients.find((x) => x.id === el.dataset.id);
-      if (!c) return;
-      showView("home");
-      $("psearch").value = c.nome;
-      renderProjects();
+  $("n-clients").textContent = state.clients.length;
+  $("n-agencies").textContent = (state.vault.agenzie || []).length;
+  if (!$("view-clients").hidden) renderClientsView();
+  if (!$("view-agencies").hidden) renderAgenciesView();
+}
+
+// Today's date in the top bar, Italian, with a capital letter.
+function paintDate() {
+  const d = new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  $("mb-date").textContent = d.charAt(0).toUpperCase() + d.slice(1);
+}
+paintDate();
+setInterval(paintDate, 60 * 60 * 1000);
+
+// The line between the two halves of Nuovo video and Smistamento clip can be dragged; each view keeps its width.
+function wireGutters() {
+  for (const g of document.querySelectorAll(".split > .gutter")) {
+    const view = g.parentElement;
+    const key = `capwizard.split.${view.id}`;
+    const apply = (w) => view.style.setProperty("--lw", `${w}px`);
+    try { const w = +localStorage.getItem(key); if (w) apply(w); } catch (_) {}
+    g.onmousedown = (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      document.body.classList.add("resizing");
+      const left = view.getBoundingClientRect().left;
+      const move = (ev) => apply(Math.round(Math.max(360, Math.min(view.clientWidth - 380, ev.clientX - left))));
+      const up = () => {
+        window.removeEventListener("mousemove", move);
+        window.removeEventListener("mouseup", up);
+        document.body.classList.remove("resizing");
+        try { localStorage.setItem(key, parseInt(view.style.getPropertyValue("--lw"), 10)); } catch (_) {}
+      };
+      window.addEventListener("mousemove", move);
+      window.addEventListener("mouseup", up);
     };
+    g.ondblclick = () => { view.style.removeProperty("--lw"); try { localStorage.removeItem(key); } catch (_) {} };
+  }
+}
+wireGutters();
+
+function videosOf(nome) {
+  return (state.projects || []).filter((p) => p.cliente === nome && !/^TEMPLATE/i.test(p.name)).length;
+}
+
+function renderClientsView() {
+  const q = $("cl-search").value.trim().toLowerCase();
+  const ags = [...new Set(state.clients.map((c) => c.agenzia || "Profili"))];
+  const ag = state.clAg && ags.includes(state.clAg) ? state.clAg : "";
+  $("cl-tabs").innerHTML = ags.length > 1 ? ["", ...ags].map((a) =>
+    `<button class="tab${a === ag ? " on" : ""}" data-ag="${escapeHtml(a)}">${escapeHtml(a || "Tutte")}</button>`).join("") : "";
+  $("cl-tabs").querySelectorAll(".tab").forEach((b) => { b.onclick = () => { state.clAg = b.dataset.ag; renderClientsView(); }; });
+  const list = state.clients.filter((c) => (!ag || (c.agenzia || "Profili") === ag)
+    && (!q || [c.nome, c.agenzia, c.template].some((x) => (x || "").toLowerCase().includes(q))));
+  $("cl-sub").textContent = `${state.clients.length} clienti · ${(state.vault.agenzie || []).length} agenzie`;
+  $("cl-grid").innerHTML = list.length ? list.map((c) => {
+    const n = videosOf(c.nome);
+    return `<article class="lib-card" style="--c:${c.colore}" data-id="${escapeHtml(c.id)}">
+      <div class="lc-top"><i>${escapeHtml((c.nome.match(/[A-Za-zÀ-ÿ0-9]/) || ["?"])[0])}</i>
+        <div class="lc-name"><b>${escapeHtml(c.nome)}</b><span>${escapeHtml(c.agenzia || "Profilo")}</span></div></div>
+      <dl>
+        <div><dt>Template</dt><dd class="${c.template_ok ? "" : "warn"}">${escapeHtml(c.template || "da creare")}</dd></div>
+        <div><dt>Video</dt><dd>${n || "—"}</dd></div>
+        <div><dt>Colore</dt><dd><span class="sw"></span>${escapeHtml(c.colore)}</dd></div>
+      </dl>
+      <div class="lc-acts">
+        <button class="bbtn primary" data-a="new">Nuovo video</button>
+        <button class="bbtn" data-a="proj">Progetti</button>
+        ${c.source === "vault" ? '<button class="bbtn" data-a="edit">Modifica</button>' : ""}
+      </div></article>`;
+  }).join("") : `<div class="lib-empty">${q ? `Nessun cliente con «${escapeHtml(q)}»` : "Nessun cliente: crea il primo con «＋ Nuovo template»."}</div>`;
+  $("cl-grid").querySelectorAll(".lib-card").forEach((card) => {
+    const c = state.clients.find((x) => x.id === card.dataset.id);
+    card.querySelectorAll("button").forEach((b) => {
+      b.onclick = () => {
+        if (b.dataset.a === "new") { showView("editor"); chooseClient(c); }
+        else if (b.dataset.a === "proj") { showView("home"); $("psearch").value = c.nome; renderProjects(); }
+        else if (b.dataset.a === "edit") openClientModal(c);
+      };
+    });
   });
+}
+
+function renderAgenciesView() {
   const ags = state.vault.agenzie || [];
-  $("sb-agencies").innerHTML = ags.length ? ags.map((a) => {
-    const n = state.clients.filter((c) => c.agenzia === a).length;
-    return `<div class="sb-item${a === ag ? " on" : ""}" data-ag="${escapeHtml(a)}" style="--c:#cdc4ff">
-      <i>${escapeHtml(a[0] || "?")}</i><span>${escapeHtml(a)}</span><small>${n}</small></div>`;
-  }).join("") : '<div class="sb-empty">Nessuna agenzia</div>';
-  $("sb-agencies").querySelectorAll(".sb-item").forEach((el) => {
-    el.onclick = () => { state.sbAg = state.sbAg === el.dataset.ag ? "" : el.dataset.ag; renderSidebar(); };
+  $("ag-sub").textContent = `${ags.length} agenzie`;
+  $("ag-grid").innerHTML = ags.length ? ags.map((a) => {
+    const cl = state.clients.filter((c) => c.agenzia === a);
+    const stile = (cl.find((c) => c.stile) || {}).stile || "";
+    const videos = cl.reduce((n, c) => n + videosOf(c.nome), 0);
+    return `<article class="lib-card ag" data-ag="${escapeHtml(a)}">
+      <div class="lc-top"><i>${escapeHtml(a[0] || "?")}</i>
+        <div class="lc-name"><b>${escapeHtml(a)}</b><span>${stile ? "Stile " + escapeHtml(stile) : "Stile da scrivere"}</span></div></div>
+      <div class="ag-clients">${cl.length ? cl.map((c) => `<span style="--c:${c.colore}"><i></i>${escapeHtml(c.nome)}</span>`).join("")
+        : '<em>Nessun cliente ancora</em>'}</div>
+      <dl><div><dt>Clienti</dt><dd>${cl.length}</dd></div><div><dt>Video</dt><dd>${videos || "—"}</dd></div></dl>
+      <div class="lc-acts"><button class="bbtn" data-a="clients">Vedi i clienti</button>
+        <button class="bbtn" data-a="new">＋ Cliente</button></div></article>`;
+  }).join("") : '<div class="lib-empty">Nessuna agenzia: aggiungi la prima con «＋ Nuova agenzia».</div>';
+  $("ag-grid").querySelectorAll(".lib-card").forEach((card) => {
+    const a = card.dataset.ag;
+    card.querySelector('[data-a="clients"]').onclick = () => { state.clAg = a; showView("clients"); };
+    card.querySelector('[data-a="new"]').onclick = async () => {
+      await openClientModal(null);
+      $("cm-ag").value = a;
+      updateStudyUI();
+    };
   });
 }
 
