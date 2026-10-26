@@ -20,7 +20,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from capwizard_app import vault
+from capwizard_app import brain, vault
 from capwizard_app.agent import SKILLS_DIR, WORK_DIR, _run_claude, _slug
 from capwizard_app.capcut import find_claude_cli
 
@@ -40,15 +40,33 @@ def skill_md() -> Path | None:
 
 
 def client_codes() -> list[dict]:
-    """The «Codici cliente» table of the skill."""
+    """The «Codici cliente» table of the skill; on a Mac that keeps its clients to itself, its own vault clients."""
+    if brain.disabled() and vault.enabled():
+        return own_codes()
     md = skill_md()
     if not md:
         return []
     return [{"codice": c, "cliente": n.strip()} for c, n in re.findall(r"^\|\s*([A-Z]{4})\s*\|\s*([^|]+?)\s*\|", md.read_text(), re.M)]
 
 
-PROMPT = """Smistamento del girato di uno shooting per l'agenzia Kora. Lavori in automatico dall'app CapWizard: NON fare domande
-e NON toccare le clip (niente rinomina, niente spostamenti): l'app mostra il tuo piano a Nicola e lo esegue lei dopo il suo ok.
+def own_codes() -> list[dict]:
+    """The vault's clients with a 4-letter code: the note's "- **Codice:** XXXX" line, else first 2 + last 2 letters of the name."""
+    out, used = [], set()
+    for c in sorted(vault.list_clients(), key=lambda c: (c["agenzia"], c["nome"])):
+        m = re.search(r"^- \*\*Codice:\*\*\s*([A-Za-z0-9]{2,6})", vault.read_note(c["nome"]) or "", re.M)
+        letters = re.sub(r"[^A-Z0-9]", "", vault.norm(c["nome"]).upper())
+        code = m.group(1).upper() if m else (letters[:2] + letters[-2:] if len(letters) >= 4 else letters.ljust(4, "X"))
+        base, i = code, 1
+        while code in used:                       # two clients with the same letters: ALBA, ALB2…
+            i += 1
+            code = base[:3] + str(i)
+        used.add(code)
+        out.append({"codice": code, "cliente": f"{c['nome']} ({c['agenzia']})"})
+    return out
+
+
+PROMPT = """Smistamento del girato di uno shooting per {agenzia}. Lavori in automatico dall'app CapWizard: NON fare domande
+e NON toccare le clip (niente rinomina, niente spostamenti): l'app mostra il tuo piano a {chi} e lo esegue lei dopo il suo ok.
 
 Segui la skill **{skill}**: {skill_md}
 Fai solo la parte di analisi del passo 3 (smistamento per PDP) e prepara quello che servirebbe per la tabella del passo 4.
@@ -58,7 +76,7 @@ L'inventario, la ricerca delle clip nere e la trascrizione li ha già fatti l'ap
 Dati:
 - Cliente: {codice}
 - PDP / piano editoriale: {pdp}
-- Note di Nicola: {note}
+- Note di {chi}: {note}
 
 Per guardare i frame di un gruppo dubbio: `{ffmpeg} -ss <t> -i <clip> -frames:v 1 -vf scale=-2:360 <file>` in `{work}`, poi affiancali con hstack.
 Se non c'è il PDP, dividi lo stesso con le clip nere e dai a ogni video un titolo breve dal contenuto (segnalalo come dubbio).
@@ -69,7 +87,7 @@ Alla fine scrivi `{result}` con questo JSON (le clip si indicano con il loro "n"
  "nere": [<n delle clip nere separatrici, anche quelle con la mano>],
  "mancanti": ["<video del PDP che non trovi nel girato>"],
  "fuori_pdp": ["<titolo provvisorio di un video girato che nel PDP non c'è>"],
- "note": "<riassunto per Nicola, in italiano, 3-6 righe>"}}
+ "note": "<riassunto per {chi}, in italiano, 3-6 righe>"}}
 Ogni clip non nera deve stare in un gruppo, in ordine di "n". Scrivi messaggi brevi in italiano su cosa stai facendo."""
 
 
@@ -125,7 +143,10 @@ def analyse(job, d: dict) -> dict:
     if pdp:
         (work / "pdp.txt").write_text(pdp)
     result = work / "piano.json"
-    prompt = PROMPT.format(skill=SKILL, skill_md=md, inventario=inv_path, codice=codice,
+    own = {c["codice"]: c["cliente"] for c in own_codes()} if brain.disabled() and vault.enabled() else {}
+    prompt = PROMPT.format(agenzia=f"il cliente {own[codice]}" if codice in own else "l'agenzia Kora",
+                           chi="Daniel" if own else "Nicola", skill=SKILL, skill_md=md, inventario=inv_path,
+                           codice=f"{codice} — {own[codice]}" if codice in own else codice,
                            pdp=f"in `{work / 'pdp.txt'}`" if pdp else "nessuno",
                            note=(d.get("note") or "").strip() or "nessuna", ffmpeg=vault.ffmpeg() or "ffmpeg",
                            work=work, result=result)
