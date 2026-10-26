@@ -368,7 +368,7 @@ async function chooseTemplate(name) {
 async function chooseClient(c) {
   state.client = c;
   state.otherTemplate = !c;
-  document.documentElement.style.setProperty("--c", c ? c.colore : "#7c6cff");
+  document.documentElement.style.setProperty("--c", c ? c.colore : "#8fa2ff");
   $("s1-sel").textContent = c ? c.nome : "template a mano";
   if (c) {
     $("template").value = c.template_ok ? c.template : "";
