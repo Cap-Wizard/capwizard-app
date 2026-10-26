@@ -26,7 +26,7 @@ const state = {
   client: null,            // chosen client, or null
   otherTemplate: false,    // no client, a template picked by hand
   templates: [],           // every CapCut project usable as a template
-  refs: [null, null, null], // up to 3 reference videos Claude imitates
+  refs: [],                // reference videos Claude imitates (as many as wanted)
   favTemplates: loadFavTemplates(),   // the ones pinned next to the clients
   steps: [],               // progress steps of an editing run
   jobId: null,
@@ -389,29 +389,34 @@ async function setBroll(path) {
   } catch (_) { $("br-info").textContent = ""; }
 }
 
-// Reference videos: three slots. A video goes in the slot it was dropped on (or the first free one).
+// Reference videos: one box per video plus an empty one to add more. Dropped on a full box, a video replaces it.
 function addRef(path, slot) {
   if (!/\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(path) || state.refs.includes(path)) return;
-  let i = slot != null && !state.refs[slot] ? slot : state.refs.indexOf(null);
-  if (slot != null && state.refs[slot]) i = slot;        // dropped on a full slot: replace it
-  if (i < 0) return;
-  state.refs[i] = path;
+  if (slot != null && slot < state.refs.length) state.refs[slot] = path;
+  else state.refs.push(path);
   renderRefs();
 }
 
+function pickRefs(slot) {
+  return async () => {
+    const picked = (window.api && await window.api.selectVideos()) || [];
+    picked.forEach((p, k) => addRef(p, k ? null : slot));
+  };
+}
+
 function renderRefs() {
-  state.refs.forEach((p, i) => {
-    const box = $(`ref-${i}`);
-    box.classList.toggle("full", !!p);
-    box.innerHTML = p
-      ? `<b>🎯 Reference ${i + 1}</b><span class="ref-name" title="${escapeHtml(p)}">${escapeHtml(p.split("/").pop())}</span>
-         <button class="btn-link mini" data-i="${i}">✕ togli</button>`
-      : `<b>🎯 Reference ${i + 1}</b><span>trascina qui un video<br>o clicca</span>`;
-    const x = box.querySelector("button");
-    if (x) x.onclick = (e) => { e.stopPropagation(); state.refs[i] = null; renderRefs(); };
+  const box = $("ref-slots");
+  box.innerHTML = state.refs.map((p, i) => `<div class="drop ref-slot full" id="ref-${i}">
+      <b>🎯 Reference ${i + 1}</b><span class="ref-name" title="${escapeHtml(p)}">${escapeHtml(p.split("/").pop())}</span>
+      <button class="btn-link mini" data-i="${i}">✕ togli</button></div>`).join("")
+    + `<div class="drop ref-slot" id="ref-add"><b>＋ ${state.refs.length ? "Aggiungi reference" : "Reference"}</b>
+      <span>trascina qui uno o più video<br>o clicca</span></div>`;
+  state.refs.forEach((_, i) => { $(`ref-${i}`).onclick = pickRefs(i); });
+  $("ref-add").onclick = pickRefs(null);
+  box.querySelectorAll("button").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); state.refs.splice(+b.dataset.i, 1); renderRefs(); };
   });
-  const n = state.refs.filter(Boolean).length;
-  $("ref-info").textContent = n ? `${n} di 3` : "facoltativo";
+  $("ref-info").textContent = state.refs.length ? `${state.refs.length} video` : "facoltativo";
 }
 
 async function setFolder(path) {
@@ -523,12 +528,6 @@ function wireEditor() {
     const p = window.api && await window.api.selectFolder();
     if (p) setBroll(p);
   };
-  for (let i = 0; i < 3; i++) {
-    $(`ref-${i}`).onclick = async () => {
-      const picked = (window.api && await window.api.selectVideos()) || [];
-      picked.forEach((p, k) => addRef(p, k ? null : i));
-    };
-  }
   renderRefs();
   $("csearch").oninput = renderChips;
   $("btn-client-edit").onclick = () => { if (state.client) openClientModal(state.client); };
@@ -579,7 +578,7 @@ function wireEditor() {
     if (dropZone && dropZone.startsWith("ref-")) {    // reference videos to imitate
       [...e.dataTransfer.files].forEach((f, k) => {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
-        if (p) addRef(p, k ? null : +dropZone.slice(4));
+        if (p) addRef(p, k || dropZone === "ref-add" ? null : +dropZone.slice(4));
       });
       return;
     }
@@ -653,7 +652,7 @@ function buildRequest() {
     sentence_transitions: isOn("sw-transitions"),
     aggressive_fillers: isOn("sw-aggr"),
     broll_path: $("broll-path").value.trim() || null,
-    reference: state.refs.filter(Boolean),
+    reference: state.refs.slice(),
     cine: isOn("sw-cine"),
     ai_media: isOn("sw-aimedia"),
   };
