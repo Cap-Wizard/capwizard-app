@@ -24,6 +24,9 @@ from pathlib import Path
 
 REPO = "https://github.com/Cap-Wizard/video-edit-brain.git"
 BRAIN = Path(os.environ.get("CAPWIZARD_BRAIN") or Path.home() / "Documents/Github/video-edit-brain")
+# A Mac that keeps its clients to itself: CAPWIZARD_BRAIN=off, or this file in the app's data folder.
+# Then nothing is cloned, pulled, moved or pushed, and the app reads only the local vault.
+OFF_FILE = Path.home() / "Library/Application Support/CapWizard/brain_off"
 SKILLS_DIR = Path.home() / ".claude/skills"
 
 _lock = threading.Lock()          # one git operation at a time
@@ -43,16 +46,23 @@ def _note(text: str) -> str:
 
 
 def status() -> dict:
+    if disabled():
+        return {"cartella": str(BRAIN), "repo": REPO, "stato": "spento su questo Mac: i clienti restano solo qui",
+                "quando": None, "spento": True}
     return {"cartella": str(BRAIN), "repo": REPO, **_status}
 
 
+def disabled() -> bool:
+    return os.environ.get("CAPWIZARD_BRAIN", "").lower() == "off" or OFF_FILE.exists()
+
+
 def available() -> bool:
-    return (BRAIN / ".git").is_dir()
+    return not disabled() and (BRAIN / ".git").is_dir()
 
 
 def vault_dir() -> Path | None:
     """The brain, when it already holds the vault (at least one client note)."""
-    return BRAIN if any((BRAIN / "02 Clienti").glob("*/*.md")) else None
+    return None if disabled() else BRAIN if any((BRAIN / "02 Clienti").glob("*/*.md")) else None
 
 
 VAULT_FOLDERS = ("01 Agenzie", "02 Clienti", "03 Stili")
@@ -62,6 +72,8 @@ def choose_vault(other_vault_ok: bool) -> Path | None:
     """Which vault to use, from what's on disk (no network, so it's instant at start):
     the brain once it holds clients; otherwise a vault already in use elsewhere (Daniel's on the
     Desktop, until he moves it here); otherwise the brain, made ready to receive the first client."""
+    if disabled():
+        return None
     if vault_dir():
         return BRAIN
     if other_vault_ok or not available():
@@ -76,6 +88,8 @@ def choose_vault(other_vault_ok: bool) -> Path | None:
 
 def pull() -> str:
     """Make the clone if it's missing, otherwise bring it up to date."""
+    if disabled():
+        return _note("spento su questo Mac: i clienti restano solo qui")
     with _lock:
         try:
             if not available():
@@ -203,6 +217,10 @@ def push_soon(reason: str, log=print) -> None:
 
 def start(on_vault=None, log=print) -> None:
     """At app start, in the background: pull, link the client skills, use the brain's vault."""
+    if disabled():
+        log(f"[brain] {pull()}")
+        return
+
     def run() -> None:
         log(f"[brain] {pull()}")
         for n in link_skills():
