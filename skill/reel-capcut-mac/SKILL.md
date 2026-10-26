@@ -1,7 +1,7 @@
 ---
 name: reel-capcut-mac
 metadata:
-  version: "0.2.0-alpha.1"
+  version: "0.2.0-alpha.2"
 description: Monta reel verticali (Instagram/TikTok) in CapCut direttamente sul Mac di Nicola con Claude Code - analisi delle clip con Whisper sul chip Apple, tagli secondo le sue regole, progetto CapCut generato dal template del cliente, b-roll Magnific, profilo del cliente e lezioni. Usala quando Nicola chiede di montare reel da una cartella di clip o di correggere un reel già montato (anche da screenshot della chat del cliente).
 ---
 
@@ -125,8 +125,13 @@ python3 costruisci_draft.py "<lavoro>/<video>/out" "NOME PROGETTO" config.json
 mkdir "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/NOME PROGETTO"
 cp "<lavoro>/<video>/out/draft_info.json" "<lavoro>/<video>/out/draft_meta_info.json" \
    "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/NOME PROGETTO/"
+python3 livella_voce.py "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/NOME PROGETTO" --applica
 python3 verifica.py "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/NOME PROGETTO" config.json
 ```
+- `livella_voce.py` porta la voce di tutti gli spezzoni allo stesso livello (loudness LUFS per
+  spezzone, obiettivo la mediana del progetto, scarti sotto 1 dB lasciati): tra una clip e
+  l'altra la voce non deve mai saltare. Gli spezzoni «voce variabile dentro lo spezzone» vanno
+  divisi o segnalati a Nicola nel «DA FARE A MANO».
 - Solo i due file nella cartella nuova: **mai** copiare la cartella del template.
 - `out/plan.json` ha il riepilogo (spezzoni, testi e scale, sottotitoli, suoni, emoji, b-roll):
   usalo per il piano e per il messaggio a Nicola.
@@ -179,6 +184,9 @@ tutti con Read. Si corregge **lo stesso progetto** (niente copie «v2»).
    richiesto. Se togli o sposti un taglio, risincronizza sottotitoli e suoni.
 7. Dopo l'apertura esistono altre copie della timeline: ogni modifica va in `draft_info.json`,
    `.bak`, `template-2.tmp` e in `Timelines/<id>/` (stesso `id` del draft). Poi `verifica.py`.
+   Se hai aggiunto, tolto o cambiato spezzoni parlati, o la voce «salta» (Nicola: «in certi
+   punti è molto più alta»), rilancia `livella_voce.py <progetto>` e poi con `--applica`:
+   tiene i volumi già messi come base e corregge solo gli scarti.
 8. **Lezione nel profilo del cliente** (copia locale, vedi sopra): nella sezione «## Lezioni»
    (creala in fondo se manca) aggiungi `- GG/MM/AAAA: <cosa voleva e come l'hai risolto>`. Se è
    una preferenza che vale anche per i prossimi video («meno suoni», «sottotitoli più in

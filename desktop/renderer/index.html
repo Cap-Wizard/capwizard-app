@@ -16,9 +16,11 @@
       <div class="sub">Scegli cliente e clip, Claude monta il video con le tue regole</div>
     </div>
     <nav class="views" id="views">
+      <button class="vbtn" id="v-dash">🏠 Home</button>
       <button class="vbtn on" id="v-new">＋ Nuovo video</button>
       <button class="vbtn" id="v-proj">📂 I miei progetti<b id="n-proj">0</b></button>
       <button class="vbtn" id="v-client" hidden>👥 Nuovo cliente</button>
+      <button class="vbtn" id="v-scarico">🗂️ Smistamento clip</button>
     </nav>
     <div class="pills">
       <span class="tb-email" id="tb-email" hidden></span>
@@ -27,6 +29,7 @@
       <div class="pill" id="pill-ffmpeg"><i></i>ffmpeg</div>
       <div class="pill" id="pill-ai"><i></i>Claude</div>
       <div class="pill" id="pill-backend"><i></i>backend</div>
+      <button class="pill pill-btn" id="btn-ai-services" title="Servizi AI per b-roll, immagini e video"><i></i>✦ Servizi AI</button>
       <button class="icon-btn" id="btn-config-ai" title="Collegamento a Claude">⚙</button>
     </div>
   </header>
@@ -124,6 +127,7 @@
           <div class="switch" data-sw="sw-transitions"><span>🎬 A fine frase: zoom, transizione e woosh</span><div class="tgl on" id="sw-transitions"></div></div>
           <div class="switch" data-sw="sw-zoom"><span>🔍 Zoom leggeri sulle frasi chiave</span><div class="tgl" id="sw-zoom"></div></div>
           <div class="switch" data-sw="sw-cine"><span>🎬 Video cine <span class="opt">colori clip per clip, b-roll sui tagli</span></span><div class="tgl" id="sw-cine"></div></div>
+          <div class="switch" data-sw="sw-aimedia"><span>✦ Contenuti AI se servono <span class="opt">b-roll e immagini con i servizi collegati</span></span><div class="tgl on" id="sw-aimedia"></div></div>
           <label>Note per Claude</label>
           <textarea id="notes" placeholder="es. tieni la seconda versione del gancio, niente musica, metti il prezzo a schermo"></textarea>
           <details class="adv">
@@ -182,15 +186,138 @@
     </section>
   </main>
 
+  <!-- ==================== SMISTAMENTO CLIP (skill scarico) ==================== -->
+  <main id="view-scarico" class="view split" hidden>
+    <section class="left">
+      <div class="lscroll">
+        <div class="step" id="sc1">
+          <h2><span class="num">1</span>Le clip dello shooting<small id="sc-count"></small></h2>
+          <div class="drop" id="sc-drop">
+            <b>🎞️ Trascina qui le clip (o la cartella)</b>
+            <span>oppure clicca per sceglierle dal Finder</span>
+          </div>
+          <div id="sc-refs" class="reflist"></div>
+        </div>
+        <div class="step" id="sc2">
+          <h2><span class="num">2</span>Dove le metto</h2>
+          <div class="row2">
+            <input type="text" id="sc-out" placeholder="/Volumes/Extreme SSD/_KORA/GISE - [Giappugliese]/GISE - [Shooting]" />
+            <button class="btn2" id="sc-out-btn">Scegli…</button>
+          </div>
+          <label>Cliente</label>
+          <select id="sc-code"></select>
+          <input type="text" id="sc-code-new" placeholder="Codice di 4 lettere (es. ABCD)" hidden />
+          <div class="row2 pair">
+            <div><label>N° shooting <span class="opt">facoltativo</span></label><input type="text" id="sc-shoot" placeholder="es. 10" /></div>
+            <div><label>Mese/anno <span class="opt">MMAA</span></label><input type="text" id="sc-mmaa" maxlength="4" /></div>
+          </div>
+          <div class="hint" id="sc-dest"></div>
+          <div class="switch" data-sw="sc-move"><span>Sposta invece di copiare <span class="opt">solo sullo stesso disco, altrimenti copia</span></span><div class="tgl" id="sc-move"></div></div>
+        </div>
+        <div class="step" id="sc3">
+          <h2><span class="num">3</span>PDP <small>facoltativo</small></h2>
+          <textarea id="sc-pdp" style="min-height:120px" placeholder="Incolla qui il piano editoriale (titoli e script dei video): Claude abbina le clip ai titoli. Senza PDP divide con le clip nere e dà un titolo provvisorio."></textarea>
+          <label>Note per Claude <span class="opt">facoltativo</span></label>
+          <textarea id="sc-note" placeholder="es. il video della fiorentina è stato girato con la costata"></textarea>
+        </div>
+      </div>
+      <div class="lfoot">
+        <button class="go" id="sc-go" disabled>ANALIZZA</button>
+        <div class="missing" id="sc-missing"></div>
+      </div>
+    </section>
+    <section class="right">
+      <div class="card" id="sc-plan-card" hidden>
+        <h3>Piano <span class="status-tag" id="sc-plan-tag"></span></h3>
+        <div id="sc-plan"></div>
+        <button class="go" id="sc-exec">CONFERMA E SMISTA</button>
+      </div>
+      <div class="card logcard">
+        <h3>Dettagli <span class="status-tag" id="sc-status">in attesa</span> <button class="stopbtn" id="sc-stop" hidden>Ferma</button></h3>
+        <div id="sc-console" ><div class="k-tool">Trascina le clip, scegli dove metterle e premi Analizza. Prima di toccare qualsiasi file ti mostro il piano.</div></div>
+      </div>
+    </section>
+  </main>
+
   <!-- ==================== I MIEI PROGETTI ==================== -->
+  <!-- ==================== HOME: dove sta ogni video ==================== -->
+  <div id="view-dash" class="view dash" hidden>
+    <div class="dash-head">
+      <div>
+        <h2>Il punto della situazione</h2>
+        <div class="dash-sub" id="dash-sub">Carico i progetti…</div>
+      </div>
+      <div class="dash-actions">
+        <button class="btn2" id="dash-add">＋ Video da fare</button>
+        <button class="send" id="dash-new">MONTA UN VIDEO</button>
+      </div>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <div class="board" id="board"></div>
+  </div>
+
   <div id="view-home" class="view projs" hidden>
     <section class="plist">
       <input type="text" class="search" id="psearch" placeholder="Cerca progetto o cliente…" />
+      <div class="pmissing" id="pmissing" hidden></div>
       <div id="groups"></div>
     </section>
     <section class="pdet" id="pdet">
       <div class="empty" style="margin:auto">Scegli un progetto a sinistra per vedere com'è stato fatto</div>
     </section>
+  </div>
+
+  <!-- ==================== SERVIZI AI ==================== -->
+  <div id="ai-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Servizi AI</h2>
+        <button class="modal-close" id="ai-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="ai-intro">Quando un video ne ha bisogno, Claude può creare <b>b-roll, immagini e video</b>
+          con i servizi AI collegati al tuo account Claude: per esempio un b-roll quando il girato è solo
+          parlato, o una ripresa cambiata partendo dal fotogramma vero. Qui scegli quali può usare.</p>
+        <div id="ai-list" class="ai-list"><div class="empty">Controllo i servizi collegati…</div></div>
+        <p class="ai-foot">Per collegarne uno nuovo: <b>claude.ai → Impostazioni → Connettori</b>, aggiungi il servizio
+          e fai l'accesso, poi torna qui e premi «Aggiorna». Ogni generazione consuma i crediti del servizio.</p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn2" id="ai-connectors">Apri i connettori di Claude</button>
+        <div class="spacer"></div>
+        <button class="btn2" id="ai-refresh">Aggiorna</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== VIDEO DA FARE ==================== -->
+  <div id="todo-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="td-title">Video da fare</h2>
+        <button class="modal-close" id="td-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <label>Titolo</label>
+        <input type="text" id="td-name" placeholder="es. ANDREA LEIDI - Villa a Treviolo" />
+        <label>Cliente</label>
+        <select id="td-client"></select>
+        <label>Cartella delle clip <span class="opt">se il girato c'è già</span></label>
+        <div class="row2">
+          <input type="text" id="td-folder" placeholder="Nessuna cartella" readonly />
+          <button class="btn2" id="td-pick">Scegli…</button>
+        </div>
+        <label>Scadenza <span class="opt">facoltativa</span></label>
+        <input type="date" id="td-due" />
+        <label>Note</label>
+        <textarea id="td-note" rows="3" placeholder="Cosa chiede il cliente, idee, riferimenti…"></textarea>
+      </div>
+      <div class="modal-foot">
+        <button class="btn2 danger" id="td-delete" hidden>Elimina</button>
+        <div class="spacer"></div>
+        <button class="send" id="td-save">SALVA</button>
+      </div>
+    </div>
   </div>
 
   <!-- ==================== CLIENTE: NUOVO / MODIFICA (vault Obsidian) ==================== -->

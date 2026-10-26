@@ -114,6 +114,22 @@ impacchettata userà un sidecar PyInstaller in `resources/backend/` (da fare).
 - Code signing: Apple Developer ID + notarization; certificato Windows
 - Auto-update
 
+## Clienti condivisi (VIDEO EDIT BRAIN)
+
+I clienti stanno nella repo privata
+[Cap-Wizard/video-edit-brain](https://github.com/Cap-Wizard/video-edit-brain):
+i profili cliente come skill (`skills/reel-<cliente>/SKILL.md`) e il vault Obsidian
+(`01 Agenzie`, `02 Clienti`, `03 Stili`…). Ogni Mac ne tiene una copia in
+`~/Documents/Github/video-edit-brain` (o dove indica `CAPWIZARD_BRAIN`).
+
+- All'avvio l'app la aggiorna (o la crea), collega ogni profilo in `~/.claude/skills`
+  (un profilo che esiste solo lì viene spostato nella repo) e legge il vault da lì,
+  appena `02 Clienti` contiene un cliente.
+- Dopo un reel, una modifica, lo studio di un'agenzia o un cliente nuovo o modificato,
+  fa commit e push con il login GitHub di chi la usa.
+- `GET /api/brain` dice com'è andata l'ultima sincronizzazione; `POST /api/brain/sync`
+  la rifà subito.
+
 ## Architettura Python
 
 ```
@@ -129,3 +145,13 @@ src/capwizard_app/
 Il formato `.draft` di CapCut non è ufficiale: i progetti si costruiscono clonando lo
 schema dal template del cliente, fatto con la tua versione di CapCut. Se aggiorni CapCut e qualcosa rompe, di solito basta
 ricreare il draft template nella nuova versione di CapCut e rilanciare.
+
+## Licenza
+
+CapWizard è distribuito con la [PolyForm Noncommercial License 1.0.0](LICENSE.md): il codice
+è visibile e si può usare, modificare e condividere **solo per scopi non commerciali**
+(studio, prove, progetti personali senza fini di lucro). Usarlo per lavoro, per esempio per
+montare video per i propri clienti, richiede una licenza commerciale di CapWizard: scrivi a
+[info@predanicola.it](mailto:info@predanicola.it).
+
+Required Notice: Copyright CapWizard (https://github.com/Cap-Wizard)

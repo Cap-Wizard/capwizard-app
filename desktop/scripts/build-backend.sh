@@ -10,6 +10,7 @@ rm -rf backend-dist pyi-build
 "$PY" -m PyInstaller --noconfirm --onefile --name capwizard-server \
   --distpath backend-dist --workpath pyi-build --specpath pyi-build \
   --collect-submodules uvicorn --collect-submodules capwizard_app \
+  --add-data "$ROOT/src/capwizard_app/tools:capwizard_app/tools" \
   "$ROOT/src/capwizard_app/server.py"
 rm -rf pyi-build
 echo "backend: $ROOT/desktop/backend-dist/capwizard-server"

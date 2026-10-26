@@ -10,10 +10,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 CAPCUT_PROJECTS_DIR = Path.home() / "Movies/CapCut/User Data/Projects/com.lveditor.draft"
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
@@ -67,6 +69,50 @@ def clean_env() -> dict[str, str]:
     return env
 
 
+def gateway_down() -> str | None:
+    """Why Claude Code can't answer right now, if it is sent through a local proxy that is off.
+
+    `~/.claude/settings.json` can set ANTHROPIC_BASE_URL to a gateway on this Mac
+    (e.g. http://localhost:3001). When that program isn't running every request
+    fails with "Connection error" and the CLI retries for minutes, which the app
+    used to report as "Claude non ha risposto entro 90 secondi"."""
+    url = ""
+    for name in ("settings.json", "settings.local.json"):
+        try:
+            env = json.loads((Path.home() / ".claude" / name).read_text()).get("env") or {}
+        except (OSError, ValueError):
+            continue
+        url = env.get("ANTHROPIC_BASE_URL") or url
+    parts = urlparse(url) if url else None
+    if not parts or parts.hostname not in ("localhost", "127.0.0.1", "::1"):
+        return None
+    try:
+        socket.create_connection((parts.hostname, parts.port or 80), timeout=2).close()
+        return None
+    except OSError:
+        return (f"Claude Code passa da un proxy su questo Mac ({url}, impostato in ~/.claude/settings.json) "
+                f"che adesso è spento")
+
+
+# what ~/.claude/settings.json (or a host session) sets to send Claude Code through a gateway
+_GATEWAY_ENV = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL")
+
+
+def claude_launch() -> tuple[list[str], dict[str, str], str | None]:
+    """Extra CLI args, environment and a note for starting `claude`.
+
+    When the local gateway is off, skip the user settings (where it is set) so
+    Claude Code uses the user's own login instead of retrying a dead proxy."""
+    env = clean_env()
+    down = gateway_down()
+    if not down:
+        return [], env, None
+    for key in _GATEWAY_ENV:
+        env.pop(key, None)
+    return ["--setting-sources", "project,local"], env, down + ": uso il tuo login Claude diretto"
+
+
 def ai_status() -> dict:
     """Whether Claude Code is there — cheap, doesn't call the model."""
     cli = find_claude_cli()
@@ -80,17 +126,20 @@ def ai_ping(model: str = "haiku") -> dict:
     if not cli:
         return {"ok": False, "method": None,
                 "message": "Non trovo Claude Code: installalo e fai il login una volta (`claude` → `/login`)."}
+    args, env, note = claude_launch()
     try:
-        r = subprocess.run([cli, "-p", "--model", model, "--no-session-persistence", "Rispondi solo: OK"],
-                           env=clean_env(), capture_output=True, text=True, timeout=90, stdin=subprocess.DEVNULL)
+        r = subprocess.run([cli, "-p", "--model", model, "--no-session-persistence", *args, "Rispondi solo: OK"],
+                           env=env, capture_output=True, text=True, timeout=90, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return {"ok": False, "method": "claude-cli", "message": "Claude non ha risposto entro 90 secondi."}
     out = (r.stdout or r.stderr).strip()
     if r.returncode != 0:
-        if "login" in out.lower():
+        if "login" in out.lower() or "authenticate" in out.lower():
             out = "Claude non è collegato: apri il Terminale, scrivi `claude`, poi `/login`."
+        if note:
+            out = f"{note}, ma: {out}"
         return {"ok": False, "method": "claude-cli", "message": out[:300]}
-    return {"ok": True, "method": "claude-cli", "message": out[:120] or "OK"}
+    return {"ok": True, "method": "claude-cli", "message": (note + ". " if note else "") + (out[:120] or "OK")}
 
 
 # ---------------------------------------------------------------------------
