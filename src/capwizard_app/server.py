@@ -1002,6 +1002,30 @@ def project_modify(project_id: str, req: ModifyRequest) -> dict:
     return {"job_id": job.id, "project_id": project["id"]}
 
 
+@app.post("/api/projects/{project_id:path}/as-template")
+def project_as_template(project_id: str) -> dict:
+    """«Usa come template»: the client's template becomes this video without its clips."""
+    from capwizard_app import template_maker
+    p = _project(project_id)
+    if not p or not p.get("result_path") or not Path(p["result_path"]).is_dir():
+        return {"ok": False, "msg": "Il progetto non c'è più tra i progetti CapCut."}
+    video = Path(p["result_path"]).name
+    client = agent.client_for(p.get("settings") or {}) or _guess_client(p["name"], agent.list_clients())
+    if not client:
+        return {"ok": False, "msg": "Non so di quale cliente è questo video: rifallo da «Nuovo video» scegliendo il cliente."}
+    template = client.get("template") or f"TEMPLATE {client['nome'].upper()}"
+    if video == template or video.upper().startswith("TEMPLATE"):
+        return {"ok": False, "msg": "Questo progetto è già un template."}
+    try:
+        out = template_maker.da_video(video, template)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "msg": str(e)}
+    if client.get("source") == "vault" and client.get("template") != template:
+        vault.salva_cliente(client["id"], base=template)
+    brain.push_soon(f"Template di {client['nome']} rifatto da {video}")
+    return out
+
+
 @app.get("/api/projects/{project_id:path}")
 def project_get(project_id: str) -> dict:
     p = _project(project_id)

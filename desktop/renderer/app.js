@@ -941,6 +941,8 @@ async function openProject(p) {
         <button class="btn2" id="pd-folder" ${p.exists ? "" : "disabled"}>Apri in Finder</button>
         <button class="btn2" id="pd-report" ${p.report_path ? "" : "disabled"}>Leggi il report</button>
         <button class="btn2" id="pd-again">Rifai con questi dati</button>
+        <button class="btn2" id="pd-template" ${p.exists && !/^TEMPLATE/i.test(p.name) ? "" : "disabled"}
+          title="Il template del cliente diventa questo video senza le clip: titoli, sottotitoli, testi, suoni e musica">Usa come template</button>
         ${p.exists ? "" : '<button class="btn2 danger" id="pd-remove">Rimuovi dall\'elenco</button>'}
       </div>
     </div>
@@ -956,6 +958,7 @@ async function openProject(p) {
   $("pd-folder").onclick = () => window.api.openPath(p.result_path);
   $("pd-report").onclick = () => window.api.openPath(p.report_path);
   $("pd-again").onclick = () => redoProject(p);
+  $("pd-template").onclick = () => useAsTemplate(p);
   if (!p.exists) $("pd-remove").onclick = () => removeProjects([p]);
   renderProjectStatus(p);
   $("btn-attach").onclick = async () => {
@@ -1333,6 +1336,24 @@ function wireAiServices() {
   $("ai-close").onclick = () => { $("ai-modal").hidden = true; };
   $("ai-refresh").onclick = () => loadAiServices(true);
   $("ai-connectors").onclick = () => window.api && window.api.openExternal(AI.url);
+}
+
+async function useAsTemplate(p) {
+  const tpl = (p.settings || {}).template || `il template di ${p.cliente}`;
+  if (!confirm(`Rifaccio «${tpl}» da questo video, senza le clip?\n\n`
+    + "Restano titoli, sottotitoli, testi, animazioni, suoni e musica ai loro tempi. "
+    + "Il template di adesso viene salvato prima in una copia di sicurezza.")) return;
+  const b = $("pd-template");
+  b.disabled = true;
+  b.textContent = "Rifaccio il template…";
+  let r;
+  try {
+    r = await (await fetch(`${BACKEND}/api/projects/${encodeURIComponent(p.id)}/as-template`, { method: "POST" })).json();
+  } catch (e) { r = { ok: false, msg: String(e) }; }
+  b.disabled = false;
+  b.textContent = "Usa come template";
+  alert((r.ok ? "✓ " : "⚠️ ") + r.msg);
+  if (r.ok) { await loadTemplates(); await loadClients(); }
 }
 
 function redoProject(p) {
