@@ -1,13 +1,9 @@
-/* Bricolage Grotesque for titles and the brand, Instrument Sans for the interface (both OFL, bundled: no network) */
-@font-face { font-family: "Bricolage Grotesque"; src: url("fonts/bricolage-grotesque.woff2") format("woff2");
-  font-weight: 200 800; font-stretch: 75% 100%; font-display: swap; }
-@font-face { font-family: "Instrument Sans"; src: url("fonts/instrument-sans.woff2") format("woff2");
-  font-weight: 400 700; font-stretch: 75% 100%; font-display: swap; }
-@font-face { font-family: "Instrument Sans"; src: url("fonts/instrument-sans-italic.woff2") format("woff2");
-  font-weight: 400 700; font-style: italic; font-display: swap; }
+/* Space Grotesk for everything (OFL, bundled: no network): one family, wide and technical */
+@font-face { font-family: "Space Grotesk"; src: url("fonts/space-grotesk.woff2") format("woff2");
+  font-weight: 300 700; font-display: swap; }
 :root {
-  --font-ui: "Instrument Sans", -apple-system, sans-serif;
-  --font-display: "Bricolage Grotesque", "Instrument Sans", sans-serif;
+  --font-ui: "Space Grotesk", -apple-system, sans-serif;
+  --font-display: "Space Grotesk", -apple-system, sans-serif;
   --bg: #050506; --bg2: #08090b; --panel: #0f1014; --panel2: #15171c; --panel3: #1e2128;
   --line: rgba(255, 255, 255, .07); --line2: rgba(255, 255, 255, .12);
   --text: #e8eaf0; --mute: #9aa0ae; --dim: #6b7180;
@@ -55,7 +51,7 @@ body { display: grid; grid-template-columns: 228px minmax(0, 1fr); grid-template
 .tb-email { font-size: 12px; color: var(--mute); }
 
 .sb-brand { display: flex; align-items: center; gap: 11px; padding: 4px 8px 18px; }
-.logo { width: 42px; height: 42px; border-radius: 12px; flex: none; box-shadow: 0 0 0 1px rgba(143, 162, 255, .18), 0 8px 22px rgba(143, 162, 255, .18); }
+.logo { width: 34px; height: 38px; flex: none; object-fit: contain; filter: drop-shadow(0 4px 14px rgba(143, 162, 255, .35)); }
 h1 { font: 750 17px/1 var(--font-display); letter-spacing: -.02em; white-space: nowrap; }
 h1 span { color: var(--accent-hover); }
 
