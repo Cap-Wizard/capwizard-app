@@ -398,6 +398,8 @@ def _run_study(job: Job, req: StudyRequest) -> None:
     job.status = "running"
     try:
         agent.run_study(job, req.model_dump())
+        if req.cliente.strip():       # the study wrote the client's note: now its CapCut template
+            vault.assicura_template(req.agenzia.strip().upper(), req.cliente.strip().upper(), job.log)
         job.status = "done"
     except Exception as e:  # noqa: BLE001
         job.error = str(e)

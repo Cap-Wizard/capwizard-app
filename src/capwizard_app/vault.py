@@ -563,7 +563,34 @@ def crea_cliente(ag: str, cl: str, col: str, font: str = "", nota: str = "") -> 
     an = note(ag)
     if an and f"[[{cl}]]" not in open(an).read():
         open(an, "a").write(f"\n- Cliente: [[{cl}]]\n")
-    return {"ok": True, "id": cid(ag, cl), "msg": f"{cl} aggiunto a {ag} (colore {col}{', font ' + font if font else ''})."}
+    tpl = assicura_template(ag, cl)
+    return {"ok": True, "id": cid(ag, cl),
+            "msg": f"{cl} aggiunto a {ag} (colore {col}{', font ' + font if font else ''}). {tpl}".strip()}
+
+
+def assicura_template(ag: str, cl: str, log=print) -> str:
+    """Every client has its CapCut template: create «TEMPLATE <CLIENTE>» with the universal layout
+    (see template_maker) when the client's note points at no existing project, and write it in the note."""
+    from capwizard_app import template_maker
+    if base_for(cl):          # the client's own note already names a real CapCut project
+        return ""
+    f = note(cl)
+    if not f:
+        return ""
+    try:
+        out = template_maker.crea(cl, colore(cl), bases=[base_for(ag)])
+    except Exception as e:  # noqa: BLE001  (the client exists anyway; the template can be made later)
+        log(f"⚠ Template CapCut non creato: {e}")
+        return f"Template CapCut non creato: {e}"
+    s = open(f).read()
+    line = f"- **Base tecnica CapCut:** {out['nome']} (template creato dall'app con lo schema universale)"
+    if re.search(r"^- \*\*Base tecnica CapCut:\*\*.*$", s, re.M):
+        s = re.sub(r"^- \*\*Base tecnica CapCut:\*\*.*$", lambda m: line, s, count=1, flags=re.M)
+    else:
+        s = re.sub(r"^(# .*\n.*\n)", lambda m: m.group(1) + line + "\n", s, count=1, flags=re.M)
+    open(f, "w").write(s)
+    log("🎬 " + out["msg"])
+    return out["msg"]
 
 
 def dati_cliente(client_id: str) -> dict:

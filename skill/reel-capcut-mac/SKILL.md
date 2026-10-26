@@ -107,6 +107,17 @@ animazione di gruppo), sottotitoli (stile, max caratteri, maiuscolo), suoni e a 
 abbinati, musica, filtri, transizione, **volumi**. Annota testo di esempio, caratteri, scala e
 posizione di ogni testo. I nomi del kit vanno nel config (`kit`, vedi sotto).
 
+**Template creati dall'app** («TEMPLATE <CLIENTE>», nella nota del cliente «creato dall'app con lo
+schema universale»): hanno sempre la stessa forma, quindi sai già dove sta ogni pezzo.
+- 0,0-3,0 s **titolo**: emoji in alto, riga piccola bianca, riga grande nel colore del cliente.
+- 3,2-5,2 s **titoletto**: una riga nel colore del cliente.
+- 5,4-9,0 s **elenco**: tre voci che entrano a 5,4 / 6,0 / 6,6 s, ultima parola nel colore del cliente.
+- 9,2-13,2 s **sottotitoli**: quattro da 1 s, bianchi con la parola chiave nel colore del cliente.
+- **Musica** per tutta la durata, un **suono** sull'entrata di titolo, titoletto e ogni voce
+  dell'elenco, **filtri/regolazione** per tutta la durata.
+Le parole sono segnaposto: riscrivile sempre. Se Nicola ha modificato il template in CapCut,
+vale quello che trovi (stessi tempi = stesso ruolo). Lo schema è in `src/capwizard_app/template_maker.py`.
+
 ## 4. Decidi il montaggio e scrivi il config
 Applica le «Regole di montaggio». Scrivi `config.json` (formato sotto): spezzoni, pause da
 togliere, transizioni, regia (titoletti, elenchi, coperture), emoji, correzioni dei nomi.
