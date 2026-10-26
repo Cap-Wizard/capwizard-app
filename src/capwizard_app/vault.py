@@ -291,6 +291,27 @@ def sezione_musica(cliente: str, progetti_cliente: set[str]) -> list[str]:
     return lines
 
 
+def istruzioni_video(job: dict, ag: str, cl: str) -> list[str]:
+    """Notes in 05 Video/<agency> written before the edit for this very video (e.g. "BUBU BAR r34"):
+    same client and same reel number (r34) as the project name or the clip folder."""
+    d = VAULT / "05 Video" / ag
+    if not d.is_dir():
+        return []
+    where = f"{job['name']} {job['input_path']}"
+    nums = set(re.findall(r"(?<![a-z0-9])r\s?(\d+)(?![0-9])", where, re.I))
+    out = []
+    for f in sorted(glob.glob(str(d) + "/*.md")):
+        name = os.path.basename(f)[:-3]
+        if norm(name) == norm(job["name"]):
+            out.append(f)
+            continue
+        if not nums or not norm(cl) or norm(cl).split()[0] not in norm(name):
+            continue
+        if set(re.findall(r"(?<![a-z0-9])r\s?(\d+)(?![0-9])", name, re.I)) & nums:
+            out.append(f)
+    return out
+
+
 def brief(job: dict, progetti_cliente: set[str] = frozenset()) -> str:
     """Everything Claude needs for a new video: clips (with fps), b-roll, general → agency → client rules, music."""
     ag, cl = split_id(job["client"])
@@ -313,6 +334,9 @@ def brief(job: dict, progetti_cliente: set[str] = frozenset()) -> str:
         parts += [clip_line(clip_info(c), br) for c in videos_in(br, recursive=True)]
     if job.get("musica", True):
         parts += sezione_musica(cliente, set(progetti_cliente))
+    for f in istruzioni_video(job, ag, cl):
+        parts += ["", f"## 📌 ISTRUZIONI DI QUESTO VIDEO (dal vault: 05 Video/{ag}/{os.path.basename(f)[:-3]}) — vincono su tutto il resto",
+                  open(f).read()]
     if job.get("cine"):
         parts += ["", "## 🎬 VIDEO CINE — applica anche la nota \"Video cine\" (colori clip per clip, b-roll sui tagli, zoom leggeri)",
                   read_note("Video cine")]
