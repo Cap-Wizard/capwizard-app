@@ -88,6 +88,7 @@ async function bootBackend() {
       if (r.ok) {
         state.backendReady = true;
         setPill("pill-backend", "ok", "backend");
+        dropNotice("backend");
         await loadSystem();
         await loadTemplates();
         await loadClients();
@@ -103,7 +104,37 @@ async function bootBackend() {
     await new Promise((res) => setTimeout(res, 500));
   }
   setPill("pill-backend", "err", "backend");
+  notice("backend", { icon: "⚠️", title: "Il motore dell'app non parte",
+    text: "Il backend non risponde da un minuto: chiudi CapWizard e riaprilo. Se succede ancora, la porta 8765 è occupata da un'altra copia.",
+    actions: [{ label: "Riprova", primary: true, run: () => { dropNotice("backend"); bootBackend(); } }] });
   _booting = false;
+}
+
+// ---------------------------------------------------------------------------
+// Notices: slide in from the right when something needs you, leave by themselves when it's fixed
+// ---------------------------------------------------------------------------
+
+function notice(id, { icon = "⚠️", title, text = "", tone = "err", actions = [] }) {
+  let n = document.getElementById(`notice-${id}`);
+  if (!n) {
+    n = document.createElement("div");
+    n.id = `notice-${id}`;
+    n.className = "notice";
+    $("notices").appendChild(n);
+  }
+  n.style.setProperty("--nc", tone === "warn" ? "var(--warn)" : "var(--err)");
+  n.innerHTML = `<div class="ni">${icon}</div><div class="nb"><b>${escapeHtml(title)}</b>${text ? `<p>${escapeHtml(text)}</p>` : ""}
+    ${actions.length ? `<div class="na">${actions.map((a, i) => `<button data-i="${i}" class="${a.primary ? "primary" : ""}">${escapeHtml(a.label)}</button>`).join("")}</div>` : ""}</div>
+    <button class="nx" title="Chiudi">✕</button>`;
+  n.querySelectorAll(".na button").forEach((b) => { b.onclick = () => actions[+b.dataset.i].run(); });
+  n.querySelector(".nx").onclick = () => dropNotice(id);
+}
+
+function dropNotice(id) {
+  const n = document.getElementById(`notice-${id}`);
+  if (!n || n.classList.contains("out")) return;
+  n.classList.add("out");
+  setTimeout(() => n.remove(), 260);
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +158,8 @@ function showView(name) {
   $("tb-account").hidden = !authed;
   $("tb-logout").hidden = !authed;
   if (state.email) $("tb-email").textContent = state.email;
+  $("sb-name").textContent = state.email ? state.email.split("@")[0] : "Questo Mac";
+  $("sb-av").textContent = ($("sb-name").textContent[0] || "C").toUpperCase();
   if (name === "home" && state.backendReady) loadProjects();
   if (name === "dash" && state.backendReady) loadBoard();
   if (name === "scarico" && state.backendReady) loadScaricoCodes();
@@ -163,6 +196,11 @@ async function checkClaude() {
   if (!state.aiReady) {
     addLog(`Claude non risponde: ${why}. Riprovo da solo tra 20 secondi.`, "err");
     claudeRetry = setTimeout(checkClaude, 20000);
+    notice("claude", { icon: "🔌", title: "Collega Claude Code",
+      text: `Senza Claude l'app non può montare né modificare i video. ${why ? why + ". " : ""}Riprovo da sola ogni 20 secondi.`,
+      actions: [{ label: "Collega Claude", primary: true, run: openWizard }, { label: "Riprova ora", run: checkClaude }] });
+  } else {
+    dropNotice("claude");
   }
   check();
   checkScarico();
@@ -173,7 +211,11 @@ async function loadSystem() {
   try {
     const sys = await (await fetch(`${BACKEND}/api/system`)).json();
     state.ffmpeg = !!sys.ffmpeg;
-    if (!sys.ffmpeg) setPill("pill-backend", "warn", "ffmpeg mancante");
+    if (!sys.ffmpeg) {
+      setPill("pill-backend", "warn", "ffmpeg mancante");
+      notice("ffmpeg", { icon: "🎞️", tone: "warn", title: "Manca ffmpeg",
+        text: "Serve per leggere e tagliare le clip. Installalo con «brew install ffmpeg» nel Terminale, poi riapri l'app." });
+    }
   } catch (e) { console.error("system", e); }
 }
 
@@ -210,6 +252,7 @@ async function loadClients() {
     state.steps = data.steps || [];
     state.vault = data.vault || state.vault;
     $("creates").hidden = !state.vault.enabled;
+    renderSidebar();
   } catch (e) { console.error("clients", e); }
   renderChips();
   renderSteps(0);
@@ -226,7 +269,6 @@ function renderChips() {
   const ags = [...new Set(state.clients.map((c) => c.agenzia || "Profili"))];
   const many = state.clients.length > 12;
   $("ag-tabs").hidden = !many || ags.length < 2;
-  $("csearch").hidden = !many;
   if (many && ags.length > 1) {
     $("ag-tabs").innerHTML = "";
     for (const a of ["Tutti", ...ags]) {
@@ -237,9 +279,11 @@ function renderChips() {
       $("ag-tabs").appendChild(t);
     }
   }
+  // the search narrows clients (by name, agency or template) and pinned templates (by name or by the client using them)
   const q = $("csearch").value.trim().toLowerCase();
+  const hit = (...xs) => !q || xs.some((x) => (x || "").toLowerCase().includes(q));
   const shown = state.clients.filter((c) => (state.ag === "Tutti" || (c.agenzia || "Profili") === state.ag)
-                                            && (!q || c.nome.toLowerCase().includes(q)));
+                                            && hit(c.nome, c.agenzia, c.template));
   for (const c of shown) {
     const chip = document.createElement("button");
     chip.className = "chip" + (state.client && state.client.id === c.id ? " on" : "");
@@ -248,15 +292,10 @@ function renderChips() {
     chip.onclick = () => chooseClient(c);
     box.appendChild(chip);
   }
-  if (state.vault.enabled) {
-    const add = document.createElement("button");
-    add.className = "chip add";
-    add.textContent = "＋ Cliente";
-    add.onclick = () => openClientModal(null);
-    box.appendChild(add);
-  }
   const cur = state.otherTemplate ? $("template").value : "";
-  for (const name of state.favTemplates) {
+  const usedBy = (name) => state.clients.filter((c) => c.template === name).map((c) => c.nome);
+  const favs = state.favTemplates.filter((n) => hit(n, ...usedBy(n)));
+  for (const name of favs) {
     const chip = document.createElement("button");
     chip.className = "chip tpl" + (cur === name ? " on" : "");
     chip.title = "Template CapCut";
@@ -275,6 +314,12 @@ function renderChips() {
   addT.textContent = "＋ Aggiungi template";
   addT.onclick = () => toggleTemplatePicker();
   box.appendChild(addT);
+  if (q && !shown.length && !favs.length) {
+    const none = document.createElement("div");
+    none.className = "chips-none";
+    none.textContent = `Nessun cliente o template con «${$("csearch").value.trim()}»`;
+    box.appendChild(none);
+  }
   $("client-hint").textContent = state.clients.length || state.favTemplates.length ? ""
     : "Nessun profilo cliente: è una skill reel-<cliente> che nomina il suo TEMPLATE. Intanto aggiungi un template.";
 }
@@ -530,6 +575,10 @@ function wireEditor() {
   };
   renderRefs();
   $("csearch").oninput = renderChips;
+  $("csearch").onkeydown = (e) => {
+    if (e.key === "Escape") { $("csearch").value = ""; renderChips(); }
+    if (e.key === "Enter") $("chips").querySelector(".chip:not(.other)")?.click();   // Invio sceglie il primo
+  };
   $("btn-client-edit").onclick = () => { if (state.client) openClientModal(state.client); };
   wireClientModal();
   // dropping a folder (or a clip: its folder) anywhere on the window. WebKit fires dragleave with no
@@ -900,6 +949,7 @@ async function loadProjects() {
     state.projects = (data.projects || []).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
     $("n-proj").textContent = state.projects.length;
     renderProjects();
+    renderSidebar();
   } catch (e) { console.error("projects", e); }
 }
 
@@ -1137,6 +1187,36 @@ function followChange(jobId, p) {
 
 const DASH = { items: [], stati: [], todo: null, loaded: false };
 const STATI = [["da_fare", "Da fare"], ["in_lavorazione", "Da finire"], ["da_revisionare", "Da revisionare"], ["fatto", "Fatto"]];
+
+// Sidebar: the clients (colour, videos in the app) and the agencies. A client opens its projects;
+// an agency narrows the client list to its own.
+function renderSidebar() {
+  const counts = {};
+  for (const p of state.projects || []) counts[p.cliente] = (counts[p.cliente] || 0) + 1;
+  const ag = state.sbAg || "";
+  const clients = state.clients.filter((c) => !ag || (c.agenzia || "") === ag);
+  $("sb-clients").innerHTML = clients.length ? clients.map((c) => `<div class="sb-item" data-id="${escapeHtml(c.id)}" style="--c:${c.colore}">
+      <i>${escapeHtml((c.nome.match(/[A-Za-zÀ-ÿ0-9]/) || ["?"])[0])}</i><span>${escapeHtml(c.nome)}</span>${counts[c.nome] ? `<small>${counts[c.nome]}</small>` : ""}</div>`).join("")
+    : '<div class="sb-empty">Nessun cliente</div>';
+  $("sb-clients").querySelectorAll(".sb-item").forEach((el) => {
+    el.onclick = () => {
+      const c = state.clients.find((x) => x.id === el.dataset.id);
+      if (!c) return;
+      showView("home");
+      $("psearch").value = c.nome;
+      renderProjects();
+    };
+  });
+  const ags = state.vault.agenzie || [];
+  $("sb-agencies").innerHTML = ags.length ? ags.map((a) => {
+    const n = state.clients.filter((c) => c.agenzia === a).length;
+    return `<div class="sb-item${a === ag ? " on" : ""}" data-ag="${escapeHtml(a)}" style="--c:#cdc4ff">
+      <i>${escapeHtml(a[0] || "?")}</i><span>${escapeHtml(a)}</span><small>${n}</small></div>`;
+  }).join("") : '<div class="sb-empty">Nessuna agenzia</div>';
+  $("sb-agencies").querySelectorAll(".sb-item").forEach((el) => {
+    el.onclick = () => { state.sbAg = state.sbAg === el.dataset.ag ? "" : el.dataset.ag; renderSidebar(); };
+  });
+}
 
 async function loadBoard() {
   try {
