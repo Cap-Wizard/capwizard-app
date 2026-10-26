@@ -1735,6 +1735,7 @@ function wireScarico() {
     if (p) { $("sc-out").value = p; checkScarico(); }
   };
   $("sc-code").onchange = () => { $("sc-code-new").hidden = $("sc-code").value !== "__new"; checkScarico(); };
+  $("sc-search").oninput = renderScaricoChips;
   ["sc-out", "sc-code-new", "sc-shoot", "sc-mmaa"].forEach((i) => { $(i).oninput = checkScarico; });
   $("sc-go").onclick = startScarico;
   $("sc-exec").onclick = execScarico;
@@ -1748,9 +1749,57 @@ async function loadScaricoCodes() {
     $("sc-code").innerHTML = `<option value="">Scegli il cliente…</option>`
       + d.codici.map((c) => `<option value="${escapeHtml(c.codice)}">${escapeHtml(c.codice)} — ${escapeHtml(c.cliente)}</option>`).join("")
       + `<option value="__new">＋ Altro codice…</option>`;
+    sc.codes = d.codici;
     sc.codesLoaded = true;
+    renderScaricoChips();
   } catch (_) { /* backend busy: retried next time the view opens */ }
   checkScarico();
+}
+
+// the clients as chips, with agency tabs and a search, like step 1 of Nuovo video
+function renderScaricoChips() {
+  const codes = sc.codes || [];
+  const ags = [...new Set(codes.map((c) => c.agenzia).filter(Boolean))];
+  sc.ag = sc.ag || "Tutti";
+  $("sc-ag-tabs").hidden = ags.length < 2;
+  $("sc-ag-tabs").innerHTML = "";
+  if (ags.length > 1) {
+    for (const a of ["Tutti", ...ags]) {
+      const t = document.createElement("button");
+      t.className = "tab" + (a === sc.ag ? " on" : "");
+      t.textContent = a;
+      t.onclick = () => { sc.ag = a; renderScaricoChips(); };
+      $("sc-ag-tabs").appendChild(t);
+    }
+  }
+  const q = $("sc-search").value.trim().toLowerCase();
+  const cur = $("sc-code").value;
+  const box = $("sc-chips");
+  box.innerHTML = "";
+  const pick = (v) => {
+    $("sc-code").value = v;
+    $("sc-code-new").hidden = v !== "__new";
+    if (v === "__new") $("sc-code-new").focus();
+    renderScaricoChips();
+    checkScarico();
+  };
+  for (const c of codes) {
+    if (sc.ag !== "Tutti" && c.agenzia !== sc.ag) continue;
+    if (q && !`${c.codice} ${c.cliente}`.toLowerCase().includes(q)) continue;
+    const chip = document.createElement("button");
+    chip.className = "chip" + (cur === c.codice ? " on" : "");
+    if (c.colore) chip.style.setProperty("--c", c.colore);
+    chip.innerHTML = `${c.colore ? `<i style="background:${c.colore}"></i>` : ""}${escapeHtml(c.nome || c.cliente)} <span class="opt">${escapeHtml(c.codice)}</span>`;
+    chip.onclick = () => pick(c.codice);
+    box.appendChild(chip);
+  }
+  const other = document.createElement("button");
+  other.className = "chip other" + (cur === "__new" ? " on" : "");
+  other.textContent = "＋ Altro codice…";
+  other.onclick = () => pick("__new");
+  box.appendChild(other);
+  const sel = codes.find((c) => c.codice === cur);
+  $("sc-sel").textContent = sel ? ` · ${sel.nome || sel.cliente}` : "";
 }
 
 function scaricoCode() {

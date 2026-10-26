@@ -204,8 +204,11 @@
             <input type="text" id="sc-out" placeholder="/Volumes/Extreme SSD/_KORA/GISE - [Giappugliese]/GISE - [Shooting]" />
             <button class="btn2" id="sc-out-btn">Scegli…</button>
           </div>
-          <label>Cliente</label>
-          <select id="sc-code"></select>
+          <label>Cliente<small id="sc-sel"></small></label>
+          <div class="tabs" id="sc-ag-tabs" hidden></div>
+          <input type="text" class="search" id="sc-search" placeholder="Cerca cliente o codice…" />
+          <div class="chips" id="sc-chips"></div>
+          <select id="sc-code" hidden></select>
           <input type="text" id="sc-code-new" placeholder="Codice di 4 lettere (es. ABCD)" hidden />
           <div class="row2 pair">
             <div><label>N° shooting <span class="opt">facoltativo</span></label><input type="text" id="sc-shoot" placeholder="es. 10" /></div>

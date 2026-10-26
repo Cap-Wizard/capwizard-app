@@ -61,7 +61,8 @@ def own_codes() -> list[dict]:
             i += 1
             code = base[:3] + str(i)
         used.add(code)
-        out.append({"codice": code, "cliente": f"{c['nome']} ({c['agenzia']})"})
+        out.append({"codice": code, "cliente": f"{c['nome']} ({c['agenzia']})", "nome": c["nome"],
+                    "agenzia": c["agenzia"], "colore": c.get("colore", "")})
     return out
 
 
