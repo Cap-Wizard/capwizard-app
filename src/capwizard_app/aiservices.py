@@ -87,13 +87,16 @@ def services(refresh: bool = False) -> list[dict]:
     servers = _servers(refresh)
     chosen = _settings().get("attivi", {})
     out = []
+    from capwizard_app import ai_render          # lazy: ai_render imports agent, which imports this module
     for k in KNOWN:
         srv = next((s for s in servers if k["key"] in s["nome"].lower()), None)
         connected = bool(srv and srv["collegato"])
-        out.append({**k, "server": srv["nome"] if srv else "", "prefix": srv["prefix"] if srv else "",
-                    "stato": "collegato" if connected else ("da autorizzare" if srv and srv["da_autorizzare"]
-                                                            else "non collegato"),
-                    "attivo": connected and chosen.get(k["key"], True)})
+        api = k["key"] == "higgsfield" and not connected and ai_render.load_key()   # the user's own API key
+        out.append({**k, "server": srv["nome"] if srv else ("API Higgsfield (chiave)" if api else ""),
+                    "prefix": srv["prefix"] if srv else "", "api": api,
+                    "stato": "collegato" if connected else "collegato con la chiave API" if api
+                    else ("da autorizzare" if srv and srv["da_autorizzare"] else "non collegato"),
+                    "attivo": (connected or api) and chosen.get(k["key"], True)})
     return out
 
 
@@ -106,10 +109,16 @@ def set_active(key: str, active: bool) -> dict:
 
 def for_run() -> tuple[list[str], str]:
     """(tool patterns to allow, prompt section) for a montage that may use AI services."""
-    active = [s for s in services() if s["attivo"] and s["prefix"]]
+    from capwizard_app import vault
+    active = [s for s in services() if s["attivo"] and (s["prefix"] or s.get("api"))]
     if not active:
         return [], ""
-    lines = "\n".join(f"- **{s['nome']}** (strumenti `{s['prefix']}__…`): {s['usi']}" for s in active)
+    tool = f'"{vault.tools_python()}" "{vault.TOOLS / "higgsfield_api.py"}"'
+    lines = "\n".join(
+        f"- **{s['nome']}** via API, con Bash: `{tool} image --image <foto> --prompt \"<istruzione>\" --ratio 9:16 --out <file.png>` "
+        f"(Qwen Image 3 Edit: modifica o allarga un'immagine) e `{tool} video --image <foto> --prompt \"<movimento di camera>\" "
+        f"--seconds 5 --out <file.mp4>` (Kling 3.0 Pro, senza audio, ~$0,56 a video). Costano soldi veri: pochi e mirati."
+        if s.get("api") else f"- **{s['nome']}** (strumenti `{s['prefix']}__…`): {s['usi']}" for s in active)
     text = (
         "\n\n## Servizi AI a disposizione\n"
         f"{lines}\n"
@@ -118,4 +127,4 @@ def for_run() -> tuple[list[str], str]:
         "aggiungendo solo ciò che serve. Ogni generazione consuma i crediti del servizio: pochi "
         "contenuti mirati. Scarica i file nella cartella del video (BROLL/), guardali prima di usarli, "
         "scarta quelli venuti male e scrivi nel report cosa hai generato e con quale servizio.\n")
-    return [s["prefix"] for s in active], text
+    return [s["prefix"] for s in active if s["prefix"]], text

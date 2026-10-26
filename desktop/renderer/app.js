@@ -1242,12 +1242,12 @@ function renderAiServices() {
   const connected = AI.services.filter((s) => s.stato !== "non collegato");
   const others = AI.services.filter((s) => s.stato === "non collegato");
   const row = (s) => `
-    <div class="ai-row ${s.stato === "collegato" ? "on" : ""}">
+    <div class="ai-row ${s.stato.startsWith("collegato") ? "on" : ""}">
       <div class="ai-logo">${escapeHtml(s.nome[0])}</div>
       <div class="ai-txt"><div class="ai-name">${escapeHtml(s.nome)}
           <span class="ai-state st-${s.stato.replace(/ /g, "-")}">${escapeHtml(s.stato)}</span></div>
         <div class="ai-use">${escapeHtml(s.usi)}</div></div>
-      ${s.stato === "collegato"
+      ${s.stato.startsWith("collegato")
         ? `<div class="tgl ${s.attivo ? "on" : ""}" data-key="${escapeHtml(s.key)}" title="Claude può usarlo nei montaggi"></div>`
         : `<button class="btn2 ai-connect" data-url="${escapeHtml(AI.url)}">Collega</button>`}
     </div>`;
@@ -1965,52 +1965,52 @@ function escapeHtml(s) {
 const ai = { project: null, points: [], renders: [], job: null };
 
 function wireAiModal() {
-  $("ai-close").onclick = () => { if (!ai.job) { $("ai-modal").hidden = true; document.body.classList.remove("modal-open"); } };
-  $("ai-renders-btn").onclick = async () => {
+  $("ar-close").onclick = () => { if (!ai.job) { $("ar-modal").hidden = true; document.body.classList.remove("modal-open"); } };
+  $("ar-renders-btn").onclick = async () => {
     const p = window.api && await window.api.selectFolder();
-    if (p) { $("ai-renders").value = p; aiCheck(); }
+    if (p) { $("ar-renders").value = p; aiCheck(); }
   };
-  $("ai-renders").oninput = aiCheck;
-  $("ai-analyse").onclick = aiPropose;
-  $("ai-go").onclick = aiGenerate;
+  $("ar-renders").oninput = aiCheck;
+  $("ar-analyse").onclick = aiPropose;
+  $("ar-go").onclick = aiGenerate;
 }
 
 async function openAiModal(project, renders, autoStart) {
   ai.project = project;
   ai.points = [];
-  $("ai-title").textContent = `🏗️ AI nel video · ${project.name}`;
-  $("ai-sub").textContent = "1) Claude guarda il video e i render e propone dove metterli · 2) spunti quelli che vuoi · "
+  $("ar-title").textContent = `🏗️ AI nel video · ${project.name}`;
+  $("ar-sub").textContent = "1) Claude guarda il video e i render e propone dove metterli · 2) spunti quelli che vuoi · "
     + "3) per ognuno: foto verticale (Qwen Image 3) → video 5 s (Kling 3.0 Pro) → inserito nel progetto a taglio netto.";
-  $("ai-renders").value = renders || $("ai-renders").value || "";
-  $("ai-points").innerHTML = "";
-  $("ai-log").hidden = true;
-  $("ai-log").innerHTML = "";
-  $("ai-modal").hidden = false;
+  $("ar-renders").value = renders || $("ar-renders").value || "";
+  $("ar-points").innerHTML = "";
+  $("ar-log").hidden = true;
+  $("ar-log").innerHTML = "";
+  $("ar-modal").hidden = false;
   document.body.classList.add("modal-open");
   try {
     const k = await (await fetch(`${BACKEND}/api/ai-video/key`)).json();
-    $("ai-key").textContent = k.ok ? "" : `⚠ Manca la chiave dell'API Higgsfield: mettila in ${k.file} come HF_KEY=key-id:key-secret.`;
+    $("ar-key").textContent = k.ok ? "" : `⚠ Manca la chiave dell'API Higgsfield: mettila in ${k.file} come HF_KEY=key-id:key-secret.`;
   } catch (_) { /* informative only */ }
   aiCheck();
-  if (autoStart && $("ai-renders").value.trim()) aiPropose();
+  if (autoStart && $("ar-renders").value.trim()) aiPropose();
 }
 
 function aiCheck() {
   const busy = !!ai.job;
   const sel = ai.points.filter((p) => p.on);
-  $("ai-analyse").disabled = busy || !$("ai-renders").value.trim();
-  $("ai-go").disabled = busy || !sel.length;
-  $("ai-cost").textContent = sel.length
+  $("ar-analyse").disabled = busy || !$("ar-renders").value.trim();
+  $("ar-go").disabled = busy || !sel.length;
+  $("ar-cost").textContent = sel.length
     ? `${sel.length} ${sel.length > 1 ? "punti" : "punto"} · ~$${(sel.length * 5 * 0.112).toFixed(2)} di video (Kling 3.0 Pro) + ${sel.length} foto Qwen` : "";
 }
 
 function aiLog(text, kind) {
-  $("ai-log").hidden = false;
+  $("ar-log").hidden = false;
   const d = document.createElement("div");
   if (kind) d.className = kind === "err" ? "k-err" : "k-ok";
   d.textContent = text;
-  $("ai-log").appendChild(d);
-  $("ai-log").scrollTop = $("ai-log").scrollHeight;
+  $("ar-log").appendChild(d);
+  $("ar-log").scrollTop = $("ar-log").scrollHeight;
 }
 
 // run a backend job and stream its log into the modal; resolves with its result or null
@@ -2040,9 +2040,9 @@ async function aiJob(url, body) {
 }
 
 async function aiPropose() {
-  $("ai-points").innerHTML = "";
+  $("ar-points").innerHTML = "";
   ai.points = [];
-  const res = await aiJob("/api/ai-video/propose", { project_id: ai.project.id, renders: $("ai-renders").value.trim() });
+  const res = await aiJob("/api/ai-video/propose", { project_id: ai.project.id, renders: $("ar-renders").value.trim() });
   if (!res) return;
   ai.renders = res.renders || [];
   ai.points = (res.punti || []).map((p) => ({ ...p, on: true }));
@@ -2050,7 +2050,7 @@ async function aiPropose() {
 }
 
 function renderAiPoints(note) {
-  const box = $("ai-points");
+  const box = $("ar-points");
   box.innerHTML = ai.points.length ? "" : '<div class="ai-note">Nessun punto adatto trovato.</div>';
   ai.points.forEach((p, i) => {
     const row = document.createElement("div");
@@ -2077,6 +2077,6 @@ async function aiGenerate() {
   const sel = ai.points.filter((p) => p.on).map(({ on, thumb, ...p }) => p);
   if (!sel.length) return;
   if (!confirm(`Genero ${sel.length} foto e ${sel.length} video con l'API Higgsfield (~$${(sel.length * 5 * 0.112).toFixed(2)} di video + le foto). Procedo?`)) return;
-  const res = await aiJob("/api/ai-video/generate", { project_id: ai.project.id, renders: $("ai-renders").value.trim(), punti: sel });
+  const res = await aiJob("/api/ai-video/generate", { project_id: ai.project.id, renders: $("ar-renders").value.trim(), punti: sel });
   if (res) aiLog(`✅ Fatto: ${res.inseriti} video nel progetto. Riapri «${ai.project.name}» in CapCut. File in ${res.cartella}`, "ok");
 }
