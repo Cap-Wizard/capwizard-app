@@ -11,6 +11,11 @@ the same way every time and Claude knows where each piece is when it reuses or e
     sulle entrate SUONI        un effetto all'entrata del titolo, del titoletto e di ogni voce dell'elenco
     sempre        COLORE       filtri / regolazione / effetti dell'agenzia per tutta la durata
 
+A template never holds clips. The best one is a video edited by hand and then emptied of its clips
+(like «TEMPLATE SOLUZIONI IMMOBILIARE»): titles in compound clips with their animations, subtitle preset,
+labels, filters, music and every sound at its time stay; the main video track is empty. `da_video()`
+does exactly that; the layout below is only the starting point for a client with no model video yet.
+
 The words are placeholders (Claude rewrites them for every video); what matters is font, colour,
 size, position, animation and the sound that starts with each text. Font, shadow, animations,
 music, sounds and looks come from a "master" project: the client's or the agency's "Base tecnica
@@ -295,3 +300,48 @@ def crea(cliente: str, colore: str, bases: list[str] = (), emoji: str = "⭐") -
     listed = _register(dst, nome, did, D["duration"])
     return {"ok": True, "nome": nome, "master": master,
             "msg": f"Creato in CapCut «{nome}» (stile preso da «{master}», colore {colore}). {listed}"}
+
+
+def da_video(video: str, template: str) -> dict:
+    """Turn a hand-edited video into the client's template: a copy of the project (compound clips need their
+    subdraft/ folders) with the main track's clips and their materials removed. The template keeps its draft
+    id, so it stays where it is in CapCut's list; the old one is backed up first. Both must be closed in CapCut."""
+    src, dst = CAPCUT_PROJECTS_DIR / video, CAPCUT_PROJECTS_DIR / template
+    for p in (src, dst):
+        if (p / ".locked").exists():
+            raise RuntimeError(f"«{p.name}» è aperto in CapCut: torna alla home dei progetti e riprova.")
+    old_id = None
+    if dst.exists():
+        old_id = json.load(open(dst / "draft_meta_info.json")).get("draft_id")
+        backup = Path.home() / "Library/Application Support/CapWizard/backup" / f"{template} {time.strftime('%m%d-%H%M%S')}"
+        shutil.copytree(dst, backup)
+    tmp = dst.with_name(dst.name + ".new")
+    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.copytree(src, tmp, ignore=shutil.ignore_patterns(".locked"))
+    D = json.load(open(tmp / "draft_info.json"))
+    main = next(t for t in D["tracks"] if t["type"] == "video" and not t.get("flag"))
+    gone = {r for s in main["segments"] for r in [s["material_id"], *(s.get("extra_material_refs") or [])]}
+    gone -= {r for t in D["tracks"] if t is not main for s in t["segments"]
+             for r in [s["material_id"], *(s.get("extra_material_refs") or [])]}
+    for k, v in D["materials"].items():
+        if isinstance(v, list):
+            D["materials"][k] = [m for m in v if not (isinstance(m, dict) and m.get("id") in gone)]
+    clips = len(main["segments"])
+    main["segments"], main["attribute"], D["id"] = [], 1, nid()
+    meta = json.load(open(tmp / "draft_meta_info.json"))
+    meta.update(draft_name=template, draft_fold_path=str(dst), draft_root_path=str(CAPCUT_PROJECTS_DIR),
+                draft_id=old_id or nid())
+    for g in meta.get("draft_materials") or []:
+        if g.get("type") == 0:
+            g["value"] = []
+    for f in [tmp / "draft_info.json", tmp / "draft_info.json.bak", tmp / "template.tmp", tmp / "template-2.tmp",
+              *tmp.glob("Timelines/*/draft_info.json")]:
+        if f.exists():
+            json.dump(D, open(f, "w"), ensure_ascii=False)
+    json.dump(meta, open(tmp / "draft_meta_info.json", "w"), ensure_ascii=False)
+    if dst.exists():
+        shutil.rmtree(dst)
+    tmp.rename(dst)
+    listed = "" if old_id else " " + _register(dst, template, meta["draft_id"], D["duration"])
+    return {"ok": True, "nome": template,
+            "msg": f"«{template}» rifatto da «{video}»: tolte {clips} clip, restano testi, animazioni, suoni e musica.{listed}"}
