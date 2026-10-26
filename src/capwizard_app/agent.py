@@ -776,6 +776,7 @@ def run_vault_modify(job, project: dict, client: dict, text: str, images: list[s
         raise
     entry.update(stato="fatto", riassunto=res.get("riassunto", ""), lezione=res.get("lezione") or "", profilo=client["nome"])
     _save_mods(project["id"], mods)
+    vault.drop_patch(folder)
     job.log(vault.porta_media(str(folder), project["name"]))
     try:
         vault.video_note(project["name"], client["id"], client.get("stile", ""), line=

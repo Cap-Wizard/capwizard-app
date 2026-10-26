@@ -502,13 +502,25 @@ def porta_media(folder: str, nome: str) -> str:
     return f"📦 Copiati {len(mapping)} file in `{dst_dir}` (CapCut li apre già collegati)."
 
 
+def drop_patch(folder) -> None:
+    """CapCut re-applies Timelines/*/attachment/patch/mini_draft.json when it opens a project: a patch left from the
+    base (or from before an edit) silently restores the old timeline and drops new tracks. CapCut writes a fresh one."""
+    for patch in glob.glob(str(folder) + "/Timelines/*/attachment/patch"):
+        shutil.rmtree(patch, ignore_errors=True)
+
+
 def install(staging: str, nome: str, log=print) -> str:
     """Copy a project built in `staging` into CapCut's projects, cut out the person for the title and link the media.
     With CapCut closed it is also added to the home list (root_meta_info); with CapCut open, restart CapCut to see it."""
     dst = CAPCUT_PROJECTS_DIR / nome
     if dst.exists():
         raise RuntimeError(f"Esiste già un progetto CapCut «{nome}».")
-    shutil.copytree(staging, dst, ignore=shutil.ignore_patterns("draft.extra", "crypto_key_store.dat*", ".locked"))
+    # draft.extra holds the state of CapCut text/caption templates: a base whose templates are reused with the same
+    # ids (e.g. Feeling Home) must keep it, so Claude leaves a ".keep_draft_extra" marker in the staging folder
+    keep_extra = (Path(staging) / ".keep_draft_extra").exists()
+    skip = ["crypto_key_store.dat*", ".locked", ".keep_draft_extra"] + ([] if keep_extra else ["draft.extra"])
+    shutil.copytree(staging, dst, ignore=shutil.ignore_patterns(*skip))
+    drop_patch(dst)
     log("📦 Installo il progetto: scontorno la persona per il titolo e collego le clip…")
     cut = scontorna(str(dst), nome, log)
     media = porta_media(str(dst), nome)
