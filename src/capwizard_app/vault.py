@@ -227,13 +227,25 @@ def rules_text(client_id: str) -> str:
 # The brief Claude gets for a new video (rules + clips + b-roll + music)
 # ---------------------------------------------------------------------------
 
+# Music ALWAYS comes from CapCut's own library (Audio > Music): tracks CapCut downloaded into its cache,
+# found in the projects of this Mac. Never mp3s from Downloads/Spotimate or other commercial songs.
+MUSIC_RULE = ("REGOLA FISSA: la musica si prende SEMPRE dalla libreria Musica di CapCut (Audio > Music). "
+              "Mai mp3 scaricati (Download, Spotimate, YouTube) né brani commerciali.")
+
+
+def _is_library_music(a: dict) -> bool:
+    return a.get("type") == "music" and bool(a.get("music_id")) and "/Cache/music/" in (a.get("path") or "")
+
+
 def musiche_progetti(n: int = 80) -> list[dict]:
-    """Background music of the latest CapCut projects (newest first): the audio covering most of the timeline."""
+    """CapCut library music of the latest projects (newest first): the library track covering most of the timeline."""
     out = []
     if not CAPCUT_PROJECTS_DIR.is_dir():
         return out
     items = sorted(((p.stat().st_mtime, p.parent.name) for p in CAPCUT_PROJECTS_DIR.glob("*/draft_info.json")), reverse=True)[:n]
     for mt, d in items:
+        if d.upper().startswith("TEMPLATE"):      # a template is not a published video
+            continue
         try:
             j = json.load(open(CAPCUT_PROJECTS_DIR / d / "draft_info.json"))
         except (ValueError, OSError):
@@ -246,14 +258,12 @@ def musiche_progetti(n: int = 80) -> list[dict]:
                 continue
             for sg in t["segments"]:
                 a = auds.get(sg["material_id"])
-                if a and sg["target_timerange"]["duration"] >= 0.5 * dur and sg["target_timerange"]["duration"] > 8e6:
-                    name = (a.get("name") or os.path.basename(a.get("path", ""))).split("##")[0]
-                    if re.search(r"voice|esv2|snaptik|\.mov$|\.mp4$", name, re.I) or "VLOG" in a.get("path", "").upper():
-                        continue        # voiceovers, ripped clips and the YouTube vlogs are not reel music
-                    best[name] = a.get("path", "")
-        for name, path in best.items():
+                if a and _is_library_music(a) and sg["target_timerange"]["duration"] >= 0.5 * dur \
+                        and sg["target_timerange"]["duration"] > 8e6:
+                    best[a.get("name") or a["music_id"]] = (a.get("path", ""), sg.get("volume"))
+        for name, (path, vol) in best.items():
             out.append({"progetto": d, "data": time.strftime("%d/%m", time.localtime(mt)), "brano": name,
-                        "path": path, "esiste": os.path.exists(path)})
+                        "path": path, "volume": vol, "esiste": os.path.exists(path)})
     return out
 
 
@@ -268,24 +278,26 @@ def sezione_musica(cliente: str, progetti_cliente: set[str]) -> list[str]:
     conta: dict[str, int] = {}
     for u in usate:
         conta[u["brano"]] = conta.get(u["brano"], 0) + 1
-    vietati = {u["brano"] for u in recenti[:10]} | {u["brano"] for u in del_cliente}
+    vietati = {u["brano"] for u in recenti[:3]} | {u["brano"] for u in del_cliente}
     disp: dict[str, dict] = {}
     for u in usate:
         if u["esiste"] and u["brano"] not in vietati:
             disp.setdefault(u["brano"], u)
-    mus_dir = "/Volumes/SSD Daniel/MUSICHE/"
-    extra = sorted(glob.glob(mus_dir + "*.wav") + glob.glob(mus_dir + "*.mp3")) if os.path.isdir(mus_dir) else []
-    extra = [p for p in extra if os.path.basename(p) not in vietati]
-    lines = ["", "## Musica — ALTERNALA (i video avevano musiche troppo uguali)",
-             "NON usare la stessa musica del progetto base né uno dei brani qui sotto. Scegli un brano diverso ma dello stesso genere dello stile.",
-             "### Usate negli ultimi video (da evitare)"]
-    lines += [f"- {u['brano']} — {u['progetto']} ({u['data']})" for u in recenti[:10]]
+    lines = ["", "## Musica: SEMPRE dalla libreria di CapCut", MUSIC_RULE,
+             "Come si mette: copia il materiale audio del brano dal progetto indicato (stessi campi: type \"music\", "
+             "music_id, path nella cache di CapCut, name), così CapCut lo riconosce come brano della sua libreria. "
+             "Volume udibile ma sotto la voce: come nel template del cliente (di solito 0,03-0,10), con dissolvenza finale.",
+             "Alterna: non usare i brani qui sotto «da evitare»."]
+    if recenti[:3]:
+        lines += ["### Usate negli ultimi video (da evitare)"] + [f"- {u['brano']} — {u['progetto']} ({u['data']})" for u in recenti[:3]]
     if del_cliente:
         lines += ["### Già usate per questo cliente (mai ripeterle)"] + [f"- {u['brano']} — {u['progetto']}" for u in del_cliente]
-    lines += ["### Disponibili sul Mac, usate poco (scegli da qui; inseriscile come audio locale dal path)"]
-    lines += [f"- {b} — usata {conta.get(b, 0)}× · `{u['path']}`" for b, u in sorted(disp.items(), key=lambda x: conta.get(x[0], 0))[:25]]
-    if extra:
-        lines += ["### Cartella MUSICHE (Artlist, tutte libere)"] + [f"- `{p}`" for p in extra]
+    if disp:
+        lines += ["### Brani della libreria CapCut già scaricati su questo Mac (scegli da qui)"]
+        lines += [f"- {b} — usata {conta.get(b, 0)}× · dal progetto «{u['progetto']}» (volume lì {u['volume']})"
+                  for b, u in sorted(disp.items(), key=lambda x: conta.get(x[0], 0))[:25]]
+    else:
+        lines += ["Nessun altro brano della libreria è scaricato su questo Mac: usa la musica del template del cliente."]
     return lines
 
 

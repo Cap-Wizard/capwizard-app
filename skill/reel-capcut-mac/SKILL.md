@@ -336,6 +336,9 @@ mai mentre c'è un titolo o un elenco.
 Title impact + woosh sui titoletti, magic reveal a inizio elenco, pop sulle voci, woosh 0,2s
 prima delle transizioni; **volumi del template** (e quelli corretti da Nicola); almeno 1s tra due
 suoni; musica del template tagliata alla durata.
+**Musica SEMPRE dalla libreria Musica di CapCut** (Audio > Music: materiale `type: "music"` con
+`music_id` e file nella cache di CapCut). Mai mp3 scaricati (Download, Spotimate, YouTube) né brani
+commerciali. Per cambiarla copia il materiale audio da un altro progetto che usa quel brano della libreria.
 
 ### 9. Zoom e transizioni
 Inquadrature al **100%**: niente zoom alternati tipo 140% (le riprese sono già strette). A fine

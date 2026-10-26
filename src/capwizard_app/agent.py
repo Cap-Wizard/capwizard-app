@@ -591,7 +591,7 @@ Procedura:
      lo fa l'app quando installa il progetto (non scrivere a Daniel di premere "Rimuovi sfondo");
    - take ripetute: tieni l'ultima take completa, mai doppioni;
    - b-roll solo quando servono, quelli 🐢 rallentati; se è un VIDEO CINE segui anche la nota "Video cine";
-   - musica DIVERSA dagli ultimi video (lista nel brief).
+   - musica SEMPRE dalla libreria Musica di CapCut (mai mp3 scaricati o brani commerciali), DIVERSA dagli ultimi video (lista nel brief).
 4. NON aprire né chiudere CapCut e NON installare il progetto: lo fa l'app. Alla fine scrivi il file `{result}` con:
    {{"staging": "{staging}", "nome": "{name}", "durata": <secondi>, "riassunto": "<cosa hai fatto, in italiano, 5-8 righe>",
     "da_fare_a_mano": ["<cosa resta da fare in CapCut>", ...]}}
