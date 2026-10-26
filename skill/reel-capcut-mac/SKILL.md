@@ -108,10 +108,12 @@ abbinati, musica, filtri, transizione, **volumi**. Annota testo di esempio, cara
 posizione di ogni testo. I nomi del kit vanno nel config (`kit`, vedi sotto).
 
 **Un template non ha mai clip.** È un insieme di testi, animazioni, preset, filtri, suoni e musica
-da cui prendi stile, font e suoni (il modello è «TEMPLATE SOLUZIONI IMMOBILIARE»). Il template migliore
-è un video montato a mano e poi svuotato delle clip (`template_maker.da_video`): stessi tempi del
-video vero, quindi leggi il ruolo di ogni pezzo dal momento in cui compare (titolo all'inizio, CTA e
-chiusura alla fine, suoni sui testi e sui cambi scena). Non mettere mai un video intero dentro un template.
+da cui prendi stile, font e suoni. Tutti i template hanno **gli stessi pezzi, agli stessi tempi e con gli
+stessi suoni di «TEMPLATE SOLUZIONI IMMOBILIARE»**: sottotitoli, numeri e dati grandi, titoletti e prezzo
+in clip composte con la loro animazione (Zoom 1, Zoom 2…), emoji che entrano (Sway In, Fall Right,
+Bend-Zoom). Cambia solo la **grafica del cliente**: preset dei sottotitoli, box e font di titoli e
+dati, filtri, musica, presi da un video montato per quel cliente (`template_maker.con_stile`, pulsante
+«Usa come template» dell'app). Non mettere mai un video intero dentro un template.
 
 **Template creati dall'app** («TEMPLATE <CLIENTE>», nella nota del cliente «creato dall'app con lo
 schema universale»): hanno sempre la stessa forma, quindi sai già dove sta ogni pezzo.

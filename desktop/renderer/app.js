@@ -942,7 +942,7 @@ async function openProject(p) {
         <button class="btn2" id="pd-report" ${p.report_path ? "" : "disabled"}>Leggi il report</button>
         <button class="btn2" id="pd-again">Rifai con questi dati</button>
         <button class="btn2" id="pd-template" ${p.exists && !/^TEMPLATE/i.test(p.name) ? "" : "disabled"}
-          title="Il template del cliente diventa questo video senza le clip: titoli, sottotitoli, testi, suoni e musica">Usa come template</button>
+          title="Il template del cliente prende la grafica di questo video: preset dei sottotitoli, box dei titoli, filtri e musica">Usa come template</button>
         ${p.exists ? "" : '<button class="btn2 danger" id="pd-remove">Rimuovi dall\'elenco</button>'}
       </div>
     </div>
@@ -1340,9 +1340,9 @@ function wireAiServices() {
 
 async function useAsTemplate(p) {
   const tpl = (p.settings || {}).template || `il template di ${p.cliente}`;
-  if (!confirm(`Rifaccio «${tpl}» da questo video, senza le clip?\n\n`
-    + "Restano titoli, sottotitoli, testi, animazioni, suoni e musica ai loro tempi. "
-    + "Il template di adesso viene salvato prima in una copia di sicurezza.")) return;
+  if (!confirm(`Rifaccio «${tpl}» con la grafica di questo video?\n\n`
+    + "Pezzi, tempi e suoni restano quelli del template di riferimento; da questo video prendo il preset dei "
+    + "sottotitoli, i box dei titoli, i filtri e la musica. Il template di adesso viene salvato prima.")) return;
   const b = $("pd-template");
   b.disabled = true;
   b.textContent = "Rifaccio il template…";

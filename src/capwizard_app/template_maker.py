@@ -11,10 +11,11 @@ the same way every time and Claude knows where each piece is when it reuses or e
     sulle entrate SUONI        un effetto all'entrata del titolo, del titoletto e di ogni voce dell'elenco
     sempre        COLORE       filtri / regolazione / effetti dell'agenzia per tutta la durata
 
-A template never holds clips. The best one is a video edited by hand and then emptied of its clips
-(like «TEMPLATE SOLUZIONI IMMOBILIARE»): titles in compound clips with their animations, subtitle preset,
-labels, filters, music and every sound at its time stay; the main video track is empty. `da_video()`
-does exactly that; the layout below is only the starting point for a client with no model video yet.
+A template never holds clips. Every client's template has the same pieces at the same times and the same
+sounds as «TEMPLATE SOLUZIONI IMMOBILIARE» (subtitles, labels and numbers, titles in compound clips with their
+motion, emojis); only the graphics are the client's: subtitle preset, title/label box and font, filters and
+music, taken from a video edited for that client (`con_stile()`, the app's «Usa come template»). The layout
+below is only the starting point for a client with no edited video yet.
 
 The words are placeholders (Claude rewrites them for every video); what matters is font, colour,
 size, position, animation and the sound that starts with each text. Font, shadow, animations,
@@ -345,3 +346,207 @@ def da_video(video: str, template: str) -> dict:
     listed = "" if old_id else " " + _register(dst, template, meta["draft_id"], D["duration"])
     return {"ok": True, "nome": template,
             "msg": f"«{template}» rifatto da «{video}»: tolte {clips} clip, restano testi, animazioni, suoni e musica.{listed}"}
+
+
+# ---------------------------------------------------------------------------
+# Same pieces, the client's graphics
+# ---------------------------------------------------------------------------
+
+STRUTTURA = "TEMPLATE SOLUZIONI IMMOBILIARE"     # the reference layout: what a template holds and when
+_LOOK_KEYS = ("background_alpha", "background_color", "background_fill", "background_height",
+              "background_horizontal_offset", "background_round_radius", "background_style",
+              "background_vertical_offset", "background_width", "border_alpha", "border_color", "border_width",
+              "has_shadow", "shadow_alpha", "shadow_angle", "shadow_color", "shadow_distance", "shadow_point",
+              "shadow_smoothing", "font_path", "font_name", "font_title", "font_id", "font_resource_id",
+              "font_category_id", "font_category_name", "font_source_platform", "font_team_id",
+              "font_third_resource_id", "font_url", "fonts", "font_size", "text_color", "text_alpha",
+              "line_spacing", "letter_spacing", "alignment", "bold_width", "italic_degree", "underline",
+              "check_flag")      # check_flag: which parts of the look are on (the box among them)
+
+
+def _is_emoji(text: str) -> bool:
+    """Only pictographs: no letters and no digits (a price like €479.000 is text)."""
+    return not any(c.isalnum() and ord(c) < 0x250 for c in text)
+
+
+def _dress(m: dict, look: dict) -> None:
+    """Give a text material the look of another one (font, colours, box, shadow), keeping its words."""
+    c = json.loads(m["content"])
+    if _is_emoji(c.get("text", "")):
+        return
+    for k in _LOOK_KEYS:
+        if k in look:
+            m[k] = copy.deepcopy(look[k])
+    shown = json.loads(look["content"]).get("text", "")
+    if shown == shown.upper():               # the client writes its titles in capitals
+        c["text"] = c["text"].upper()
+    st = copy.deepcopy(json.loads(look["content"])["styles"][0])
+    st["range"] = [0, utf16len(c["text"])]
+    c["styles"] = [st]
+    m["content"] = json.dumps(c, ensure_ascii=False)
+
+
+def con_stile(stile: str, template: str, struttura: str = STRUTTURA) -> dict:
+    """«template» = every piece of «struttura» at its time (texts, compound clips and their motion, sounds),
+    dressed with the graphics of «stile», a video or template of the client: its subtitle preset, the look of
+    its titles and labels, its filters and its music. Emojis and the structure's sounds stay as they are."""
+    src, sty, dst = (CAPCUT_PROJECTS_DIR / n for n in (struttura, stile, template))
+    for p in (src, sty, dst):
+        if (p / ".locked").exists():
+            raise RuntimeError(f"«{p.name}» è aperto in CapCut: torna alla home dei progetti e riprova.")
+    S = load_template(stile)
+    six = _materials_index(S)
+    texts = [(t, s) for t in S["tracks"] if t["type"] == "text" for s in t["segments"]]
+    cap = next((s for t, s in texts if six[s["material_id"]][0] == "text_templates"), None)
+    labels = [s for t, s in texts if not t.get("flag") and six[s["material_id"]][0] == "texts"]
+    look_label = six[labels[0]["material_id"]][1] if labels else None
+    drafts = [d for d in S["materials"].get("drafts", []) if isinstance(d.get("draft"), dict)]
+    look_title = next((m for d in drafts for m in d["draft"]["materials"].get("texts", [])
+                       if not _is_emoji(json.loads(m["content"]).get("text", ""))), None) or look_label
+    music = next((s for t in S["tracks"] if t["type"] == "audio" for s in t["segments"]
+                  if six[s["material_id"]][1].get("type") == "music"
+                  and s["target_timerange"]["duration"] >= 6e6), None)
+    looks = [s for t in S["tracks"] if t["type"] in ("filter", "adjust", "effect") for s in t["segments"]]
+
+    old_id = None
+    if dst.exists():
+        old_id = json.load(open(dst / "draft_meta_info.json")).get("draft_id")
+        shutil.copytree(dst, Path.home() / "Library/Application Support/CapWizard/backup"
+                        / f"{template} {time.strftime('%m%d-%H%M%S')}")
+    tmp = dst.with_name(dst.name + ".new")
+    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.copytree(src, tmp, ignore=shutil.ignore_patterns(".locked", "crypto_key_store.dat*"))
+    D = json.load(open(tmp / "draft_info.json"))
+    M = D["materials"]
+    ix = _materials_index(D)
+
+    def take(mid: str) -> dict:           # copy a material from the style project
+        kind, m = six[mid]
+        c = copy.deepcopy(m)
+        c["id"] = nid()
+        M.setdefault(kind, []).append(c)
+        return c
+
+    def clone_seg(seg: dict, start: int, dur: int) -> dict:
+        s = copy.deepcopy(seg)
+        s["id"] = nid()
+        s["material_id"] = take(seg["material_id"])["id"]
+        s["extra_material_refs"] = [take(r)["id"] for r in seg.get("extra_material_refs") or [] if r in six]
+        s["target_timerange"] = {"start": start, "duration": dur}
+        if "source_timerange" in s and s["source_timerange"]:
+            s["source_timerange"] = {"start": seg["source_timerange"]["start"], "duration": dur}
+        return s
+
+    changed = {"sottotitoli": 0, "testi": 0}
+    text_tracks = [t for t in D["tracks"] if t["type"] == "text"]
+    cap_track = max(text_tracks, key=lambda t: len(t["segments"]), default=None)   # the subtitles: the busiest text track
+    label_scale = (labels[0].get("clip") or {}).get("scale") if labels else None
+    for t in text_tracks:
+        new = []
+        for s in t["segments"]:
+            m = ix[s["material_id"]][1]
+            txt = _shown_text(m)
+            if t is cap_track and cap is not None and not _is_emoji(txt):
+                # the client's subtitle preset, same words and time
+                c = clone_seg(cap, s["target_timerange"]["start"], s["target_timerange"]["duration"])
+                tt = next(x for x in M["text_templates"] if x["id"] == c["material_id"])
+                inner = copy.deepcopy(six[six[cap["material_id"]][1]["text_info_resources"][0]["text_material_id"]][1])
+                inner["id"] = nid()
+                M["texts"].append(inner)
+                body = txt.upper().replace("\n", " ")
+                cc = json.loads(inner["content"])
+                st = cc["styles"][0]
+                st["range"] = [0, utf16len(body)]
+                cc["text"], cc["styles"] = body, [st]
+                inner["content"] = json.dumps(cc, ensure_ascii=False)
+                inner["recognize_text"] = body.lower()
+                ws, dur = body.lower().split(), s["target_timerange"]["duration"]
+                tot, cur, a, b, x = sum(len(w) for w in ws) or 1, 0.0, [], [], []
+                for i, w in enumerate(ws):
+                    wd = dur / 1000 * len(w) / tot
+                    a.append(int(cur)); b.append(int(cur + wd)); x.append(w); cur += wd
+                    if i < len(ws) - 1:
+                        a.append(int(cur)); b.append(int(cur)); x.append(" ")
+                inner["words"] = {"start_time": a, "end_time": b, "text": x}
+                tir = tt["text_info_resources"][0]
+                tir["id"], tir["text_material_id"] = nid(), inner["id"]
+                tir["attach_info"]["duration"] = dur
+                kinds = {six[r][0]: i for i, r in enumerate(cap["extra_material_refs"]) if r in six}
+                tir["extra_material_refs"] = [c["extra_material_refs"][kinds[k]] for k in ("effects", "material_animations")
+                                              if k in kinds]
+                c["clip"] = copy.deepcopy(cap["clip"])
+                c["render_index"], c["track_render_index"] = s.get("render_index"), s.get("track_render_index")
+                new.append(c)
+                changed["sottotitoli"] += 1
+            else:
+                if look_label is not None and not _is_emoji(txt):
+                    _dress(m, look_label)       # numbers and labels: the client's label box
+                    m["words"] = {"start_time": [], "end_time": [], "text": []}
+                    if label_scale:
+                        s["clip"]["scale"] = copy.deepcopy(label_scale)
+                    changed["testi"] += 1
+                new.append(s)
+        t["segments"] = new
+        if any(_text_of(_materials_index(D), s)[0] is not None for s in new):
+            t["flag"] = 1
+
+    # titles inside the compound clips: the client's title look (in the timeline and in subdraft/)
+    def dress_draft(dd: dict) -> int:
+        n = 0
+        for m in dd.get("materials", {}).get("texts", []):
+            if look_title is not None and not _is_emoji(_shown_text(m)):
+                _dress(m, look_title)
+                n += 1
+        for sub in dd.get("materials", {}).get("drafts", []):
+            if isinstance(sub.get("draft"), dict):
+                n += dress_draft(sub["draft"])
+        return n
+    for d in M.get("drafts", []):
+        if isinstance(d.get("draft"), dict):
+            changed["testi"] += dress_draft(d["draft"])
+            f = tmp / d.get("draft_file_path", "").split("##/")[-1]
+            if f.is_file():
+                try:
+                    sub = json.load(open(f))
+                    dress_draft(sub)
+                    json.dump(sub, open(f, "w"), ensure_ascii=False)
+                except (ValueError, OSError):
+                    pass
+
+    # the client's colour look and music for the whole length
+    total = D["duration"]
+    D["tracks"] = [t for t in D["tracks"] if t["type"] not in ("filter", "adjust", "effect")]
+    at = 1
+    for s in looks[:1] + [x for x in looks[1:] if six[x["material_id"]][1].get("name") != six[looks[0]["material_id"]][1].get("name")]:
+        D["tracks"].insert(at, {"id": nid(), "type": "filter" if six[s["material_id"]][0] == "effects" else "adjust",
+                                "flag": 0, "attribute": 0, "name": "", "is_default_name": True,
+                                "segments": [clone_seg(s, 0, total)]})
+        at += 1
+    if music is not None:
+        for t in D["tracks"]:
+            if t["type"] == "audio" and any(ix.get(s["material_id"], ("", {}))[1].get("type") == "music"
+                                            and s["target_timerange"]["duration"] >= 6e6 for s in t["segments"]):
+                t["segments"] = [clone_seg(music, 0, min(total, int(six[music["material_id"]][1].get("duration") or total)))]
+                t["segments"][0]["volume"] = music.get("volume", 0.14)
+                break
+
+    D["id"] = nid()
+    meta = json.load(open(tmp / "draft_meta_info.json"))
+    meta.update(draft_name=template, draft_fold_path=str(dst), draft_root_path=str(CAPCUT_PROJECTS_DIR),
+                draft_id=old_id or nid())
+    for g in meta.get("draft_materials") or []:   # the structure's own imported files: not ours ("Link media")
+        g["value"] = []
+    for f in [tmp / "draft_info.json", tmp / "draft_info.json.bak", tmp / "template.tmp", tmp / "template-2.tmp",
+              *tmp.glob("Timelines/*/draft_info.json")]:
+        if f.exists():
+            json.dump(D, open(f, "w"), ensure_ascii=False)
+    json.dump(meta, open(tmp / "draft_meta_info.json", "w"), ensure_ascii=False)
+    (tmp / "draft_virtual_store.json").unlink(missing_ok=True)
+    if dst.exists():
+        shutil.rmtree(dst)
+    tmp.rename(dst)
+    listed = "" if old_id else " " + _register(dst, template, meta["draft_id"], total)
+    return {"ok": True, "nome": template,
+            "msg": (f"«{template}»: struttura e suoni di «{struttura}», grafica di «{stile}» "
+                    f"({changed['sottotitoli']} sottotitoli col preset, {changed['testi']} testi restilizzati, "
+                    f"filtri e musica del cliente).{listed}")}

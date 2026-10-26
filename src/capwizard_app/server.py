@@ -1004,7 +1004,8 @@ def project_modify(project_id: str, req: ModifyRequest) -> dict:
 
 @app.post("/api/projects/{project_id:path}/as-template")
 def project_as_template(project_id: str) -> dict:
-    """«Usa come template»: the client's template becomes this video without its clips."""
+    """«Usa come template»: the client's template = the reference structure (texts, compound clips, sounds of
+    TEMPLATE SOLUZIONI IMMOBILIARE) dressed with this video's graphics; without the reference, this video emptied of its clips."""
     from capwizard_app import template_maker
     p = _project(project_id)
     if not p or not p.get("result_path") or not Path(p["result_path"]).is_dir():
@@ -1017,7 +1018,10 @@ def project_as_template(project_id: str) -> dict:
     if video == template or video.upper().startswith("TEMPLATE"):
         return {"ok": False, "msg": "Questo progetto è già un template."}
     try:
-        out = template_maker.da_video(video, template)
+        if (CAPCUT_PROJECTS_DIR / template_maker.STRUTTURA / "draft_info.json").exists():
+            out = template_maker.con_stile(video, template)
+        else:
+            out = template_maker.da_video(video, template)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "msg": str(e)}
     if client.get("source") == "vault" and client.get("template") != template:
