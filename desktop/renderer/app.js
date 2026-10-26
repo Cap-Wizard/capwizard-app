@@ -62,7 +62,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   bootBackend();          // sidecar readiness (pills + editing), runs regardless
 
   if (LOCAL_MODE) {
-    showView("editor");   // private use: skip the login/subscription gate
+    showView("dash");     // private use: skip the login/subscription gate
   } else {
     startAuthGate();      // decides the first visible screen
   }
@@ -83,6 +83,8 @@ async function bootBackend() {
         await loadTemplates();
         await loadClients();
         await loadProjects();
+        if (!$("view-dash").hidden) loadBoard();
+        loadAiServices();
         check();
         checkClaude();                      // real request, takes a few seconds
         _booting = false;
@@ -100,11 +102,12 @@ async function bootBackend() {
 // ---------------------------------------------------------------------------
 
 function showView(name) {
-  for (const v of ["view-auth", "view-subscribe", "view-home", "view-editor", "view-scarico"]) {
+  for (const v of ["view-auth", "view-subscribe", "view-dash", "view-home", "view-editor", "view-scarico"]) {
     $(v).hidden = v !== `view-${name}`;
   }
-  const inApp = name === "home" || name === "editor" || name === "scarico";
+  const inApp = name === "home" || name === "editor" || name === "dash" || name === "scarico";
   $("views").hidden = !inApp;
+  $("v-dash").classList.toggle("on", name === "dash");
   $("v-new").classList.toggle("on", name === "editor");
   $("v-proj").classList.toggle("on", name === "home");
   $("v-scarico").classList.toggle("on", name === "scarico");
@@ -116,6 +119,7 @@ function showView(name) {
   $("tb-logout").hidden = !authed;
   if (state.email) $("tb-email").textContent = state.email;
   if (name === "home" && state.backendReady) loadProjects();
+  if (name === "dash" && state.backendReady) loadBoard();
   if (name === "scarico" && state.backendReady) loadScaricoCodes();
 }
 
@@ -397,6 +401,8 @@ function check() {
 function isOn(id) { return $(id).classList.contains("on"); }
 
 function wireEditor() {
+  $("v-dash").onclick = () => showView("dash");
+  wireBoard();
   $("v-new").onclick = () => showView("editor");
   $("v-proj").onclick = () => showView("home");
   $("v-client").onclick = () => openClientModal(null);
@@ -519,6 +525,7 @@ function buildRequest() {
     aggressive_fillers: isOn("sw-aggr"),
     broll_path: $("broll-path").value.trim() || null,
     cine: isOn("sw-cine"),
+    ai_media: isOn("sw-aimedia"),
   };
 }
 
@@ -796,6 +803,29 @@ function renderProjects() {
     box.appendChild(g);
   }
   if (!list.length) box.innerHTML = '<div class="empty">Nessun progetto CapCut su questo Mac</div>';
+  // projects made with the app whose CapCut draft was deleted: offer to clear them out
+  const gone = state.projects.filter((p) => !p.exists);
+  const bar = $("pmissing");
+  bar.hidden = !gone.length;
+  if (gone.length) {
+    bar.innerHTML = `<span>${gone.length} ${gone.length > 1 ? "progetti non sono" : "progetto non è"} più in CapCut</span>
+      <button class="btn-link" id="pm-remove">Rimuovi dall'elenco</button>`;
+    $("pm-remove").onclick = () => removeProjects(gone);
+  }
+}
+
+// Only the app's record goes: the CapCut project is already gone (and is never deleted from here).
+async function removeProjects(ps) {
+  const what = ps.length > 1 ? `questi ${ps.length} progetti` : `«${ps[0].name}»`;
+  if (!confirm(`Togliere ${what} dall'elenco? In CapCut non c'${ps.length > 1 ? "sono" : "è"} più.`)) return;
+  for (const p of ps) {
+    try { await fetch(`${BACKEND}/api/projects/${encodeURIComponent(p.id)}`, { method: "DELETE" }); } catch (_) {}
+  }
+  if (state.currentProject && ps.some((p) => p.id === state.currentProject.id)) {
+    state.currentProject = null;
+    $("pdet").innerHTML = '<div class="empty" style="margin:auto">Scegli un progetto a sinistra per vedere com\'è stato fatto</div>';
+  }
+  await loadProjects();
 }
 
 function badge(p) {
@@ -831,11 +861,13 @@ async function openProject(p) {
       <div style="flex:1;min-width:0"><div class="m">${escapeHtml(p.cliente)} · template «${escapeHtml(s.template || "—")}»</div>
         <h2>${escapeHtml(p.name)}</h2>
         <div class="m">${p.source === "capcut" ? "Ultima modifica in CapCut" : "Montato"} il ${fmtDate(p.created_at)}${mods.length ? ` · ${mods.length} ${mods.length > 1 ? "modifiche" : "modifica"}` : ""}</div>
-        <div class="sum">${escapeHtml(p.riassunto || "")}</div></div>
+        <div class="sum">${escapeHtml(p.riassunto || "")}</div>
+        <div class="pstatus" id="pd-status"></div></div>
       <div class="acts">
         <button class="btn2" id="pd-folder" ${p.exists ? "" : "disabled"}>Apri in Finder</button>
         <button class="btn2" id="pd-report" ${p.report_path ? "" : "disabled"}>Leggi il report</button>
         <button class="btn2" id="pd-again">Rifai con questi dati</button>
+        ${p.exists ? "" : '<button class="btn2 danger" id="pd-remove">Rimuovi dall\'elenco</button>'}
       </div>
     </div>
     <div class="thread" id="thread">${thread || '<div class="empty">Nessuna modifica ancora. Se il video non va, scrivi qui sotto cosa cambiare e allega gli screenshot della chat del cliente: Claude corregge questo progetto e salva la lezione nel profilo del cliente.</div>'}</div>
@@ -850,6 +882,8 @@ async function openProject(p) {
   $("pd-folder").onclick = () => window.api.openPath(p.result_path);
   $("pd-report").onclick = () => window.api.openPath(p.report_path);
   $("pd-again").onclick = () => redoProject(p);
+  if (!p.exists) $("pd-remove").onclick = () => removeProjects([p]);
+  renderProjectStatus(p);
   $("btn-attach").onclick = async () => {
     for (const path of (window.api && await window.api.selectImages()) || []) attach({ path });
   };
@@ -965,6 +999,270 @@ function followChange(jobId, p) {
 }
 
 // Back to "Nuovo video" with the same folder, client and notes.
+// ---------------------------------------------------------------------------
+// Home: where every video stands (da fare → da finire → da revisionare → fatto)
+// ---------------------------------------------------------------------------
+
+const DASH = { items: [], stati: [], todo: null, loaded: false };
+const STATI = [["da_fare", "Da fare"], ["in_lavorazione", "Da finire"], ["da_revisionare", "Da revisionare"], ["fatto", "Fatto"]];
+
+async function loadBoard() {
+  try {
+    const data = await (await fetch(`${BACKEND}/api/board`)).json();
+    DASH.items = data.items || [];
+    DASH.stati = data.stati || [];
+    DASH.loaded = true;
+    renderBoard();
+  } catch (e) { console.error("board", e); $("dash-sub").textContent = "Non riesco a leggere i progetti."; }
+}
+
+function dueInfo(scadenza) {
+  if (!scadenza) return "";
+  const days = Math.round((new Date(scadenza + "T23:59") - new Date()) / 86400000);
+  const label = new Date(scadenza).toLocaleDateString("it-IT", { day: "2-digit", month: "short" });
+  const cls = days < 0 ? "late" : days <= 2 ? "soon" : "";
+  const when = days < 0 ? `scaduto ${label}` : days === 0 ? "oggi" : days === 1 ? "domani" : label;
+  return `<span class="due ${cls}">⏰ ${when}</span>`;
+}
+
+function renderBoard() {
+  const count = (k) => DASH.items.filter((i) => i.stato === k).length;
+  const late = DASH.items.filter((i) => i.stato !== "fatto" && i.scadenza
+    && new Date(i.scadenza + "T23:59") < new Date()).length;
+  const tiles = [
+    ["da_fare", "Da fare", "🗂"], ["in_lavorazione", "Da finire", "✂️"],
+    ["da_revisionare", "Da revisionare", "👀"], ["fatto", "Fatti (30 giorni)", "✅"],
+  ];
+  $("kpis").innerHTML = tiles.map(([k, n, ic]) =>
+    `<div class="kpi k-${k}"><div class="ic">${ic}</div><div><b>${count(k)}</b><span>${n}</span></div></div>`).join("");
+  const open = DASH.items.length - count("fatto");
+  $("dash-sub").textContent = open
+    ? `${open} video in giro${late ? ` · ${late} oltre la scadenza` : ""}. Trascina una scheda per cambiarne lo stato.`
+    : "Tutto in ordine: nessun video in sospeso.";
+
+  const board = $("board");
+  board.innerHTML = "";
+  for (const st of DASH.stati) {
+    const col = document.createElement("section");
+    col.className = `bcol c-${st.id}`;
+    const cards = DASH.items.filter((i) => i.stato === st.id);
+    col.innerHTML = `<h3>${escapeHtml(st.nome)}<small>${cards.length}</small></h3><div class="bcards"></div>`;
+    const box = col.querySelector(".bcards");
+    for (const it of cards) box.appendChild(boardCard(it));
+    if (!cards.length) box.innerHTML = `<div class="bempty">${st.id === "da_fare"
+      ? "Aggiungi i video da fare con «＋ Video da fare»" : "Trascina qui una scheda"}</div>`;
+    col.ondragover = (e) => { e.preventDefault(); col.classList.add("over"); };
+    col.ondragleave = () => col.classList.remove("over");
+    col.ondrop = (e) => {
+      e.preventDefault();
+      col.classList.remove("over");
+      const id = e.dataTransfer.getData("text/plain");
+      if (id) setBoardStatus(id, st.id);
+    };
+    board.appendChild(col);
+  }
+}
+
+function boardCard(it) {
+  const card = document.createElement("div");
+  card.className = "bcard" + (it.esiste ? "" : " gone");
+  card.style.setProperty("--c", it.colore || "#6b7180");
+  card.draggable = true;
+  card.ondragstart = (e) => { e.dataTransfer.setData("text/plain", it.id); card.classList.add("drag"); };
+  card.ondragend = () => card.classList.remove("drag");
+  const isTodo = it.tipo === "da_fare";
+  const next = { da_fare: "in_lavorazione", in_lavorazione: "da_revisionare", da_revisionare: "fatto" }[it.stato];
+  const nextName = (DASH.stati.find((s) => s.id === next) || {}).nome;
+  card.innerHTML = `${it.cover ? `<img src="${it.cover}">` : ""}
+    <div class="bbody">
+      <div class="bclient"><i></i>${escapeHtml(it.cliente || "Senza cliente")}</div>
+      <div class="btitle">${escapeHtml(it.titolo)}</div>
+      ${it.note ? `<div class="bnote">${escapeHtml(it.note)}</div>` : ""}
+      <div class="bmeta">${dueInfo(it.scadenza)}${it.esiste ? "" : '<span class="due late">non più in CapCut</span>'}</div>
+      <div class="bacts">
+        ${isTodo ? '<button class="bbtn primary" data-a="monta">Monta</button>' : '<button class="bbtn" data-a="apri">Apri</button>'}
+        ${isTodo || it.todo_id ? '<button class="bbtn" data-a="edit">✎</button>' : ""}
+        ${next ? `<button class="bbtn" data-a="next" title="Sposta in ${escapeHtml(nextName || "")}">→ ${escapeHtml(nextName || "")}</button>` : ""}
+      </div>
+    </div>`;
+  card.querySelectorAll(".bbtn").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const a = b.dataset.a;
+      if (a === "monta") startFromTodo(it);
+      else if (a === "apri") openFromBoard(it);
+      else if (a === "edit") openTodo(it.todo_id ? { ...it, id: it.todo_id, tipo: "da_fare" } : it);
+      else if (a === "next") setBoardStatus(it.id, next);
+    };
+  });
+  card.ondblclick = () => (isTodo ? openTodo(it) : openFromBoard(it));
+  return card;
+}
+
+async function setBoardStatus(id, stato) {
+  const it = DASH.items.find((i) => i.id === id);
+  if (!it || it.stato === stato) return;
+  it.stato = stato;
+  renderBoard();
+  try {
+    await fetch(`${BACKEND}/api/board/status`, { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, stato }) });
+  } catch (_) { loadBoard(); }
+}
+
+function openTodo(it) {
+  DASH.todo = it;
+  $("td-title").textContent = it ? "Modifica il video da fare" : "Video da fare";
+  const sel = $("td-client");
+  sel.innerHTML = '<option value="">— nessun cliente —</option>'
+    + state.clients.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.nome)}</option>`).join("");
+  $("td-name").value = it ? it.titolo : "";
+  sel.value = it ? (it.cliente_id || (state.clients.find((c) => c.nome === it.cliente) || {}).id || "") : "";
+  $("td-folder").value = it ? (it.cartella || "") : "";
+  $("td-due").value = it ? (it.scadenza || "") : "";
+  $("td-note").value = it ? (it.note || "") : "";
+  $("td-delete").hidden = !it;
+  $("todo-modal").hidden = false;
+  $("td-name").focus();
+}
+
+async function saveTodo() {
+  const body = { titolo: $("td-name").value.trim(), cliente: $("td-client").value, cartella: $("td-folder").value,
+    scadenza: $("td-due").value, note: $("td-note").value.trim() };
+  if (!body.titolo) { $("td-name").focus(); return; }
+  const it = DASH.todo;
+  const url = it ? `${BACKEND}/api/board/todos/${encodeURIComponent(it.id)}` : `${BACKEND}/api/board/todos`;
+  try {
+    await fetch(url, { method: it ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  } catch (e) { console.error("todo", e); }
+  $("todo-modal").hidden = true;
+  loadBoard();
+}
+
+async function deleteTodo() {
+  const it = DASH.todo;
+  if (!it || !confirm(`Eliminare «${it.titolo}» dai video da fare?`)) return;
+  try { await fetch(`${BACKEND}/api/board/todos/${encodeURIComponent(it.id)}`, { method: "DELETE" }); } catch (_) {}
+  $("todo-modal").hidden = true;
+  loadBoard();
+}
+
+// A to-do becomes a new video: the editor opens with its client, folder and name filled in.
+function startFromTodo(it) {
+  const c = state.clients.find((x) => x.id === it.cliente_id) || state.clients.find((x) => x.nome === it.cliente);
+  showView("editor");
+  chooseClient(c || null);
+  $("name").value = it.titolo;
+  $("name").dataset.auto = "";
+  if (it.note && $("notes")) $("notes").value = it.note;
+  if (it.cartella) setFolder(it.cartella);
+  check();
+}
+
+// the project's column on the Home board, changeable from its page
+async function renderProjectStatus(p) {
+  if (!DASH.loaded) await loadBoard();
+  const box = $("pd-status");
+  if (!box || state.currentProject !== p) return;
+  const cur = (DASH.items.find((i) => i.id === p.id) || {}).stato;
+  box.innerHTML = `<span class="lbl">Stato</span>` + STATI.map(([k, n]) =>
+    `<button class="pst s-${k} ${k === cur ? "on" : ""}" data-k="${k}">${n}</button>`).join("")
+    + (cur ? "" : '<span class="hint">non è in Home</span>');
+  box.querySelectorAll(".pst").forEach((b) => {
+    b.onclick = async () => {
+      const it = DASH.items.find((i) => i.id === p.id);
+      if (it) it.stato = b.dataset.k;
+      else DASH.items.push({ id: p.id, stato: b.dataset.k });
+      renderProjectStatus(p);
+      try {
+        await fetch(`${BACKEND}/api/board/status`, { method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: p.id, stato: b.dataset.k }) });
+      } catch (_) {}
+      loadBoard();
+    };
+  });
+}
+
+async function openFromBoard(it) {
+  showView("home");
+  await loadProjects();
+  const p = state.projects.find((x) => x.id === it.id);
+  if (p) openProject(p);
+}
+
+function wireBoard() {
+  $("dash-add").onclick = () => openTodo(null);
+  $("dash-new").onclick = () => showView("editor");
+  $("td-close").onclick = () => { $("todo-modal").hidden = true; };
+  $("td-save").onclick = saveTodo;
+  $("td-delete").onclick = deleteTodo;
+  $("td-pick").onclick = async () => {
+    const p = window.api && await window.api.selectFolder();
+    if (p) $("td-folder").value = p;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// AI services (MCP servers connected to Claude): which ones Claude may use
+// ---------------------------------------------------------------------------
+
+const AI = { services: [], url: "https://claude.ai/settings/connectors" };
+
+async function loadAiServices(refresh = false) {
+  if (refresh) $("ai-list").innerHTML = '<div class="empty">Controllo i servizi collegati…</div>';
+  try {
+    const data = await (await fetch(`${BACKEND}/api/ai-services${refresh ? "?refresh=true" : ""}`)).json();
+    AI.services = data.services || [];
+    AI.url = data.connettori || AI.url;
+  } catch (e) { console.error("ai-services", e); }
+  renderAiServices();
+}
+
+function renderAiServices() {
+  const active = AI.services.filter((s) => s.attivo).length;
+  const pill = $("btn-ai-services");
+  pill.classList.toggle("ok", active > 0);
+  pill.title = active ? `${active} servizi AI a disposizione di Claude` : "Nessun servizio AI attivo";
+  const list = $("ai-list");
+  if (!AI.services.length) { list.innerHTML = '<div class="empty">Nessun servizio trovato.</div>'; return; }
+  const connected = AI.services.filter((s) => s.stato !== "non collegato");
+  const others = AI.services.filter((s) => s.stato === "non collegato");
+  const row = (s) => `
+    <div class="ai-row ${s.stato === "collegato" ? "on" : ""}">
+      <div class="ai-logo">${escapeHtml(s.nome[0])}</div>
+      <div class="ai-txt"><div class="ai-name">${escapeHtml(s.nome)}
+          <span class="ai-state st-${s.stato.replace(/ /g, "-")}">${escapeHtml(s.stato)}</span></div>
+        <div class="ai-use">${escapeHtml(s.usi)}</div></div>
+      ${s.stato === "collegato"
+        ? `<div class="tgl ${s.attivo ? "on" : ""}" data-key="${escapeHtml(s.key)}" title="Claude può usarlo nei montaggi"></div>`
+        : `<button class="btn2 ai-connect" data-url="${escapeHtml(AI.url)}">Collega</button>`}
+    </div>`;
+  list.innerHTML = connected.map(row).join("")
+    + (others.length ? `<div class="ai-sep">Altri servizi che puoi collegare</div>${others.map(row).join("")}` : "");
+  list.querySelectorAll(".tgl[data-key]").forEach((t) => {
+    t.onclick = async () => {
+      t.classList.toggle("on");
+      const s = AI.services.find((x) => x.key === t.dataset.key);
+      if (s) s.attivo = t.classList.contains("on");
+      renderAiServices();
+      try {
+        await fetch(`${BACKEND}/api/ai-services/${encodeURIComponent(t.dataset.key)}`, { method: "PUT",
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ attivo: s ? s.attivo : false }) });
+      } catch (_) {}
+    };
+  });
+  list.querySelectorAll(".ai-connect").forEach((b) => {
+    b.onclick = () => window.api && window.api.openExternal(b.dataset.url);
+  });
+}
+
+function wireAiServices() {
+  $("btn-ai-services").onclick = () => { $("ai-modal").hidden = false; loadAiServices(); };
+  $("ai-close").onclick = () => { $("ai-modal").hidden = true; };
+  $("ai-refresh").onclick = () => loadAiServices(true);
+  $("ai-connectors").onclick = () => window.api && window.api.openExternal(AI.url);
+}
+
 function redoProject(p) {
   const s = p.settings || {};
   const c = state.clients.find((x) => x.id === s.client);
@@ -1010,6 +1308,7 @@ function md(t) {
 
 function wireWizard() {
   $("btn-config-ai").onclick = openWizard;
+  wireAiServices();
   $("wizard-close").onclick = closeWizard;
   $("wizard-next").onclick = () => gotoStep(state.wizardStep + 1);
   $("wizard-prev").onclick = () => gotoStep(state.wizardStep - 1);
@@ -1127,7 +1426,7 @@ async function routeBySubscription() {
     state.email = me.email;
     if (me.active) {
       cacheActive(true);
-      showView("editor");
+      showView("dash");
     } else {
       cacheActive(false);
       renderSubInfo(me);
@@ -1136,7 +1435,7 @@ async function routeBySubscription() {
   } catch (_) {
     // cloud unreachable — honor the offline grace period
     if (cachedGraceOk()) {
-      showView("editor");
+      showView("dash");
     } else {
       renderSubInfo(null);
       showView("subscribe");

@@ -38,7 +38,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent, scarico, vault
+from capwizard_app import agent, aiservices, board, brain, scarico, vault
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +130,7 @@ class GenerateRequest(BaseModel):
     projects_dir: str | None = None
     broll_path: str | None = None     # b-roll the client gave in another folder
     cine: bool = False                # "video cine": per-clip colour, b-roll on the cuts (vault clients)
+    ai_media: bool = True             # Claude may use the AI services chosen in the app (b-roll, images…)
 
 
 class BatchRequest(GenerateRequest):
@@ -145,7 +146,7 @@ class BatchRequest(GenerateRequest):
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="CapWizard API", version="0.2.0-alpha.1")
+app = FastAPI(title="CapWizard API", version="0.2.0-alpha.2")
 
 # The Electron renderer runs from a file:// or localhost origin; allow all in
 # this local-only server (it binds 127.0.0.1, never exposed to the network).
@@ -272,6 +273,7 @@ def _run_job(job: Job, req: GenerateRequest) -> None:
         job.error = str(e)
         job.status = "error"
         job.log(f"ERRORE: {e}")
+    brain.push_soon(f"Lezioni dal reel «{req.name}»")
 
 
 def _project_subfolders(parent: Path) -> list[Path]:
@@ -383,6 +385,7 @@ def _run_study(job: Job, req: StudyRequest) -> None:
         job.error = str(e)
         job.status = "error"
         job.log(f"ERRORE: {e}")
+    brain.push_soon("Studio di un'agenzia o di un cliente")
 
 
 @app.post("/api/study")
@@ -447,7 +450,9 @@ def client_new(req: NewClientRequest) -> dict:
     """A new client of an agency already in the vault: colour (and font only if the client wants one)."""
     if not vault.enabled():
         return {"ok": False, "msg": "Nessun vault Obsidian trovato."}
-    return vault.crea_cliente(req.agenzia, req.nome, req.colore, req.font, req.note)
+    out = vault.crea_cliente(req.agenzia, req.nome, req.colore, req.font, req.note)
+    brain.push_soon(f"Nuovo cliente {req.nome} ({req.agenzia})")
+    return out
 
 
 @app.get("/api/clients/{client_id:path}/params")
@@ -459,7 +464,25 @@ def client_params(client_id: str) -> dict:
 def client_params_save(client_id: str, req: ClientParams) -> dict:
     if not client_id.startswith(vault.PREFIX):
         return {"ok": False, "msg": "Solo i clienti del vault si modificano da qui: per un profilo skill apri il file."}
-    return vault.salva_cliente(client_id, req.colore, req.font, req.base, req.regola)
+    out = vault.salva_cliente(client_id, req.colore, req.font, req.base, req.regola)
+    brain.push_soon(f"Aggiorna {client_id[len(vault.PREFIX):]}")
+    return out
+
+
+@app.get("/api/brain")
+def brain_status() -> dict:
+    """Where the shared client repo is and how its last sync went."""
+    return brain.status()
+
+
+@app.post("/api/brain/sync")
+def brain_sync() -> dict:
+    """Pull now, link the client skills, then push what's pending."""
+    notes = [brain.pull(), *brain.link_skills()]
+    if brain.vault_dir():
+        vault.VAULT = brain.vault_dir()
+    notes.append(brain.push("Sincronizzazione manuale") or "niente da caricare")
+    return {**brain.status(), "note": notes}
 
 
 @app.get("/api/clients/{client_id:path}/rules")
@@ -824,6 +847,69 @@ def projects_list() -> dict:
     return {"projects": out}
 
 
+# ---------------------------------------------------------------------------
+# Homepage board: where every video stands
+# ---------------------------------------------------------------------------
+
+class BoardStatus(BaseModel):
+    id: str
+    stato: str
+
+
+class TodoRequest(BaseModel):
+    titolo: str | None = None
+    cliente: str | None = None
+    cartella: str | None = None
+    scadenza: str | None = None
+    note: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# AI services Claude can use during a montage (MCP servers connected to Claude)
+# ---------------------------------------------------------------------------
+
+class ServiceToggle(BaseModel):
+    attivo: bool
+
+
+@app.get("/api/ai-services")
+def ai_services(refresh: bool = False) -> dict:
+    return {"services": aiservices.services(refresh), "connettori": aiservices.CONNECTORS_URL}
+
+
+@app.put("/api/ai-services/{key}")
+def ai_service_toggle(key: str, req: ServiceToggle) -> dict:
+    return aiservices.set_active(key, req.attivo)
+
+
+@app.get("/api/board")
+def board_get() -> dict:
+    clients = agent.list_clients()
+    templates = {c["template"] for c in clients if c.get("template")}
+    templates |= {(p.get("settings") or {}).get("template") or "" for p in registry.list_projects()}
+    return board.board(projects_list()["projects"], clients, templates - {"", "—"})
+
+
+@app.put("/api/board/status")
+def board_status(req: BoardStatus) -> dict:
+    return board.set_status(req.id, req.stato)
+
+
+@app.post("/api/board/todos")
+def board_todo_add(req: TodoRequest) -> dict:
+    return board.add_todo(req.model_dump())
+
+
+@app.put("/api/board/todos/{todo_id:path}")
+def board_todo_edit(todo_id: str, req: TodoRequest) -> dict:
+    return board.update_todo(todo_id, req.model_dump())
+
+
+@app.delete("/api/board/todos/{todo_id:path}")
+def board_todo_delete(todo_id: str) -> dict:
+    return board.remove_todo(todo_id)
+
+
 class ModifyRequest(BaseModel):
     testo: str = ""
     immagini: list[str] = []
@@ -860,6 +946,7 @@ def _run_modify(job: Job, project: dict, req: ModifyRequest) -> None:
         job.error = str(e)
         job.status = "error"
         job.log(f"ERRORE: {e}")
+    brain.push_soon(f"Lezione dalla modifica di «{project.get('name', 'progetto')}»")
 
 
 @app.post("/api/projects/{project_id:path}/modify")
@@ -953,6 +1040,13 @@ def run() -> None:
         print(agent.install_editor_skill(Path(args.skill_dir) if args.skill_dir else None), flush=True)
     except OSError as e:
         print(f"skill non installata: {e}", flush=True)
+    # the shared client brain: read the vault from it (decided now, from disk), then in the
+    # background pull it, link its client skills and switch to it if it gained clients
+    chosen = brain.choose_vault(vault.enabled())
+    if chosen:
+        vault.VAULT = chosen
+        print(f"[brain] vault: {chosen}", flush=True)
+    brain.start(on_vault=lambda v: setattr(vault, "VAULT", v), log=lambda m: print(m, flush=True))
 
     import uvicorn
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
