@@ -11,26 +11,32 @@
 <body>
   <header class="topbar">
     <img class="logo" src="logo.png" alt="" />
-    <div class="brand-text">
-      <h1>Cap<span>Wizard</span></h1>
-      <div class="sub">Scegli cliente e clip, Claude monta il video con le tue regole</div>
-    </div>
+    <h1>Cap<span>Wizard</span></h1>
     <nav class="views" id="views">
       <button class="vbtn" id="v-dash">🏠 Home</button>
       <button class="vbtn on" id="v-new">＋ Nuovo video</button>
       <button class="vbtn" id="v-proj">📂 I miei progetti<b id="n-proj">0</b></button>
-      <button class="vbtn" id="v-client" hidden>👥 Nuovo cliente</button>
       <button class="vbtn" id="v-scarico">🗂️ Smistamento clip</button>
     </nav>
-    <div class="pills">
+    <div class="tb-right">
+      <div class="creates" id="creates" hidden>
+        <button class="cbtn" id="v-agency">＋ Nuova agenzia</button>
+        <button class="cbtn" id="v-client">＋ Nuovo template</button>
+      </div>
       <span class="tb-email" id="tb-email" hidden></span>
       <button class="btn-link" id="tb-account" hidden>Gestisci abbonamento</button>
       <button class="btn-link" id="tb-logout" hidden>Esci</button>
-      <div class="pill" id="pill-ffmpeg"><i></i>ffmpeg</div>
-      <div class="pill" id="pill-ai"><i></i>Claude</div>
-      <div class="pill" id="pill-backend"><i></i>backend</div>
-      <button class="pill pill-btn" id="btn-ai-services" title="Servizi AI per b-roll, immagini e video"><i></i>✦ Servizi AI</button>
-      <button class="icon-btn" id="btn-config-ai" title="Collegamento a Claude">⚙</button>
+      <div class="pills">
+        <div class="pill" id="pill-backend"><i></i>backend</div>
+        <button class="pill pill-btn" id="pill-ai" title="Collegamento a Claude"><i></i>Claude</button>
+      </div>
+      <div class="menu-wrap">
+        <button class="icon-btn" id="btn-settings" title="Impostazioni">⚙</button>
+        <div class="menu" id="settings-menu" hidden>
+          <button id="btn-config-ai">Collegamento a Claude</button>
+          <button id="btn-ai-services">✦ Servizi AI <small id="ai-count"></small></button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -328,7 +334,7 @@
   <div id="client-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-head">
-        <h2 id="cm-title">Nuovo cliente</h2>
+        <h2 id="cm-title">Nuovo template</h2>
         <button class="modal-close" id="cm-close">✕</button>
       </div>
       <div class="modal-body">
@@ -369,12 +375,53 @@
         </details>
         <label id="cm-reg-label">Nuova regola <span class="opt">facoltativo</span></label>
         <textarea id="cm-reg" placeholder="es. da ora vuole i sottotitoli più grandi"></textarea>
-        <div class="missing" id="cm-msg" style="text-align:left"></div>
+        <div class="missing" id="cm-err" style="text-align:left"></div>
       </div>
       <div class="modal-foot">
         <button class="btn2" id="cm-cancel">Annulla</button>
         <div class="spacer"></div>
         <button class="btn-primary-sm" id="cm-save">SALVA</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== NUOVA AGENZIA ==================== -->
+  <div id="agency-modal" class="modal-overlay" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h2>Nuova agenzia</h2>
+        <button class="modal-close" id="ag-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" class="ag-name" id="ag-name" placeholder="Nome dell'agenzia" />
+        <p class="ag-intro">Scrivi come si montano i video di questa agenzia. Claude lo segue per tutti i suoi clienti; i campi vuoti restano alle regole generali.</p>
+        <textarea class="ag-who" id="ag-chi" data-campo="chi" placeholder="Chi sono e come lavorano (facoltativo): es. agenzia di Bergamo, mandano il girato su Drive, referente Matteo."></textarea>
+        <h3 class="ag-sec">Come si monta</h3>
+        <div class="ag-grid">
+            <div class="ag-field"><label for="ag-tagli">Tagli</label><textarea id="ag-tagli" data-campo="tagli" placeholder="es. stretti ma umani: via le pause morte, senza mozzare l'inizio delle parole. Dopo il gancio ~0,35 s di reazione."></textarea></div>
+            <div class="ag-field"><label for="ag-titolo">Titolo</label><textarea id="ag-titolo" data-campo="titolo" placeholder="es. sempre uguale: font Jumper, ombra 100-33-0-0, Bounce Left. Riga 1 bianca, riga 2 nel colore del cliente, dietro la testa."></textarea></div>
+            <div class="ag-field"><label for="ag-sottotitoli">Sottotitoli</label><textarea id="ag-sottotitoli" data-campo="sottotitoli" placeholder="es. su tutto il parlato, 1-3 parole per volta, bianchi con la parola chiave nel colore del cliente."></textarea></div>
+            <div class="ag-field"><label for="ag-scritte">Scritte e font</label><textarea id="ag-scritte" data-campo="scritte" placeholder="es. Clostan Bold Italic maiuscolo size 9; eccezioni: Poppins per Hotel Aqua."></textarea></div>
+            <div class="ag-field"><label for="ag-zoom">Zoom</label><textarea id="ag-zoom" data-campo="zoom" placeholder="es. punch-in alternati, scala 1,25-1,35. Mai lo zoom automatico."></textarea></div>
+            <div class="ag-field"><label for="ag-transizioni">Transizioni</label><textarea id="ag-transizioni" data-campo="transizioni" placeholder="es. poche, ~2 Pull in a video."></textarea></div>
+            <div class="ag-field"><label for="ag-suoni">Suoni</label><textarea id="ag-suoni" data-campo="suoni" placeholder="es. tanti ma bassi, 35-40 al minuto; il colpo subito dopo la parola chiave. Niente bong."></textarea></div>
+            <div class="ag-field"><label for="ag-musica">Musica</label><textarea id="ag-musica" data-campo="musica" placeholder="es. funk della libreria CapCut a ~0,02, diversa in ogni video, mai brani commerciali."></textarea></div>
+            <div class="ag-field"><label for="ag-colore">Colore</label><textarea id="ag-colore" data-campo="colore" placeholder="es. livello di regolazione con la LUT su tutto."></textarea></div>
+            <div class="ag-field"><label for="ag-voce">Voce</label><textarea id="ag-voce" data-campo="voce" placeholder="es. isolamento vocale + migliora voce ~25%."></textarea></div>
+            <div class="ag-field"><label for="ag-foto">Foto, b-roll ed effetti</label><textarea id="ag-foto" data-campo="foto" placeholder="es. foto inclinata dietro la persona scontornata, con un suono flash."></textarea></div>
+            <div class="ag-field"><label for="ag-sempre">Regole sempre valide</label><textarea id="ag-sempre" data-campo="sempre" placeholder="es. parolacce con bip e asterischi; leggere le note del file scadenze per ogni video."></textarea></div>
+        </div>
+        <h3 class="ag-sec">Reference</h3>
+        <div class="ag-grid">
+            <div class="ag-field"><label for="ag-ref_ok">Già sul Mac</label><textarea id="ag-ref_ok" data-campo="ref_ok" placeholder="Un progetto CapCut per riga, es. CAMPOBASE 4 v2 (tagli, suoni e titolo modello)"></textarea></div>
+            <div class="ag-field"><label for="ag-ref_mancano">Da recuperare</label><textarea id="ag-ref_mancano" data-campo="ref_mancano" placeholder="Una cosa per riga, es. colori del titolo di CGARAGE: chiederli al cliente"></textarea></div>
+        </div>
+        <div class="missing" id="ag-err" style="text-align:left"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn2" id="ag-cancel">Annulla</button>
+        <div class="spacer"></div>
+        <button class="btn-primary-sm" id="ag-save">Salva agenzia</button>
       </div>
     </div>
   </div>

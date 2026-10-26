@@ -30,34 +30,48 @@ button { font: inherit; border: 0; cursor: pointer; border-radius: 10px; }
 /* ---- header (macOS drag region) ---- */
 .topbar {
   display: flex; align-items: center; gap: 14px; flex: none;
-  padding: 10px 22px 10px 92px;      /* leave room for the traffic lights */
+  padding: 10px 16px 10px 88px;      /* leave room for the traffic lights */
   border-bottom: 1px solid var(--line); background: rgba(11, 12, 16, .6); backdrop-filter: blur(20px);
   -webkit-app-region: drag;
 }
 .topbar button, .topbar .pill { -webkit-app-region: no-drag; }
-.logo { width: 36px; height: 36px; border-radius: 10px; }
-.brand-text { min-width: 0; }
-h1 { font: 700 16px/1.1 -apple-system, "SF Pro Display", sans-serif; letter-spacing: -.02em; }
+.logo { width: 32px; height: 32px; border-radius: 9px; }
+h1 { font: 700 16px/1.1 -apple-system, "SF Pro Display", sans-serif; letter-spacing: -.02em; white-space: nowrap; }
 h1 span { color: var(--accent-hover); }
-.sub { color: var(--mute); font-size: 11.5px; margin-top: 2px; white-space: nowrap; }
-.views { display: flex; gap: 2px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin-left: 22px; }
+.views { display: flex; gap: 2px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin-left: 10px; }
 .vbtn { background: transparent; color: var(--mute); padding: 7px 14px; border-radius: 9px; font-weight: 600; font-size: 12.5px;
   transition: .15s; display: flex; align-items: center; gap: 7px; white-space: nowrap; -webkit-app-region: no-drag; }
 .vbtn:hover { color: var(--text); }
 .vbtn.on { background: var(--panel3); color: var(--text); box-shadow: 0 1px 0 rgba(255, 255, 255, .06) inset, 0 2px 8px rgba(0, 0, 0, .4); }
 .vbtn b { background: var(--panel2); color: var(--mute); border: 1px solid var(--line2); border-radius: 999px; padding: 0 7px; font-size: 10.5px; line-height: 17px; }
 .vbtn.on b { background: var(--text); color: #0b0c10; border-color: transparent; }
-.pills { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+/* right side: what you can create, then whether the app can work, then settings */
+.tb-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.creates { display: flex; gap: 6px; padding-right: 12px; border-right: 1px solid var(--line); }
+.cbtn { background: transparent; color: var(--text); padding: 7px 12px; border-radius: 9px; font-weight: 600; font-size: 12.5px;
+  border: 1px dashed var(--line2); white-space: nowrap; transition: .15s; }
+.cbtn:hover { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
+.pills { display: flex; align-items: center; gap: 6px; }
 .pill { display: flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; background: var(--panel);
   border: 1px solid var(--line); font-size: 11.5px; color: var(--mute); white-space: nowrap; }
 .pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
 .pill.ok i { background: var(--ok); box-shadow: 0 0 0 3px rgba(62, 207, 142, .15); }
 .pill.warn i { background: var(--warn); box-shadow: 0 0 0 3px rgba(245, 166, 35, .15); }
 .pill.err i { background: var(--err); box-shadow: 0 0 0 3px rgba(255, 92, 108, .15); }
+.pill.err { color: var(--text); }
 .icon-btn { background: var(--panel); border: 1px solid var(--line); color: var(--mute); width: 30px; height: 28px; border-radius: 999px; }
 .icon-btn:hover { color: var(--text); border-color: var(--line2); }
+.menu-wrap { position: relative; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 210px; padding: 5px; z-index: 50;
+  background: var(--panel2); border: 1px solid var(--line2); border-radius: 12px; box-shadow: var(--shadow); }
+.menu button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left;
+  padding: 8px 10px; border-radius: 8px; background: transparent; color: var(--text); font-size: 12.5px; }
+.menu button:hover { background: var(--panel3); }
+.menu small { color: var(--ok); font-size: 11px; }
 .tb-email { font-size: 12px; color: var(--mute); }
-@media (max-width: 1320px) { .sub { display: none; } .views { margin-left: 12px; } }
+@media (max-width: 1440px) { .topbar h1 { display: none; } .vbtn { padding: 7px 11px; } .cbtn { padding: 7px 10px; }
+  .tb-right { gap: 8px; } .creates { padding-right: 8px; } }
+@media (max-width: 1180px) { .vbtn, .cbtn { font-size: 12px; padding: 6px 8px; } }
 @media (max-width: 1180px) { .pill { font-size: 0; gap: 0; padding: 7px; } }
 
 .view { flex: 1; min-height: 0; }
@@ -445,3 +459,16 @@ body.projs-view.dragging::after { content: "Rilascia qui gli screenshot della ch
 .sc-group .doubt { font-size: 11.5px; color: var(--warn); margin-top: 3px; }
 .sc-list { font-size: 12px; color: var(--mute); margin-top: 8px; line-height: 1.5; }
 .sc-list b { color: var(--text); }
+
+/* ---- Nuova agenzia: a style sheet the AI reads ---- */
+.modal-wide { width: 860px; }
+.ag-name { font-size: 20px !important; font-weight: 700; padding: 12px 14px !important; letter-spacing: -.01em; }
+.ag-intro { color: var(--mute); font-size: 12.5px; line-height: 1.55; margin: 10px 0 12px; max-width: 70ch; }
+.ag-who { min-height: 54px; }
+.ag-sec { font-size: 13px; font-weight: 650; margin: 22px 0 4px; padding-top: 16px; border-top: 1px solid var(--line); }
+.ag-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+.ag-field textarea { min-height: 74px; font-size: 12.5px; line-height: 1.45; }
+.ag-field textarea:placeholder-shown { background: transparent; }
+.ag-field label { margin-top: 12px; }
+@media (max-width: 760px) { .ag-grid { grid-template-columns: 1fr; } }
+#cm-err.ok, #ag-err.ok { color: var(--ok); }

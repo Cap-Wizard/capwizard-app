@@ -640,5 +640,46 @@ def salva_cliente(client_id: str, col: str = "", font: str = "", base: str = "",
     return {"ok": True, "msg": "Aggiornato: " + "; ".join(cambi)}
 
 
+# What the AI has to know about how an agency edits: field → heading in its "Stile" note.
+AGENZIA_CAMPI = {
+    "tagli": "Tagli", "titolo": "Titolo", "sottotitoli": "Sottotitoli", "scritte": "Scritte e font",
+    "zoom": "Zoom", "transizioni": "Transizioni", "suoni": "Suoni", "musica": "Musica",
+    "colore": "Colore", "voce": "Voce", "foto": "Foto, b-roll ed effetti", "sempre": "Regole sempre valide",
+}
+
+
+def crea_agenzia(nome: str, campi: dict[str, str]) -> dict:
+    """New agency from the app's form: its note in 01 Agenzie, its editing style in 03 Stili, its client folder."""
+    ag = re.sub(r"[/:]", "-", (nome or "").strip().upper())
+    if not ag:
+        return {"ok": False, "msg": "Scrivi il nome dell'agenzia."}
+    if note(ag) or (VAULT / "02 Clienti" / ag).exists():
+        return {"ok": False, "msg": f"{ag} esiste già nel vault."}
+    campi = {k: (v or "").strip() for k, v in campi.items()}
+    if not any(campi.get(k) for k in AGENZIA_CAMPI):
+        return {"ok": False, "msg": "Scrivi almeno una regola di montaggio, così Claude sa come montare per loro."}
+    stile, oggi = ag.title(), time.strftime("%Y-%m-%d")
+
+    def lista(txt: str, segno: str) -> str:
+        return "".join(f"- {segno} {r.strip().lstrip('-•✅❌ ').strip()}\n" for r in txt.splitlines() if r.strip())
+
+    (VAULT / "01 Agenzie").mkdir(parents=True, exist_ok=True)
+    (VAULT / "01 Agenzie" / f"{ag}.md").write_text(
+        f"---\ncssclasses: [agenzia]\ntags: [agenzia]\ncreato: {oggi}\n---\n\n# {ag}\n\n"
+        + (f"{campi['chi']}\n\n" if campi.get("chi") else "")
+        + "## Clienti\n\n"
+        + ("## Reference\n" + lista(campi.get("ref_ok", ""), "✅") + lista(campi.get("ref_mancano", ""), "❌") + "\n"
+           if campi.get("ref_ok") or campi.get("ref_mancano") else "")
+        + f"Stile generale: [[Stile {stile}]]\n")
+    (VAULT / "03 Stili").mkdir(parents=True, exist_ok=True)
+    (VAULT / "03 Stili" / f"Stile {stile}.md").write_text(
+        f"---\ncssclasses: [stile]\ntags: [stile]\nagenzia: \"[[{ag}]]\"\ncreato: {oggi}\n---\n\n# Stile {stile}\n\n"
+        f"Come si montano i video di [[{ag}]] (scritto dall'app il {time.strftime('%d/%m/%Y')}). "
+        "Vale per tutti i suoi clienti; la nota del cliente cambia solo quello che dice lei.\n\n## Come si monta\n"
+        + "".join(f"\n### {titolo}\n{campi[k]}\n" for k, titolo in AGENZIA_CAMPI.items() if campi.get(k)))
+    (VAULT / "02 Clienti" / ag).mkdir(parents=True, exist_ok=True)
+    return {"ok": True, "agenzia": ag, "msg": f"Agenzia {ag} aggiunta: ora puoi crearle i template dei clienti."}
+
+
 def agenzie() -> list[str]:
     return sorted(os.path.basename(p) for p in glob.glob(str(VAULT) + "/02 Clienti/*") if os.path.isdir(p)) if enabled() else []

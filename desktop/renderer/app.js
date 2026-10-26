@@ -148,7 +148,7 @@ async function checkClaude() {
     const r = await (await fetch(`${BACKEND}/api/ai/test`, { method: "POST" })).json();
     state.aiReady = !!r.ok;
     setPill("pill-ai", r.ok ? "ok" : "err", r.ok ? "Claude collegato" : "Claude da collegare");
-    if (!r.ok) addLog(`Claude non è collegato: ${r.message}. Premi ⚙ in alto per collegarlo.`, "err");
+    if (!r.ok) addLog(`Claude non è collegato: ${r.message}. Clicca «Claude» in alto per collegarlo.`, "err");
   } catch (_) {
     state.aiReady = false;
     setPill("pill-ai", "err", "Claude da collegare");
@@ -161,7 +161,7 @@ async function loadSystem() {
   try {
     const sys = await (await fetch(`${BACKEND}/api/system`)).json();
     state.ffmpeg = !!sys.ffmpeg;
-    setPill("pill-ffmpeg", sys.ffmpeg ? "ok" : "err", "ffmpeg");
+    if (!sys.ffmpeg) setPill("pill-backend", "warn", "ffmpeg mancante");
   } catch (e) { console.error("system", e); }
 }
 
@@ -197,7 +197,7 @@ async function loadClients() {
     state.clients = data.clients || [];
     state.steps = data.steps || [];
     state.vault = data.vault || state.vault;
-    $("v-client").hidden = !state.vault.enabled;
+    $("creates").hidden = !state.vault.enabled;
   } catch (e) { console.error("clients", e); }
   renderChips();
   renderSteps(0);
@@ -458,7 +458,7 @@ function check() {
   $("missing").textContent = state.running ? "Montaggio in corso…"
     : !state.backendReady ? "Avvio del motore dell'app…"
     : miss.length ? `Manca: ${miss.join(", ")}`
-    : !state.aiReady ? "Collega Claude con ⚙ in alto"
+    : !state.aiReady ? "Collega Claude: clicca «Claude» in alto"
     : "Tutto pronto ✓";
   if (!state.running) {
     $("btn-generate").textContent = state.batch
@@ -474,6 +474,7 @@ function wireEditor() {
   $("v-new").onclick = () => showView("editor");
   $("v-proj").onclick = () => showView("home");
   $("v-client").onclick = () => openClientModal(null);
+  $("v-agency").onclick = openAgencyModal;
   $("v-scarico").onclick = () => showView("scarico");
   wireScarico();
 
@@ -1293,9 +1294,7 @@ async function loadAiServices(refresh = false) {
 
 function renderAiServices() {
   const active = AI.services.filter((s) => s.attivo).length;
-  const pill = $("btn-ai-services");
-  pill.classList.toggle("ok", active > 0);
-  pill.title = active ? `${active} servizi AI a disposizione di Claude` : "Nessun servizio AI attivo";
+  $("ai-count").textContent = active ? `${active} attivi` : "";
   const list = $("ai-list");
   if (!AI.services.length) { list.innerHTML = '<div class="empty">Nessun servizio trovato.</div>'; return; }
   const connected = AI.services.filter((s) => s.stato !== "non collegato");
@@ -1330,7 +1329,7 @@ function renderAiServices() {
 }
 
 function wireAiServices() {
-  $("btn-ai-services").onclick = () => { $("ai-modal").hidden = false; loadAiServices(); };
+  $("btn-ai-services").onclick = () => { $("settings-menu").hidden = true; $("ai-modal").hidden = false; loadAiServices(); };
   $("ai-close").onclick = () => { $("ai-modal").hidden = true; };
   $("ai-refresh").onclick = () => loadAiServices(true);
   $("ai-connectors").onclick = () => window.api && window.api.openExternal(AI.url);
@@ -1380,7 +1379,10 @@ function md(t) {
 
 
 function wireWizard() {
-  $("btn-config-ai").onclick = openWizard;
+  $("btn-config-ai").onclick = () => { $("settings-menu").hidden = true; openWizard(); };
+  $("pill-ai").onclick = openWizard;
+  $("btn-settings").onclick = (e) => { e.stopPropagation(); $("settings-menu").hidden = !$("settings-menu").hidden; };
+  document.addEventListener("click", (e) => { if (!e.target.closest(".menu-wrap")) $("settings-menu").hidden = true; });
   wireAiServices();
   $("wizard-close").onclick = closeWizard;
   $("wizard-next").onclick = () => gotoStep(state.wizardStep + 1);
@@ -1645,6 +1647,8 @@ function wireClientModal() {
     if (/^#[0-9a-f]{6}$/i.test(v)) $("cm-pick").value = v.toLowerCase();
   };
   $("cm-save").onclick = saveClientModal;
+  $("ag-close").onclick = $("ag-cancel").onclick = closeAgencyModal;
+  $("ag-save").onclick = saveAgency;
 }
 
 async function addStudyShot(body) {
@@ -1705,11 +1709,12 @@ async function openClientModal(c) {
   $("cm-study").open = false;
   renderStudy();
   document.body.classList.add("modal-open");
-  $("cm-title").textContent = c ? `✏️ ${c.nome}` : "Nuovo cliente";
+  $("cm-title").textContent = c ? `✏️ ${c.nome}` : "Nuovo template";
   $("cm-new").hidden = !!c;
   $("cm-edit-only").hidden = !c;
   $("cm-reg-label").hidden = $("cm-reg").hidden = !c;
-  $("cm-msg").textContent = "";
+  $("cm-err").textContent = "";
+  $("cm-err").classList.remove("ok");
   ["cm-name", "cm-col", "cm-font", "cm-reg"].forEach((i) => { $(i).value = ""; });
   $("cm-now").textContent = "";
   if (!c) {
@@ -1748,7 +1753,7 @@ async function saveClientModal() {
                                regola: $("cm-reg").value.trim() }) })).json();
     }
   } catch (e) { r = { ok: false, msg: String(e) }; }
-  if (!r.ok) { $("cm-msg").textContent = "⚠️ " + r.msg; return; }
+  if (!r.ok) { $("cm-err").textContent = "⚠️ " + r.msg; return; }
   $("client-modal").hidden = true;
   const id = c ? c.id : r.id;
   await loadClients();
@@ -1757,10 +1762,45 @@ async function saveClientModal() {
   addLog("✏️ " + r.msg, "ok");
 }
 
+function openAgencyModal() {
+  for (const t of $("agency-modal").querySelectorAll("[data-campo], #ag-name")) t.value = "";
+  $("ag-err").textContent = "";
+  $("ag-save").disabled = false;
+  document.body.classList.add("modal-open");
+  $("agency-modal").hidden = false;
+  $("ag-name").focus();
+}
+
+function closeAgencyModal() {
+  $("agency-modal").hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+async function saveAgency() {
+  const campi = {};
+  for (const t of $("agency-modal").querySelectorAll("[data-campo]")) campi[t.dataset.campo] = t.value;
+  $("ag-save").disabled = true;
+  let r;
+  try {
+    r = await (await fetch(`${BACKEND}/api/agencies`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome: $("ag-name").value, campi }) })).json();
+  } catch (e) { r = { ok: false, msg: String(e) }; }
+  $("ag-save").disabled = false;
+  if (!r.ok) { $("ag-err").textContent = "⚠️ " + r.msg; return; }
+  closeAgencyModal();
+  await loadClients();
+  // the natural next step: the first client template of the new agency
+  await openClientModal(null);
+  $("cm-ag").value = r.agenzia;
+  updateStudyUI();
+  $("cm-err").textContent = "✓ " + r.msg;
+  $("cm-err").classList.add("ok");
+}
+
 async function startStudy(col) {
   const nuova = $("cm-ag").value === "__new";
   const ag = (nuova ? $("cm-ag-new").value : $("cm-ag").value).trim().toUpperCase();
-  if (!ag) { $("cm-msg").focus(); $("cm-save").textContent = "Scrivi il nome dell'agenzia"; return; }
+  if (!ag) { $("cm-ag-new").focus(); $("cm-err").textContent = "Scrivi il nome dell'agenzia."; return; }
   const body = { agenzia: ag, cliente: $("cm-name").value.trim(), colore: col.toUpperCase(), font: $("cm-font").value.trim(),
                  video: state.study.video, link: $("cm-links").value, messaggio: $("cm-msg").value,
                  screenshot: state.study.shots.map((a) => a.path), note: $("cm-note").value, ai_model: $("ai-model").value };
@@ -1866,7 +1906,7 @@ function checkScarico() {
   $("sc-dest").textContent = scaricoDest() ? `Le cartelle dei video andranno in: ${scaricoDest()}` : "";
   $("sc-go").disabled = busy || !!miss.length || !state.backendReady || !state.aiReady;
   $("sc-missing").textContent = busy ? "" : miss.length ? `Manca: ${miss.join(", ")}`
-    : !state.aiReady ? "Claude non è collegato: premi ⚙ in alto" : "Analizzo e ti mostro il piano: nessun file viene toccato finché non confermi";
+    : !state.aiReady ? "Claude non è collegato: clicca «Claude» in alto" : "Analizzo e ti mostro il piano: nessun file viene toccato finché non confermi";
   $("sc-exec").disabled = busy || !sc.plan;
 }
 

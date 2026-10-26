@@ -463,6 +463,22 @@ def scarico_esegui(req: ScaricoExecRequest) -> dict:
     return {"job_id": job.id}
 
 
+class NewAgencyRequest(BaseModel):
+    nome: str
+    campi: dict[str, str] = {}
+
+
+@app.post("/api/agencies")
+def agency_new(req: NewAgencyRequest) -> dict:
+    """A new agency and how it edits, so Claude knows it before the first client."""
+    if not vault.enabled():
+        return {"ok": False, "msg": "Nessun vault Obsidian trovato."}
+    out = vault.crea_agenzia(req.nome, req.campi)
+    if out["ok"]:
+        brain.push_soon(f"Nuova agenzia {out['agenzia']}")
+    return out
+
+
 @app.post("/api/clients")
 def client_new(req: NewClientRequest) -> dict:
     """A new client of an agency already in the vault: colour (and font only if the client wants one)."""
