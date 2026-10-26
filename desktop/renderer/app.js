@@ -1205,7 +1205,8 @@ function boardCard(it) {
   const isTodo = it.tipo === "da_fare";
   const next = { da_fare: "in_lavorazione", in_lavorazione: "da_revisionare", da_revisionare: "fatto" }[it.stato];
   const nextName = (DASH.stati.find((s) => s.id === next) || {}).nome;
-  card.innerHTML = `${it.cover ? `<img src="${it.cover}">` : ""}
+  card.innerHTML = `<button class="bx" title="Togli dalla Home (finito). Il progetto in CapCut resta.">✕</button>
+    ${it.cover ? `<img src="${it.cover}">` : ""}
     <div class="bbody">
       <div class="bclient"><i></i>${escapeHtml(it.cliente || "Senza cliente")}</div>
       <div class="btitle">${escapeHtml(it.titolo)}</div>
@@ -1217,6 +1218,10 @@ function boardCard(it) {
         ${next ? `<button class="bbtn" data-a="next" title="Sposta in ${escapeHtml(nextName || "")}">→ ${escapeHtml(nextName || "")}</button>` : ""}
       </div>
     </div>`;
+  card.querySelector(".bx").onclick = (e) => {
+    e.stopPropagation();
+    setBoardStatus(it.id, "tolto");
+  };
   card.querySelectorAll(".bbtn").forEach((b) => {
     b.onclick = (e) => {
       e.stopPropagation();

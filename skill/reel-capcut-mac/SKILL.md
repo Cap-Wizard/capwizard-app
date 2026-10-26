@@ -312,6 +312,11 @@ non contano.
 - **Copertura** (preferita): sopra chi parla, audio del parlato sotto, sulla parola che nomina la
   cosa, 1,5-4s, mai nei primi 2s né sulla call to action, tra due coperture si rivede il volto.
 - **Inserto** a tutto schermo solo se il copione lo chiede, 1-1,2s.
+- **Take unica tagliata più volte:** quando il titolare dice tutto in una sola ripresa, il video
+  è quella take tagliata ogni 2-3 s, e quasi ogni taglio si copre con un b-roll (0,8-2,5 s) su ciò che
+  sta dicendo: il b-roll nasconde il salto e dà ritmo. B-roll a 50p → velocità 0,5.
+- **Ogni b-roll entra con il suo suono** (lo stesso suono breve dei titoletti, es. Mouse click), se lo
+  stile del cliente lo prevede: è ciò che dà il ritmo al video.
 - **B-roll Magnific** quando il girato è solo parlato: `kling-25`, `1080p`, `9:16`, 5s; prompt in
   inglese con ambiente e colori del cliente; negativePrompt «text, logos, watermark, distorted
   faces, extra fingers, dark lighting». 3-5 per video sugli argomenti specifici. Lanciali appena
@@ -341,6 +346,9 @@ mai mentre c'è un titolo o un elenco.
   (📍 + nome) in clip composta vanno riusate allo stesso modo.
 - **Titoletti con box pieno** per i dati da leggere (orari, menù, nome del titolare): mentre ci
   sono prendono il posto del sottotitolo.
+- **Elenco a spunte:** quando chi parla elenca caratteristiche (aperti, a pranzo, orari…), una ✅ per
+  voce in clip composta con animazione (es. Glossy Wipe) che entra quando la voce viene detta, accanto
+  al titoletto della voce.
 - Titoletti (riga piccola + parola grande + emoji) circa ogni 5-6s sulle frasi chiave; misure
   fisse; testo lungo → accorcia, non rimpicciolire.
 - **Elenchi detti a voce sempre a schermo**, una voce quando viene detta; più di 4 voci → due
@@ -352,6 +360,9 @@ mai mentre c'è un titolo o un elenco.
   `scala = scala_sua × car_vecchi / car_nuovi`.
 
 ### 8. Suoni e musica
+**Prima di scegliere i suoni leggi la «Ricetta misurata» dello stile dell'agenzia** (nota «Stile …» del
+vault): ci sono suono, volume e momento esatti presi dai video finiti di Gabriele. Se c'è, vale più
+delle regole qui sotto.
 Title impact + woosh sui titoletti, magic reveal a inizio elenco, pop sulle voci, woosh 0,2s
 prima delle transizioni; **volumi del template** (e quelli corretti da Nicola); almeno 1s tra due
 suoni; musica del template tagliata alla durata.

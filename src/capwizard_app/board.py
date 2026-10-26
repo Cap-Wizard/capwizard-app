@@ -21,7 +21,7 @@ STATUSES = [
     ("da_revisionare", "Da revisionare"),
     ("fatto", "Fatto"),
 ]
-_KEYS = {k for k, _ in STATUSES}
+_KEYS = {k for k, _ in STATUSES} | {"tolto"}   # tolto: finished and taken off the board with its ✕
 _PATH = registry.app_data_dir() / "board.json"
 _LOCK = threading.Lock()
 
@@ -130,7 +130,7 @@ def board(projects: list[dict], clients: list[dict], templates: set[str] = froze
             if not recent or not p.get("exists", True):
                 continue
             own = "da_revisionare" if made_here else "in_lavorazione"
-        if own == "fatto" and now - status.get(p["id"], {}).get("quando", when) > DONE_SHOWN:
+        if own == "tolto" or (own == "fatto" and now - status.get(p["id"], {}).get("quando", when) > DONE_SHOWN):
             continue
         items.append({"id": p["id"], "tipo": "progetto", "titolo": p["name"], "cliente": p.get("cliente", ""),
                       "colore": p.get("colore") or "#6b7180", "cover": p.get("cover", ""), "quando": when,
@@ -138,6 +138,8 @@ def board(projects: list[dict], clients: list[dict], templates: set[str] = froze
                       "esiste": p.get("exists", True), "todo_id": (todo or {}).get("id", "")})
     for t in todos.values():
         own = status.get(t["id"], {}).get("stato") or "da_fare"
+        if own == "tolto":
+            continue
         if own == "fatto" and now - status.get(t["id"], {}).get("quando", t["creato"]) > DONE_SHOWN:
             continue
         client = by_id.get(t["cliente"])
