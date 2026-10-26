@@ -319,9 +319,20 @@ non contano.
 ### 6. Sottotitoli
 Pacchetto del template, stesso maiuscolo e punteggiatura, righe bilanciate ≤ max caratteri,
 mai mentre c'è un titolo o un elenco.
+- **Preset sottotitoli di CapCut** (testo dentro un `text_templates` di tipo subtitle, es.
+  «短文本边框弹出Ⅰ», box colore cliente che salta sulla parola detta): clona wrapper, testo e
+  riferimenti (effetto + animazione) come in `costruisci_draft.caption`, con `words` = tempo vero di
+  ogni parola. Un sottotitolo per gruppo di 2-4 parole: **mai** il karaoke finto fatto con più
+  segmenti uguali con una parola colorata ciascuno.
 
 ### 7. Testi a schermo
 - Titolo d'apertura sempre: dice subito di cosa si parla e cosa lo rende speciale.
+- **Titolo in più clip composte** una dopo l'altra (es. prima il nome dell'attività, poi il gancio
+  con un'emoji per lato), ognuna con la sua animazione di gruppo (Zoom 1, Shake 3…): rifai la
+  stessa sequenza del template con le stesse animazioni e cambia solo le parole. CTA e chiusura
+  (📍 + nome) in clip composta vanno riusate allo stesso modo.
+- **Titoletti con box pieno** per i dati da leggere (orari, menù, nome del titolare): mentre ci
+  sono prendono il posto del sottotitolo.
 - Titoletti (riga piccola + parola grande + emoji) circa ogni 5-6s sulle frasi chiave; misure
   fisse; testo lungo → accorcia, non rimpicciolire.
 - **Elenchi detti a voce sempre a schermo**, una voce quando viene detta; più di 4 voci → due
@@ -336,11 +347,17 @@ mai mentre c'è un titolo o un elenco.
 Title impact + woosh sui titoletti, magic reveal a inizio elenco, pop sulle voci, woosh 0,2s
 prima delle transizioni; **volumi del template** (e quelli corretti da Nicola); almeno 1s tra due
 suoni; musica del template tagliata alla durata.
+**Mappa suoni del template**: ripeti quale suono va su quale momento (entrata del titolo, gancio,
+transizione, titoletto, nome, CTA, chiusura) con gli stessi nomi e volumi; la mappa del cliente o
+dell'agenzia è anche nella nota «Stile …» del vault. I brani della libreria lunghi pochi secondi
+(es. Bell ding) sono effetti, non musica. Musica udibile: circa 15 dB sotto la voce.
 **Musica SEMPRE dalla libreria Musica di CapCut** (Audio > Music: materiale `type: "music"` con
 `music_id` e file nella cache di CapCut). Mai mp3 scaricati (Download, Spotimate, YouTube) né brani
 commerciali. Per cambiarla copia il materiale audio da un altro progetto che usa quel brano della libreria.
 
 ### 9. Zoom e transizioni
+Se il template ha le sue transizioni (es. **Hot Flash**) usa quelle, solo sui cambi forti (fine del
+titolo, prima della CTA), ognuna con il suo woosh; le regole qui sotto valgono quando non ne ha.
 Inquadrature al **100%**: niente zoom alternati tipo 140% (le riprese sono già strette). A fine
 frase zoom 100→115% nell'ultimo secondo + transizione (Bagliore II) + woosh; mai nei primi 2s,
 almeno 2,5s tra due transizioni.

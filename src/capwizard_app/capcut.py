@@ -192,7 +192,7 @@ def _classify_audio(material: dict, seg_seconds: float = 0.0) -> str:
     a 1-second snippet of a 2-minute file is not a music bed.
       * `video_original_sound` is audio detached from a video of the project the
         template was copied from (someone else's voice/ambience) → leftover;
-      * music library tracks, or anything laid for 10 s or more → music;
+      * anything laid for 10 s or more, or a library track laid for 6 s or more → music;
       * the rest are short effects, told apart by name.
     """
     name = (material.get("name") or "").lower()
@@ -200,7 +200,7 @@ def _classify_audio(material: dict, seg_seconds: float = 0.0) -> str:
 
     if typ == "video_original_sound":
         return "leftover"
-    if typ == "music" or seg_seconds >= 10:
+    if seg_seconds >= 10 or (typ == "music" and seg_seconds >= 6):   # a 3 s library "song" (Bell ding) is an effect
         return "music"
     if any(k in name for k in _TRANSITION_HINTS):
         return "transition"
@@ -358,6 +358,31 @@ def _sounds_with_times(info: dict, index: dict) -> list[tuple[float, float, str,
 _LOOK_TRACKS = ("adjust", "filter", "effect")
 
 
+def _combos(info: dict, index: dict) -> list[dict]:
+    """Compound clips on overlay tracks (title, CTA, closing built as a "clip composta"): when, the texts
+    inside, the group animation."""
+    drafts = {d.get("id"): d for d in info.get("materials", {}).get("drafts", []) if isinstance(d, dict)}
+    out = []
+    for tr in info["tracks"]:
+        if tr["type"] != "video" or not tr.get("flag"):
+            continue
+        for s in tr["segments"]:
+            d = next((drafts[r] for r in s.get("extra_material_refs") or [] if r in drafts), None)
+            if not d or not isinstance(d.get("draft"), dict):
+                continue
+            inner = d["draft"]
+            nix = _materials_index(inner)
+            texts = [_shown_text(t).strip() for tr2 in inner.get("tracks", []) if tr2["type"] == "text"
+                     for x in tr2["segments"] for t in [_text_of(nix, x)[1]] if t]
+            anims = [a.get("name") for r in s.get("extra_material_refs") or []
+                     if index.get(r, ("",))[0] == "material_animations"
+                     for a in index[r][1].get("animations") or [] if a.get("name")]
+            tt = s.get("target_timerange") or {}
+            out.append({"start": (tt.get("start", 0) or 0) / 1e6, "duration": _seg_seconds(s),
+                        "texts": [t for t in texts if t], "animation": ", ".join(anims)})
+    return sorted(out, key=lambda c: c["start"])
+
+
 def template_kit(template_name: str, projects_dir: Path = CAPCUT_PROJECTS_DIR) -> dict:
     """Everything reusable a template offers, described for the AI and for the
     app's checklist: text blocks (with the sounds the template starts along
@@ -395,7 +420,7 @@ def template_kit(template_name: str, projects_dir: Path = CAPCUT_PROJECTS_DIR) -
     captions = sum(1 for t in info["tracks"] if t["type"] == "text"
                    for s in t["segments"] if _is_caption_seg(index, s))
     return {
-        "name": template_name, "groups": groups, "captions": captions,
+        "name": template_name, "groups": groups, "captions": captions, "combos": _combos(info, index),
         "sounds": sorted({n for _, _, n, kind in sounds if kind != "musica"}),
         "music": sorted({n for _, _, n, kind in sounds if kind == "musica"}),
         "looks": looks,

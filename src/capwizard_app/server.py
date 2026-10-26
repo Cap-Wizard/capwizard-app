@@ -241,6 +241,9 @@ def template_kit_summary(name: str, projects_dir: str | None = None) -> dict:
 
     groups = kit["groups"]
     title = groups[0] if groups and groups[0]["start"] < 1.0 else None
+    combo_title = next((c for c in kit.get("combos", []) if c["start"] < 1.0), None)
+    if not title and combo_title:        # title built as compound clips (one or more, back to back)
+        title = {"slots": [{"text": t} for c in kit["combos"] if c["start"] < 4.0 for t in c["texts"]]}
     rest = [g for g in groups if g is not title]
     lists = [g for g in rest if len({round(s["after"], 1) for s in g["slots"]}) >= 3]
     labels = [g for g in rest if g not in lists]
