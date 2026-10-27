@@ -187,6 +187,16 @@ body.dragging::after { content: "Rilascia qui la cartella delle clip"; position:
 .thumbs { display: flex; gap: 6px; margin-top: 10px; overflow-x: auto; }
 .thumbs:empty { display: none; }
 .thumbs img { height: 84px; border-radius: 9px; border: 1px solid var(--line2); }
+.drop { position: relative; }
+.drop-x { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 8px; border: 1px solid var(--line2);
+  background: var(--panel2); color: var(--mute); font-size: 12px; line-height: 1; display: grid; place-items: center; cursor: pointer; }
+.drop-x:hover { color: var(--text); border-color: var(--err); background: color-mix(in srgb, var(--err) 18%, var(--panel2)); }
+.drop-x[hidden] { display: none; }
+.clip-th { position: relative; flex: none; }
+.clip-th img { display: block; min-width: 47px; height: 84px; background: var(--panel2); }
+.clip-th button { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; border-radius: 50%; border: 0; padding: 0;
+  background: rgba(0, 0, 0, .7); color: #fff; font-size: 10px; line-height: 18px; text-align: center; cursor: pointer; }
+.clip-th button:hover { background: var(--err); }
 
 .row2 { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .btn2 { background: var(--panel2); border: 1px solid var(--line2); color: var(--text); border-radius: 11px; padding: 0 14px; font-weight: 500; transition: .15s; }

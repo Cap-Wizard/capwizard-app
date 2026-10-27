@@ -132,6 +132,7 @@ class GenerateRequest(BaseModel):
     projects_dir: str | None = None
     broll_path: str | None = None     # b-roll the client gave in another folder
     reference: list[str] = []         # videos to imitate (rhythm, sounds, titles, subtitles)
+    exclude: list[str] = []           # clips taken out with their ✕ in the app: never used
     cine: bool = False                # "video cine": per-clip colour, b-roll on the cuts (vault clients)
     ai_media: bool = True             # Claude may use the AI services chosen in the app (b-roll, images…)
 
@@ -572,7 +573,29 @@ def folder_info(path: str) -> dict:
         lengths = [d or 0.0 for d, _ in info]
         thumbs = list(ex.map(lambda cd: _thumb(cd[0], 160, min(1.0, cd[1] / 2)), list(zip(clips, lengths))[:8]))
     return {"ok": True, "n": len(clips), "durata": round(sum(lengths)), "thumbs": [t for t in thumbs if t],
-            "lenti": sum(1 for _, f in info if vault.is_slowmo(f))}
+            "lenti": sum(1 for _, f in info if vault.is_slowmo(f)),
+            # every clip, so each one can be taken out; the frames after the first 8 come from /api/thumbs
+            "clips": [{"path": str(c), "durata": d, "lento": bool(vault.is_slowmo(f)), "thumb": thumbs[k] if k < len(thumbs) else ""}
+                      for k, (c, (d, f)) in enumerate(zip(clips, ((d or 0.0, f) for d, f in info)))]}
+
+
+class ThumbsRequest(BaseModel):
+    paths: list[str]
+
+
+@app.post("/api/thumbs")
+def thumbs_of(req: ThumbsRequest) -> dict:
+    """Frames of the clips the strip shows after the first 8 (asked a few at a time)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(p: str) -> str:
+        src = Path(p)
+        if not src.is_file():
+            return ""
+        d = vault.probe(p)[0] or 0.0
+        return _thumb(src, 160, min(1.0, d / 2))
+    with ThreadPoolExecutor(6) as ex:
+        return {"thumbs": list(ex.map(one, req.paths[:40]))}
 
 
 @app.post("/api/jobs/{job_id}/stop")

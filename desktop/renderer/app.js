@@ -27,6 +27,8 @@ const state = {
   otherTemplate: false,    // no client, a template picked by hand
   templates: [],           // every CapCut project usable as a template
   refs: [],                // reference videos Claude imitates (as many as wanted)
+  clips: [],               // clips of the chosen folder: {path, durata, lento, thumb}
+  excluded: new Set(),     // clips taken out with their ✕: Claude never uses them
   favTemplates: loadFavTemplates(),   // the ones pinned next to the clients
   steps: [],               // progress steps of an editing run
   jobId: null,
@@ -469,25 +471,70 @@ function renderRefs() {
   $("ref-info").textContent = state.refs.length ? `${state.refs.length} video` : "facoltativo";
 }
 
-async function setFolder(path) {
+let thumbTok = 0;
+async function setFolder(path, exclude = []) {
+  const tok = ++thumbTok;
   $("input-path").value = path;
   $("input-path-label").textContent = path;
-  $("s2-info").textContent = "carico…";
+  $("clips-clear").hidden = !path;
+  $("s2-info").textContent = path ? "carico…" : "";
   $("thumbs").innerHTML = "";
+  state.clips = [];
+  state.excluded = new Set(exclude);
   suggestName();
   check();
+  if (!path) return;
   if (state.batch) previewBatch();
   try {
     const i = await (await fetch(`${BACKEND}/api/folder-info?path=${encodeURIComponent(path)}`)).json();
-    if ($("input-path").value !== path) return;
-    $("s2-info").textContent = i.ok && i.n
-      ? `${i.n} clip · ${Math.floor(i.durata / 60)}:${String(i.durata % 60).padStart(2, "0")} min${i.lenti ? " · 🐢 " + i.lenti + " slow-mo" : ""}` : "nessuna clip trovata";
-    for (const t of i.thumbs || []) {
-      const img = document.createElement("img");
-      img.src = t;
-      $("thumbs").appendChild(img);
+    if (tok !== thumbTok) return;
+    state.clips = (i.clips || []).filter((c) => !state.excluded.has(c.path));
+    if (!i.ok || !i.n) { $("s2-info").textContent = "nessuna clip trovata"; return; }
+    renderClips();
+    // the frames after the first 8, a few at a time so the strip fills while the user looks
+    for (let k = 0; k < state.clips.length && tok === thumbTok; k += 12) {
+      const part = state.clips.slice(k, k + 12).filter((c) => !c.thumb);
+      if (!part.length) continue;
+      const r = await (await fetch(`${BACKEND}/api/thumbs`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                              body: JSON.stringify({ paths: part.map((c) => c.path) }) })).json();
+      if (tok !== thumbTok) return;
+      part.forEach((c, j) => {
+        c.thumb = r.thumbs[j] || "";
+        const img = $("thumbs").querySelector(`[data-path="${CSS.escape(c.path)}"] img`);
+        if (img && c.thumb) img.src = c.thumb;
+      });
     }
-  } catch (_) { $("s2-info").textContent = ""; }
+  } catch (_) { if (tok === thumbTok) $("s2-info").textContent = ""; }
+}
+
+// One frame per clip, each with its ✕; the count above follows what is left.
+function renderClips() {
+  const box = $("thumbs");
+  box.innerHTML = "";
+  for (const c of state.clips) {
+    const d = document.createElement("div");
+    d.className = "clip-th";
+    d.dataset.path = c.path;
+    d.title = c.path.split("/").pop();
+    d.innerHTML = `<img${c.thumb ? ` src="${c.thumb}"` : ""}><button title="Togli questa clip">✕</button>`;
+    d.querySelector("button").onclick = (e) => {
+      e.stopPropagation();
+      state.excluded.add(c.path);
+      state.clips = state.clips.filter((x) => x !== c);
+      if (!state.clips.length) { setFolder(""); return; }
+      d.remove();
+      clipInfo();
+    };
+    box.appendChild(d);
+  }
+  clipInfo();
+}
+
+function clipInfo() {
+  const n = state.clips.length, dur = Math.round(state.clips.reduce((a, c) => a + (c.durata || 0), 0));
+  const lenti = state.clips.filter((c) => c.lento).length, tolte = state.excluded.size;
+  $("s2-info").textContent = `${n} clip · ${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, "0")} min`
+    + (lenti ? ` · 🐢 ${lenti} slow-mo` : "") + (tolte ? ` · ${tolte} ${tolte === 1 ? "tolta" : "tolte"}` : "");
 }
 
 // Name = client + folder, until the user writes their own.
@@ -577,6 +624,7 @@ function wireEditor() {
     const p = window.api && await window.api.selectFolder();
     if (p) setFolder(p);
   };
+  $("clips-clear").onclick = (e) => { e.stopPropagation(); setFolder(""); };
   $("drop-broll").onclick = async () => {
     const p = window.api && await window.api.selectFolder();
     if (p) setBroll(p);
@@ -697,6 +745,7 @@ function buildRequest() {
   const target = $("ai-target").value;
   return {
     input_path: $("input-path").value.trim(),
+    exclude: [...state.excluded],
     name: $("name").value.trim(),
     template: $("template").value || null,
     client: state.client ? state.client.id : null,
@@ -815,7 +864,7 @@ async function addToQueue() {
     if (r.error) { $("missing").textContent = "⚠️ " + r.error; check(); return; }
     addLog(`＋ In coda: ${body.name} · ${state.client ? state.client.nome : body.template}`, "step");
     // ready for the next video of the same client: clear folder, b-roll, name and notes
-    $("input-path").value = ""; $("input-path-label").textContent = ""; $("thumbs").innerHTML = ""; $("s2-info").textContent = "";
+    setFolder("");
     setBroll(""); $("name").value = ""; $("name").dataset.auto = "1"; $("notes").value = "";
   } catch (e) { addLog(`Il motore dell'app non risponde (${e}).`, "err"); }
   check();
@@ -1597,7 +1646,7 @@ function redoProject(p) {
   $("notes").value = s.notes || "";
   $("script-path").value = s.script_path || "";
   $("intro-title").value = s.intro_title || "";
-  if (s.input_path) setFolder(s.input_path);
+  if (s.input_path) setFolder(s.input_path, s.exclude || []);
   check();
 }
 
