@@ -8,8 +8,8 @@
   --line: rgba(255, 255, 255, .07); --line2: rgba(255, 255, 255, .12);
   --text: #e8eaf0; --mute: #9aa0ae; --dim: #6b7180;
   --accent: #8fa2ff; --accent-hover: #a9b7ff; --accent-soft: rgba(143, 162, 255, .13);
-  --accent-hi: #c9d2ff; --on-accent: #070b1f;  /* brand: black + the light blue of the logo */
-  --grad: linear-gradient(120deg, #7d92ff 0%, #8fa2ff 45%, #b9c4ff 100%);
+  --accent-hi: #c9d2ff; --on-accent: #ffffff;  /* brand: black + the light blue of the logo */
+  --grad: linear-gradient(135deg, #9badff 0%, #8597fb 55%, #7588f2 100%);   /* the one brand fill: #8FA2FF, lightly shaded */
   --ok: #3ecf8e; --warn: #f5a623; --err: #ff5c6c;
   --c: #8fa2ff;                       /* colour of the chosen client */
   --r: 18px; --shadow: 0 1px 0 rgba(255, 255, 255, .04) inset, 0 12px 32px rgba(0, 0, 0, .35);
@@ -61,9 +61,9 @@ h1 span { color: var(--accent-hover); }
 .vbtn svg { width: 18px; height: 18px; flex: none; }
 .vbtn span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vbtn:hover { color: var(--text); background: rgba(255, 255, 255, .04); }
-.vbtn.on { background: var(--accent-hi); color: var(--on-accent); box-shadow: 0 6px 18px rgba(143, 162, 255, .22); }
+.vbtn.on { background: var(--grad); color: var(--on-accent); box-shadow: 0 6px 18px rgba(143, 162, 255, .22); }
 .vbtn b { font-size: 11px; font-weight: 650; color: var(--dim); }
-.vbtn.on b { color: #34448f; }
+.vbtn.on b { color: rgba(255, 255, 255, .8); }
 
 .icon-btn { display: grid; place-items: center; background: transparent; color: var(--mute); width: 30px; height: 30px; border-radius: 9px; }
 .icon-btn svg { width: 17px; height: 17px; }
@@ -197,7 +197,7 @@ body.dragging::after { content: "Rilascia qui la cartella delle clip"; position:
 #row-batch { margin-top: 10px; }
 .tgl { flex: none; width: 38px; height: 22px; border-radius: 999px; background: var(--panel3); position: relative; transition: .2s; }
 .tgl::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: .2s; box-shadow: 0 1px 3px rgba(0, 0, 0, .4); }
-.tgl.on { background: var(--accent); } .tgl.on::after { left: 19px; }
+.tgl.on { background: var(--grad); } .tgl.on::after { left: 19px; }
 .adv { margin-top: 12px; color: var(--mute); font-size: 12px; }
 .adv summary { cursor: pointer; }
 
@@ -350,8 +350,8 @@ body.projs-view.dragging::after { content: "Rilascia qui gli screenshot della ch
 .gate-btn { width: 100%; padding: 12px; }
 .gate-error { color: var(--err); font-size: 12.5px; min-height: 16px; }
 .gate-switch { font-size: 12.5px; color: var(--dim); margin-top: 4px; }
-.btn-primary-sm { background: var(--accent); color: var(--on-accent); padding: 10px 16px; font-weight: 600; }
-.btn-primary-sm:hover { background: var(--accent-hover); }
+.btn-primary-sm { background: var(--grad); color: var(--on-accent); padding: 10px 16px; font-weight: 600; }
+.btn-primary-sm:hover { background: var(--grad); filter: brightness(1.06); }
 
 /* ---- modals ---- */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); display: flex; align-items: center; justify-content: center;
@@ -389,7 +389,7 @@ body.projs-view.dragging::after { content: "Rilascia qui gli screenshot della ch
 .guide-steps li { font-size: 13px; color: var(--mute); line-height: 1.5; }
 .guide-steps strong { color: var(--text); }
 
-.spinner { width: 15px; height: 15px; border: 2px solid rgba(7, 11, 31, .25); border-top-color: var(--on-accent); border-radius: 50%;
+.spinner { width: 15px; height: 15px; border: 2px solid rgba(255, 255, 255, .35); border-top-color: var(--on-accent); border-radius: 50%;
   display: inline-block; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -443,7 +443,7 @@ body.projs-view.dragging::after { content: "Rilascia qui gli screenshot della ch
 .bacts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
 .bbtn { font-size: 11px; padding: 4px 9px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--line2); color: var(--text); cursor: pointer; }
 .bbtn:hover { background: var(--panel3); }
-.bbtn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+.bbtn.primary { background: var(--grad); border-color: transparent; color: var(--on-accent); font-weight: 700; }
 @media (max-width: 1100px) { .board, .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* ---- AI services ---- */
@@ -576,12 +576,12 @@ body.dragging.editor-drag::after { display: none; }
 .lib-tabs:empty { display: none; }
 .lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; align-content: start; }
 .lib-card { display: flex; flex-direction: column; gap: 14px; padding: 16px; border-radius: 18px;
-  background: linear-gradient(160deg, color-mix(in srgb, var(--c, var(--accent-hi)) 20%, #101116) 0%, #0c0d10 70%);
-  border: 1px solid color-mix(in srgb, var(--c, var(--accent-hi)) 26%, transparent); transition: border-color .15s, transform .15s; }
-.lib-card:hover { border-color: color-mix(in srgb, var(--c, var(--accent-hi)) 55%, transparent); transform: translateY(-2px); }
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c, var(--accent)) 20%, #101116) 0%, #0c0d10 70%);
+  border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 26%, transparent); transition: border-color .15s, transform .15s; }
+.lib-card:hover { border-color: color-mix(in srgb, var(--c, var(--accent)) 55%, transparent); transform: translateY(-2px); }
 .lc-top { display: flex; align-items: center; gap: 12px; }
 .lc-top i { width: 42px; height: 42px; border-radius: 13px; flex: none; display: grid; place-items: center; font: 800 18px var(--font-display);
-  font-style: normal; color: #0b0c10; background: var(--c, var(--accent-hi)); }
+  font-style: normal; color: #0b0c10; background: var(--c, var(--accent)); }
 .lc-name { min-width: 0; display: flex; flex-direction: column; }
 .lc-name b { font: 700 15.5px/1.2 var(--font-display); letter-spacing: -.01em; overflow-wrap: anywhere; }
 .lc-name span { font-size: 12px; color: var(--mute); margin-top: 2px; }
@@ -602,3 +602,21 @@ body.dragging.editor-drag::after { display: none; }
 .lib-empty { grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--dim); border: 1px dashed var(--line2); border-radius: 18px; }
 .sb-label:has(+ .views2[hidden]) { display: none; }   /* no vault: no archive */
 ::selection { background: rgba(143, 162, 255, .35); color: #fff; }
+
+/* ---- client cards: the actions share the row edge to edge, same width each ---- */
+.lc-acts { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
+.lc-acts .bbtn { width: 100%; padding: 7px 6px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bbtn.primary:hover { background: var(--grad); filter: brightness(1.06); }
+
+/* ---- sidebar wizard: half the size ---- */
+.logo { width: 21px; height: 24px; filter: drop-shadow(0 2px 8px rgba(143, 162, 255, .35)); }
+.sb-brand { gap: 9px; }
+
+/* ---- Home cards: the video thumbnail fills the card's left edge, top to bottom ---- */
+.bcard { align-items: stretch; overflow: hidden; }
+.bcard img { align-self: stretch; width: 54px; height: auto; min-height: 72px; margin: -10px 0 -10px -10px;
+  border-radius: 0; box-shadow: none; object-fit: cover; }
+
+/* white text on the light blue: a hair of shadow keeps it crisp */
+:is(.vbtn.on, .go:not(:disabled), .send:not(:disabled), .btn-primary-sm, .bbtn.primary, .notice .na button.primary) {
+  text-shadow: 0 1px 1px rgba(20, 30, 90, .25); }

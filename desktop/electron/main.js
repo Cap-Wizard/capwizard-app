@@ -142,8 +142,8 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   if (!app.hasSingleInstanceLock()) return;
-  // Unpackaged, the dock would show Electron's own icon.
-  if (process.platform === "darwin" && !app.isPackaged) app.dock.setIcon(APP_ICON);
+  // The Dock caches app icons: set ours at launch so a new icon shows at once, packaged or not.
+  if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   startBackend();
   createWindow();
 
