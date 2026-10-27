@@ -120,7 +120,8 @@ async function waitForBackend(timeoutMs = 60000) {
   return false;
 }
 
-const APP_ICON = path.join(__dirname, "..", "renderer", "logo.png");
+// the official icon with the macOS margin, so the Dock shows it the same size as every other app
+const APP_ICON = path.join(__dirname, "..", "renderer", "dock-icon.png");
 
 function createWindow() {
   mainWindow = new BrowserWindow({
