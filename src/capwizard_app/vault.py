@@ -307,6 +307,7 @@ def brief(job: dict, progetti_cliente: set[str] = frozenset()) -> str:
     cliente = f"{ag} / {cl}"
     stile = job.get("stile") or stile_for(cliente)
     tolte = {os.path.normpath(c) for c in job.get("exclude") or []}
+    br = job.get("broll_path")
     clips = [clip_info(c) for c in videos_in(job["input_path"]) + videos_in(job["input_path"] + "/*") if os.path.normpath(c) not in tolte]
     parts = [f"# Lavoro: {job['name']}", f"- Cliente: **{cliente}** · Stile: **{stile}** · Musica: **{'sì' if job.get('musica', True) else 'no'}**"
              + (" · **🎬 VIDEO CINE**" if job.get("cine") else ""),
@@ -315,16 +316,19 @@ def brief(job: dict, progetti_cliente: set[str] = frozenset()) -> str:
              "Se più clip dicono le stesse cose sono take rifatte da Daniel finché non andava bene: tieni l'ULTIMA take completa "
              "(numero/ora più alti), a meno che sia chiaramente peggiore; mai due take della stessa frase nel video."]
     parts += [clip_line(c) for c in clips] or ["- (nessuna clip direttamente nella cartella: guarda nelle sottocartelle, es. CLIP/)"]
-    if tolte:
+    clip_tolte = sorted(c for c in tolte if not br or not c.startswith(os.path.normpath(br) + os.sep))
+    if clip_tolte:
         parts += ["", "## Clip tolte da Daniel nell'app: NON usarle mai (non sono nemmeno trascritte)"]
-        parts += [f"- {os.path.relpath(c, job['input_path'])}" for c in sorted(tolte)]
-    br = job.get("broll_path")
+        parts += [f"- {os.path.relpath(c, job['input_path'])}" for c in clip_tolte]
     if br and os.path.isdir(br):
         parts += ["", f"## B-roll dati a parte (`{br}`)",
                   "Usali SOLO quando servono (quando si parla di ciò che mostrano, o per coprire un taglio/una pausa), non per forza tutti e non sempre: "
                   "muti, sopra il parlato, 1,5–3 s l'uno, mai sopra titolo e CTA. Quelli a 50p o 100 fps (🐢) sono girati per lo slow motion: "
                   "mettili rallentati (50p → velocità 0,5; 100 fps → 0,3) clonando la velocità da un segmento della base."]
-        parts += [clip_line(clip_info(c), br) for c in videos_in(br, recursive=True)]
+        parts += [clip_line(clip_info(c), br) for c in videos_in(br, recursive=True) if os.path.normpath(c) not in tolte]
+        br_tolti = sorted(c for c in tolte if c.startswith(os.path.normpath(br) + os.sep))
+        if br_tolti:
+            parts += ["B-roll tolti da Daniel nell'app, NON usarli mai: " + ", ".join(os.path.relpath(c, br) for c in br_tolti)]
     if job.get("musica", True):
         parts += sezione_musica(cliente, set(progetti_cliente))
     if job.get("cine"):
