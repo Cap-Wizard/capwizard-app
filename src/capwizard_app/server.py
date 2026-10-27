@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import base64
 import hashlib
+import hmac
 import os
 import platform
 import re
@@ -31,8 +32,9 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from capwizard_app import registry
@@ -129,6 +131,7 @@ class GenerateRequest(BaseModel):
     fmt: str = "vertical"
     projects_dir: str | None = None
     broll_path: str | None = None     # b-roll the client gave in another folder
+    reference: list[str] = []         # videos to imitate (rhythm, sounds, titles, subtitles)
     cine: bool = False                # "video cine": per-clip colour, b-roll on the cuts (vault clients)
     ai_media: bool = True             # Claude may use the AI services chosen in the app (b-roll, images…)
 
@@ -148,12 +151,28 @@ class BatchRequest(GenerateRequest):
 
 app = FastAPI(title="CapWizard API", version="0.2.0-alpha.2")
 
-# The Electron renderer runs from a file:// or localhost origin; allow all in
-# this local-only server (it binds 127.0.0.1, never exposed to the network).
+# Only the CapWizard window may drive this API. 127.0.0.1 alone is not enough: any web page open
+# in a browser on this Mac can call it. Electron hands the backend a random token at launch
+# (CAPWIZARD_TOKEN) and the renderer sends it on every request; a web page can't know it.
+# The renderer loads from file://, whose origin is "null".
+TOKEN = os.environ.get("CAPWIZARD_TOKEN", "")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["null"], allow_methods=["*"], allow_headers=["*"],
 )
+
+
+def _token_ok(given: str | None) -> bool:
+    return not TOKEN or hmac.compare_digest(given or "", TOKEN)
+
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    path = request.url.path
+    if (path.startswith("/api/") and path != "/api/health" and request.method != "OPTIONS"
+            and not _token_ok(request.headers.get("x-capwizard-token"))):
+        return JSONResponse({"detail": "non autorizzato"}, status_code=403)
+    return await call_next(request)
 
 
 @app.get("/api/health")
@@ -223,6 +242,9 @@ def template_kit_summary(name: str, projects_dir: str | None = None) -> dict:
 
     groups = kit["groups"]
     title = groups[0] if groups and groups[0]["start"] < 1.0 else None
+    combo_title = next((c for c in kit.get("combos", []) if c["start"] < 1.0), None)
+    if not title and combo_title:        # title built as compound clips (one or more, back to back)
+        title = {"slots": [{"text": t} for c in kit["combos"] if c["start"] < 4.0 for t in c["texts"]]}
     rest = [g for g in groups if g is not title]
     lists = [g for g in rest if len({round(s["after"], 1) for s in g["slots"]}) >= 3]
     labels = [g for g in rest if g not in lists]
@@ -380,6 +402,8 @@ def _run_study(job: Job, req: StudyRequest) -> None:
     job.status = "running"
     try:
         agent.run_study(job, req.model_dump())
+        if req.cliente.strip():       # the study wrote the client's note: now its CapCut template
+            vault.assicura_template(req.agenzia.strip().upper(), req.cliente.strip().upper(), job.log)
         job.status = "done"
     except Exception as e:  # noqa: BLE001
         job.error = str(e)
@@ -494,6 +518,22 @@ def scarico_esegui(req: ScaricoExecRequest) -> dict:
     job = manager.create()
     threading.Thread(target=_run_scarico, args=(job, scarico.execute, req.model_dump()), daemon=True).start()
     return {"job_id": job.id}
+
+
+class NewAgencyRequest(BaseModel):
+    nome: str
+    campi: dict[str, str] = {}
+
+
+@app.post("/api/agencies")
+def agency_new(req: NewAgencyRequest) -> dict:
+    """A new agency and how it edits, so Claude knows it before the first client."""
+    if not vault.enabled():
+        return {"ok": False, "msg": "Nessun vault Obsidian trovato."}
+    out = vault.crea_agenzia(req.nome, req.campi)
+    if out["ok"]:
+        brain.push_soon(f"Nuova agenzia {out['agenzia']}")
+    return out
 
 
 @app.post("/api/clients")
@@ -1014,6 +1054,36 @@ def project_modify(project_id: str, req: ModifyRequest) -> dict:
     return {"job_id": job.id, "project_id": project["id"]}
 
 
+@app.post("/api/projects/{project_id:path}/as-template")
+def project_as_template(project_id: str) -> dict:
+    """«Usa come template»: the client's template = the reference structure (texts, compound clips, sounds of
+    TEMPLATE SOLUZIONI IMMOBILIARE) dressed with this video's graphics; without the reference, this video emptied of its clips."""
+    from capwizard_app import template_maker
+    p = _project(project_id)
+    if not p or not p.get("result_path") or not Path(p["result_path"]).is_dir():
+        return {"ok": False, "msg": "Il progetto non c'è più tra i progetti CapCut."}
+    video = Path(p["result_path"]).name
+    client = agent.client_for(p.get("settings") or {}) or _guess_client(p["name"], agent.list_clients())
+    if not client:
+        return {"ok": False, "msg": "Non so di quale cliente è questo video: rifallo da «Nuovo video» scegliendo il cliente."}
+    template = client.get("template") or f"TEMPLATE {client['nome'].upper()}"
+    if video == template or video.upper().startswith("TEMPLATE"):
+        return {"ok": False, "msg": "Questo progetto è già un template."}
+    try:
+        if (CAPCUT_PROJECTS_DIR / template_maker.STRUTTURA / "draft_info.json").exists():
+            out = template_maker.con_stile(video, template)
+        else:
+            out = template_maker.da_video(video, template)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "msg": str(e)}
+    if client.get("source") == "vault" and client.get("template") != template:
+        vault.salva_cliente(client["id"], base=template)
+    brain.push_soon(f"Template di {client['nome']} rifatto da {video}")
+    if not vault.capcut_running():
+        vault.open_capcut()              # back on CapCut's home, with the new template in the list
+    return out
+
+
 @app.get("/api/projects/{project_id:path}")
 def project_get(project_id: str) -> dict:
     p = _project(project_id)
@@ -1038,6 +1108,9 @@ def ai_test_endpoint() -> dict:
 
 @app.websocket("/api/ws/jobs/{job_id}")
 async def job_logs(websocket: WebSocket, job_id: str) -> None:
+    if not _token_ok(websocket.query_params.get("t")):   # websockets skip CORS and the http middleware
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     job = manager.get(job_id)
     if not job:

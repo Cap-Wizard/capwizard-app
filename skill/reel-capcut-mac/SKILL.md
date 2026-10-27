@@ -107,6 +107,25 @@ animazione di gruppo), sottotitoli (stile, max caratteri, maiuscolo), suoni e a 
 abbinati, musica, filtri, transizione, **volumi**. Annota testo di esempio, caratteri, scala e
 posizione di ogni testo. I nomi del kit vanno nel config (`kit`, vedi sotto).
 
+**Un template non ha mai clip.** È un insieme di testi, animazioni, preset, filtri, suoni e musica
+da cui prendi stile, font e suoni. Tutti i template hanno **gli stessi pezzi, agli stessi tempi e con gli
+stessi suoni di «TEMPLATE SOLUZIONI IMMOBILIARE»**: sottotitoli, numeri e dati grandi, titoletti e prezzo
+in clip composte con la loro animazione (Zoom 1, Zoom 2…), emoji che entrano (Sway In, Fall Right,
+Bend-Zoom). Cambia solo la **grafica del cliente**: preset dei sottotitoli, box e font di titoli e
+dati, filtri, musica, presi da un video montato per quel cliente (`template_maker.con_stile`, pulsante
+«Usa come template» dell'app). Non mettere mai un video intero dentro un template.
+
+**Template creati dall'app** («TEMPLATE <CLIENTE>», nella nota del cliente «creato dall'app con lo
+schema universale»): hanno sempre la stessa forma, quindi sai già dove sta ogni pezzo.
+- 0,0-3,0 s **titolo**: emoji in alto, riga piccola bianca, riga grande nel colore del cliente.
+- 3,2-5,2 s **titoletto**: una riga nel colore del cliente.
+- 5,4-9,0 s **elenco**: tre voci che entrano a 5,4 / 6,0 / 6,6 s, ultima parola nel colore del cliente.
+- 9,2-13,2 s **sottotitoli**: quattro da 1 s, bianchi con la parola chiave nel colore del cliente.
+- **Musica** per tutta la durata, un **suono** sull'entrata di titolo, titoletto e ogni voce
+  dell'elenco, **filtri/regolazione** per tutta la durata.
+Le parole sono segnaposto: riscrivile sempre. Se Nicola ha modificato il template in CapCut,
+vale quello che trovi (stessi tempi = stesso ruolo). Lo schema è in `src/capwizard_app/template_maker.py`.
+
 ## 4. Decidi il montaggio e scrivi il config
 Applica le «Regole di montaggio». Scrivi `config.json` (formato sotto): spezzoni, pause da
 togliere, transizioni, regia (titoletti, elenchi, coperture), emoji, correzioni dei nomi.
@@ -293,6 +312,11 @@ non contano.
 - **Copertura** (preferita): sopra chi parla, audio del parlato sotto, sulla parola che nomina la
   cosa, 1,5-4s, mai nei primi 2s né sulla call to action, tra due coperture si rivede il volto.
 - **Inserto** a tutto schermo solo se il copione lo chiede, 1-1,2s.
+- **Take unica tagliata più volte:** quando il titolare dice tutto in una sola ripresa, il video
+  è quella take tagliata ogni 2-3 s, e quasi ogni taglio si copre con un b-roll (0,8-2,5 s) su ciò che
+  sta dicendo: il b-roll nasconde il salto e dà ritmo. B-roll a 50p → velocità 0,5.
+- **Ogni b-roll entra con il suo suono** (lo stesso suono breve dei titoletti, es. Mouse click), se lo
+  stile del cliente lo prevede: è ciò che dà il ritmo al video.
 - **B-roll Magnific** quando il girato è solo parlato: `kling-25`, `1080p`, `9:16`, 5s; prompt in
   inglese con ambiente e colori del cliente; negativePrompt «text, logos, watermark, distorted
   faces, extra fingers, dark lighting». 3-5 per video sugli argomenti specifici. Lanciali appena
@@ -308,9 +332,23 @@ non contano.
 ### 6. Sottotitoli
 Pacchetto del template, stesso maiuscolo e punteggiatura, righe bilanciate ≤ max caratteri,
 mai mentre c'è un titolo o un elenco.
+- **Preset sottotitoli di CapCut** (testo dentro un `text_templates` di tipo subtitle, es.
+  «短文本边框弹出Ⅰ», box colore cliente che salta sulla parola detta): clona wrapper, testo e
+  riferimenti (effetto + animazione) come in `costruisci_draft.caption`, con `words` = tempo vero di
+  ogni parola. Un sottotitolo per gruppo di 2-4 parole: **mai** il karaoke finto fatto con più
+  segmenti uguali con una parola colorata ciascuno.
 
 ### 7. Testi a schermo
 - Titolo d'apertura sempre: dice subito di cosa si parla e cosa lo rende speciale.
+- **Titolo in più clip composte** una dopo l'altra (es. prima il nome dell'attività, poi il gancio
+  con un'emoji per lato), ognuna con la sua animazione di gruppo (Zoom 1, Shake 3…): rifai la
+  stessa sequenza del template con le stesse animazioni e cambia solo le parole. CTA e chiusura
+  (📍 + nome) in clip composta vanno riusate allo stesso modo.
+- **Titoletti con box pieno** per i dati da leggere (orari, menù, nome del titolare): mentre ci
+  sono prendono il posto del sottotitolo.
+- **Elenco a spunte:** quando chi parla elenca caratteristiche (aperti, a pranzo, orari…), una ✅ per
+  voce in clip composta con animazione (es. Glossy Wipe) che entra quando la voce viene detta, accanto
+  al titoletto della voce.
 - Titoletti (riga piccola + parola grande + emoji) circa ogni 5-6s sulle frasi chiave; misure
   fisse; testo lungo → accorcia, non rimpicciolire.
 - **Elenchi detti a voce sempre a schermo**, una voce quando viene detta; più di 4 voci → due
@@ -322,11 +360,23 @@ mai mentre c'è un titolo o un elenco.
   `scala = scala_sua × car_vecchi / car_nuovi`.
 
 ### 8. Suoni e musica
+**Prima di scegliere i suoni leggi la «Ricetta misurata» dello stile dell'agenzia** (nota «Stile …» del
+vault): ci sono suono, volume e momento esatti presi dai video finiti di Gabriele. Se c'è, vale più
+delle regole qui sotto.
 Title impact + woosh sui titoletti, magic reveal a inizio elenco, pop sulle voci, woosh 0,2s
 prima delle transizioni; **volumi del template** (e quelli corretti da Nicola); almeno 1s tra due
 suoni; musica del template tagliata alla durata.
+**Mappa suoni del template**: ripeti quale suono va su quale momento (entrata del titolo, gancio,
+transizione, titoletto, nome, CTA, chiusura) con gli stessi nomi e volumi; la mappa del cliente o
+dell'agenzia è anche nella nota «Stile …» del vault. I brani della libreria lunghi pochi secondi
+(es. Bell ding) sono effetti, non musica. Musica udibile: circa 15 dB sotto la voce.
+**Musica SEMPRE dalla libreria Musica di CapCut** (Audio > Music: materiale `type: "music"` con
+`music_id` e file nella cache di CapCut). Mai mp3 scaricati (Download, Spotimate, YouTube) né brani
+commerciali. Per cambiarla copia il materiale audio da un altro progetto che usa quel brano della libreria.
 
 ### 9. Zoom e transizioni
+Se il template ha le sue transizioni (es. **Hot Flash**) usa quelle, solo sui cambi forti (fine del
+titolo, prima della CTA), ognuna con il suo woosh; le regole qui sotto valgono quando non ne ha.
 Inquadrature al **100%**: niente zoom alternati tipo 140% (le riprese sono già strette). A fine
 frase zoom 100→115% nell'ultimo secondo + transizione (Bagliore II) + woosh; mai nei primi 2s,
 almeno 2,5s tra due transizioni.

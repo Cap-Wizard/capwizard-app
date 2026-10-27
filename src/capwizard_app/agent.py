@@ -158,6 +158,27 @@ def client_for(settings: dict) -> dict | None:
         (c for c in list_clients() if settings.get("template") and c["template"] == settings.get("template")), None)
 
 
+def reference_section(paths: list[str], work: Path) -> str:
+    """What Claude must do with the reference videos dropped in «Nuovo video»."""
+    refs = [p for p in paths or [] if Path(p).is_file()]
+    if not refs:
+        return ""
+    ff = vault.ffmpeg() or "ffmpeg"
+    lines = ["", "## Video di riferimento: monta in questo stile",
+             "Prima di decidere il montaggio studia questi video (non sono clip da usare):"]
+    lines += [f"- `{p}`" for p in refs]
+    lines += [
+        f"Come: fotogrammi ogni 0,5 s in un mosaico (`{ff} -i <video> -vf fps=2,scale=270:-1,tile=8x4 "
+        f"\"{work}/ref_<n>_%d.jpg\"`) e guardali con Read; audio con `{ff} -i <video> -ac 1 -ar 22050 \"{work}/ref_<n>.wav\"` "
+        "e trova dove cadono gli effetti (picchi brevi sopra la voce, soprattutto acuti) e quanto è alta la musica rispetto alla voce.",
+        "Prendi dal riferimento: ritmo dei tagli, dove e quanti suoni (ai cambi scena, sui titoletti, sulla CTA), "
+        "transizioni, come entrano titoli e titoletti, lunghezza e posizione dei sottotitoli, b-roll e zoom.",
+        "Restano del cliente: colori, font, preset dei sottotitoli e i suoni della libreria CapCut del template. "
+        "Nel risultato scrivi in una riga cosa hai preso dal riferimento.",
+    ]
+    return "\n".join(lines)
+
+
 def client_rules(client_id: str) -> str:
     """The profile's text, without its frontmatter: what the app shows as the client's rules."""
     c = get_client(client_id)
@@ -308,7 +329,10 @@ def check_request(req) -> str | None:
     if not tdir.is_dir():
         return f"Il template «{req.template}» non c'è tra i progetti CapCut."
     if (tdir / ".locked").exists():
-        return f"Il template «{req.template}» è aperto in CapCut: torna alla home dei progetti e riprova."
+        try:
+            vault.libera(tdir)
+        except RuntimeError as e:
+            return str(e)
     if (CAPCUT_PROJECTS_DIR / req.name).exists():
         return f"Esiste già un progetto CapCut «{req.name}»: scegli un altro nome."
     return None
@@ -336,6 +360,8 @@ def run_agent(job, req) -> tuple[str, str]:
         extra.append("- Togli anche gli intercalari cioè / tipo / diciamo.")
     if getattr(req, "notes", None):
         extra.append(f"- Note di Nicola (vincolanti): {req.notes}")
+    if getattr(req, "reference", None):
+        extra.append(reference_section(req.reference, work))
     prompt = PROMPT.format(
         skill=EDITOR_SKILL, skill_md=skill_md, skill_dir=skill_md.parent,
         client=(f"2. Profilo del cliente **{client['nome']}**: leggi `{client['path']}`. Prevale sulla skill "
@@ -352,6 +378,7 @@ def run_agent(job, req) -> tuple[str, str]:
         dirs.add(str(Path(client["path"]).parent))
     if req.script_path:
         dirs.add(str(Path(req.script_path).parent))
+    dirs.update(str(Path(p).parent) for p in getattr(req, "reference", None) or [] if Path(p).is_file())
     job.log(f"🎬 Avvio Claude Code ({req.ai_model}) con la skill {EDITOR_SKILL}"
             + (f" e il profilo di {client['nome']}" if client else ""))
     job.set_step(1)
@@ -488,8 +515,7 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
         raise RuntimeError("Non trovo Claude Code sul Mac.")
     if not folder.is_dir():
         raise RuntimeError("Il progetto non c'è più tra i progetti CapCut.")
-    if (folder / ".locked").exists():
-        raise RuntimeError("Il progetto è aperto in CapCut: torna alla home dei progetti di CapCut e riprova.")
+    vault.libera(folder, job.log)
     settings = project.get("settings") or {}
     client = client_for(settings)
     if client and client.get("source") == "vault":
@@ -555,6 +581,8 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
     job.log("✓ " + (res.get("riassunto") or "Modifiche fatte.").replace("\n", " "))
     if res.get("lezione"):
         job.log(f"📒 Lezione salvata{' nel profilo di ' + client['nome'] if client else ''}: {res['lezione']}")
+    if not vault.capcut_running():
+        vault.open_capcut()          # back on CapCut's home, the changed project in the list
     return res
 
 
@@ -594,7 +622,7 @@ Procedura:
      lo fa l'app quando installa il progetto (non scrivere a Daniel di premere "Rimuovi sfondo");
    - take ripetute: tieni l'ultima take completa, mai doppioni;
    - b-roll solo quando servono, quelli 🐢 rallentati; se è un VIDEO CINE segui anche la nota "Video cine";
-   - musica DIVERSA dagli ultimi video (lista nel brief).
+   - musica SEMPRE dalla libreria Musica di CapCut (mai mp3 scaricati o brani commerciali), DIVERSA dagli ultimi video (lista nel brief).
 4. NON aprire né chiudere CapCut e NON installare il progetto: lo fa l'app. Alla fine scrivi il file `{result}` con:
    {{"staging": "{staging}", "nome": "{name}", "durata": <secondi>, "riassunto": "<cosa hai fatto, in italiano, 5-8 righe>",
     "da_fare_a_mano": ["<cosa resta da fare in CapCut>", ...]}}
@@ -676,12 +704,16 @@ def run_vault(job, req, client: dict) -> tuple[str, str]:
         brief += f"\n\nTitolo iniziale voluto da Daniel: «{req.intro_title}»"
     if req.ai_target_duration:
         brief += f"\nDurata voluta: {req.ai_target_duration:g} s"
+    brief += reference_section(getattr(req, "reference", None) or [], work)
     prompt = VAULT_PROMPT.format(vault=vault.VAULT, base=base, brief=brief, py=vault.tools_python(), tools=vault.TOOLS,
                                  clips=req.input_path, work=work, ff=vault.ffmpeg() or "ffmpeg", capcut=CAPCUT_PROJECTS_DIR,
                                  staging=staging, result=result, name=req.name)
     dirs = {str(Path(req.input_path)), str(CAPCUT_PROJECTS_DIR), str(work), str(vault.VAULT), str(vault.TOOLS)}
     if getattr(req, "broll_path", None):
         dirs.add(str(Path(req.broll_path)))
+    dirs.update(str(Path(p).parent) for p in getattr(req, "reference", None) or [] if Path(p).is_file())
+    if getattr(req, "reference", None):
+        job.log(f"🎯 Video di riferimento: {', '.join(Path(p).name for p in req.reference)}")
     old_scripts = Path.home() / "Desktop/VIDEO CLAUDE/720 STUDI0"
     if old_scripts.is_dir():
         dirs.add(str(old_scripts))

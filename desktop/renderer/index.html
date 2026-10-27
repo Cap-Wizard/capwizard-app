@@ -7,32 +7,44 @@
   <title>CapWizard</title>
   <link rel="icon" href="logo.png" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="theme-zenus.css" />
 </head>
 <body>
-  <header class="topbar">
-    <img class="logo" src="logo.png" alt="" />
-    <div class="brand-text">
-      <h1>Cap<span>Wizard</span></h1>
-      <div class="sub">Scegli cliente e clip, Claude monta il video con le tue regole</div>
-    </div>
+  <header class="sidebar" id="sidebar">
+    <div class="sb-brand"><img class="logo" src="wizard.svg" alt="" /><h1>Cap<span>Wizard</span></h1></div>
     <nav class="views" id="views">
-      <button class="vbtn" id="v-dash">🏠 Home</button>
-      <button class="vbtn on" id="v-new">＋ Nuovo video</button>
-      <button class="vbtn" id="v-proj">📂 I miei progetti<b id="n-proj">0</b></button>
-      <button class="vbtn" id="v-client" hidden>👥 Nuovo cliente</button>
-      <button class="vbtn" id="v-scarico">🗂️ Smistamento clip</button>
+      <button class="vbtn" id="v-dash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
+      <button class="vbtn on" id="v-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M12 8v8M8 12h8"/></svg><span>Nuovo video</span></button>
+      <button class="vbtn" id="v-proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>I miei progetti</span><b id="n-proj">0</b></button>
+      <button class="vbtn" id="v-scarico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.5"/><rect x="3" y="11" width="18" height="5" rx="1.5"/><path d="M7 20h10"/></svg><span>Smistamento clip</span></button>
     </nav>
-    <div class="pills">
-      <span class="tb-email" id="tb-email" hidden></span>
-      <button class="btn-link" id="tb-account" hidden>Gestisci abbonamento</button>
-      <button class="btn-link" id="tb-logout" hidden>Esci</button>
-      <div class="pill" id="pill-ffmpeg"><i></i>ffmpeg</div>
-      <div class="pill" id="pill-ai"><i></i>Claude</div>
+    <div class="sb-label">Archivio</div>
+    <nav class="views views2" id="creates" hidden>
+      <button class="vbtn" id="v-clients"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.8-3.2 3-5 5.5-5s4.7 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 14.2c2.3.2 4 1.8 4.8 4.8"/></svg><span>Clienti</span><b id="n-clients">0</b></button>
+      <button class="vbtn" id="v-agencies"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V7l8-4 8 4v14"/><path d="M9 21v-5h6v5M8 10h.01M12 10h.01M16 10h.01"/></svg><span>Agenzie</span><b id="n-agencies">0</b></button>
+    </nav>
+    <div class="pills" hidden>
       <div class="pill" id="pill-backend"><i></i>backend</div>
-      <button class="pill pill-btn" id="btn-ai-services" title="Servizi AI per b-roll, immagini e video"><i></i>✦ Servizi AI</button>
-      <button class="icon-btn" id="btn-config-ai" title="Collegamento a Claude">⚙</button>
+      <button class="pill pill-btn" id="pill-ai"><i></i>Claude</button>
     </div>
   </header>
+  <div class="mainbar" id="mainbar">
+    <span class="mb-title" id="mb-title">Home</span>
+    <span class="mb-date" id="mb-date"></span>
+    <div class="mb-right">
+      <span class="tb-email" id="tb-email" hidden></span>
+      <div class="menu-wrap">
+        <button class="icon-btn" id="btn-settings" title="Impostazioni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg></button>
+        <div class="menu" id="settings-menu" hidden>
+          <button id="btn-config-ai">Collegamento a Claude</button>
+          <button id="btn-ai-services">✦ Servizi AI <small id="ai-count"></small></button>
+          <button id="tb-account" hidden>Gestisci abbonamento</button>
+          <button id="tb-logout" hidden>Esci</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notices" id="notices"></aside>
 
   <!-- ==================== LOGIN ==================== -->
   <div id="view-auth" class="view gate-view" hidden>
@@ -68,10 +80,14 @@
     <section class="left">
       <div class="lscroll">
         <div class="step" id="s1">
-          <h2><span class="num">1</span>Per quale cliente?<small id="s1-sel"></small></h2>
+          <h2><span class="num">1</span>Scegli Template<small id="s1-sel" hidden></small>
+            <input type="search" class="hsearch" id="csearch" placeholder="Cerca cliente o template…" autocomplete="off" /></h2>
           <div class="tabs" id="ag-tabs" hidden></div>
-          <input type="text" class="search" id="csearch" placeholder="Cerca cliente…" hidden />
           <div class="chips" id="chips"></div>
+          <div class="tpl-picker" id="tpl-picker" hidden>
+            <input type="text" class="search" id="tpl-search" placeholder="Cerca tra i tuoi progetti CapCut…" />
+            <div class="tpl-list" id="tpl-list"></div>
+          </div>
           <div class="hint" id="client-hint"></div>
           <div id="template-box" hidden>
             <label>Template CapCut</label>
@@ -109,8 +125,14 @@
           <div class="hint" id="batch-preview" hidden></div>
         </div>
 
+        <div class="step" id="sref">
+          <h2><span class="num">3</span>Video di riferimento<small id="ref-info">facoltativo</small></h2>
+          <p class="ref-hint">Video da imitare: Claude ne prende ritmo, suoni, transizioni, titoli e sottotitoli. Colori, font e suoni restano quelli del cliente.</p>
+          <div class="ref-slots" id="ref-slots"></div>
+        </div>
+
         <div class="step" id="s3">
-          <h2><span class="num">3</span>Il progetto CapCut</h2>
+          <h2><span class="num">4</span>Il progetto CapCut</h2>
           <label id="name-label">Nome del nuovo progetto</label>
           <input type="text" id="name" placeholder="es. CLIENTE - Video 1" />
           <label>Copione <span class="opt">facoltativo</span></label>
@@ -123,7 +145,7 @@
         </div>
 
         <div class="step" id="s4">
-          <h2><span class="num">4</span>Extra <small>facoltativo</small></h2>
+          <h2><span class="num">5</span>Extra <small>facoltativo</small></h2>
           <div class="switch" data-sw="sw-transitions"><span>🎬 A fine frase: zoom, transizione e woosh</span><div class="tgl on" id="sw-transitions"></div></div>
           <div class="switch" data-sw="sw-zoom"><span>🔍 Zoom leggeri sulle frasi chiave</span><div class="tgl" id="sw-zoom"></div></div>
           <div class="switch" data-sw="sw-cine"><span>🎬 Video cine <span class="opt">colori clip per clip, b-roll sui tagli</span></span><div class="tgl" id="sw-cine"></div></div>
@@ -160,6 +182,7 @@
       </div>
     </section>
 
+    <div class="gutter" title="Trascina per allargare una delle due parti · doppio clic per tornare com'era"></div>
     <section class="right">
       <div class="card">
         <h3><i></i><span id="rules-title">Regole del cliente</span>
@@ -234,6 +257,7 @@
         <div class="missing" id="sc-missing"></div>
       </div>
     </section>
+    <div class="gutter" title="Trascina per allargare una delle due parti · doppio clic per tornare com'era"></div>
     <section class="right">
       <div class="card" id="sc-plan-card" hidden>
         <h3>Piano <span class="status-tag" id="sc-plan-tag"></span></h3>
@@ -249,6 +273,28 @@
 
   <!-- ==================== I MIEI PROGETTI ==================== -->
   <!-- ==================== HOME: dove sta ogni video ==================== -->
+  <!-- ==================== CLIENTI ==================== -->
+  <div id="view-clients" class="view lib" hidden>
+    <div class="lib-head">
+      <div><h2>Clienti</h2><p class="lib-sub" id="cl-sub"></p></div>
+      <div class="lib-actions">
+        <input type="search" class="hsearch" id="cl-search" placeholder="Cerca cliente, agenzia o template…" autocomplete="off" />
+        <button class="btn-primary-sm" id="v-client">＋ Nuovo template</button>
+      </div>
+    </div>
+    <div class="lib-tabs" id="cl-tabs"></div>
+    <div class="lib-grid" id="cl-grid"></div>
+  </div>
+
+  <!-- ==================== AGENZIE ==================== -->
+  <div id="view-agencies" class="view lib" hidden>
+    <div class="lib-head">
+      <div><h2>Agenzie</h2><p class="lib-sub" id="ag-sub"></p></div>
+      <div class="lib-actions"><button class="btn-primary-sm" id="v-agency">＋ Nuova agenzia</button></div>
+    </div>
+    <div class="lib-grid" id="ag-grid"></div>
+  </div>
+
   <div id="view-dash" class="view dash" hidden>
     <div class="dash-head">
       <div>
@@ -358,7 +404,7 @@
   <div id="client-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-head">
-        <h2 id="cm-title">Nuovo cliente</h2>
+        <h2 id="cm-title">Nuovo template</h2>
         <button class="modal-close" id="cm-close">✕</button>
       </div>
       <div class="modal-body">
@@ -371,7 +417,7 @@
         </div>
         <label>Colore</label>
         <div class="row2 color-row">
-          <input type="color" id="cm-pick" value="#7c6cff" />
+          <input type="color" id="cm-pick" value="#8fa2ff" />
           <input type="text" id="cm-col" placeholder="#RRGGBB" />
         </div>
         <div class="hint" id="cm-now"></div>
@@ -399,12 +445,53 @@
         </details>
         <label id="cm-reg-label">Nuova regola <span class="opt">facoltativo</span></label>
         <textarea id="cm-reg" placeholder="es. da ora vuole i sottotitoli più grandi"></textarea>
-        <div class="missing" id="cm-msg" style="text-align:left"></div>
+        <div class="missing" id="cm-err" style="text-align:left"></div>
       </div>
       <div class="modal-foot">
         <button class="btn2" id="cm-cancel">Annulla</button>
         <div class="spacer"></div>
         <button class="btn-primary-sm" id="cm-save">SALVA</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== NUOVA AGENZIA ==================== -->
+  <div id="agency-modal" class="modal-overlay" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h2>Nuova agenzia</h2>
+        <button class="modal-close" id="ag-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" class="ag-name" id="ag-name" placeholder="Nome dell'agenzia" />
+        <p class="ag-intro">Scrivi come si montano i video di questa agenzia. Claude lo segue per tutti i suoi clienti; i campi vuoti restano alle regole generali.</p>
+        <textarea class="ag-who" id="ag-chi" data-campo="chi" placeholder="Chi sono e come lavorano (facoltativo): es. agenzia di Bergamo, mandano il girato su Drive, referente Matteo."></textarea>
+        <h3 class="ag-sec">Come si monta</h3>
+        <div class="ag-grid">
+            <div class="ag-field"><label for="ag-tagli">Tagli</label><textarea id="ag-tagli" data-campo="tagli" placeholder="es. stretti ma umani: via le pause morte, senza mozzare l'inizio delle parole. Dopo il gancio ~0,35 s di reazione."></textarea></div>
+            <div class="ag-field"><label for="ag-titolo">Titolo</label><textarea id="ag-titolo" data-campo="titolo" placeholder="es. sempre uguale: font Jumper, ombra 100-33-0-0, Bounce Left. Riga 1 bianca, riga 2 nel colore del cliente, dietro la testa."></textarea></div>
+            <div class="ag-field"><label for="ag-sottotitoli">Sottotitoli</label><textarea id="ag-sottotitoli" data-campo="sottotitoli" placeholder="es. su tutto il parlato, 1-3 parole per volta, bianchi con la parola chiave nel colore del cliente."></textarea></div>
+            <div class="ag-field"><label for="ag-scritte">Scritte e font</label><textarea id="ag-scritte" data-campo="scritte" placeholder="es. Clostan Bold Italic maiuscolo size 9; eccezioni: Poppins per Hotel Aqua."></textarea></div>
+            <div class="ag-field"><label for="ag-zoom">Zoom</label><textarea id="ag-zoom" data-campo="zoom" placeholder="es. punch-in alternati, scala 1,25-1,35. Mai lo zoom automatico."></textarea></div>
+            <div class="ag-field"><label for="ag-transizioni">Transizioni</label><textarea id="ag-transizioni" data-campo="transizioni" placeholder="es. poche, ~2 Pull in a video."></textarea></div>
+            <div class="ag-field"><label for="ag-suoni">Suoni</label><textarea id="ag-suoni" data-campo="suoni" placeholder="es. tanti ma bassi, 35-40 al minuto; il colpo subito dopo la parola chiave. Niente bong."></textarea></div>
+            <div class="ag-field"><label for="ag-musica">Musica</label><textarea id="ag-musica" data-campo="musica" placeholder="es. funk della libreria CapCut a ~0,02, diversa in ogni video, mai brani commerciali."></textarea></div>
+            <div class="ag-field"><label for="ag-colore">Colore</label><textarea id="ag-colore" data-campo="colore" placeholder="es. livello di regolazione con la LUT su tutto."></textarea></div>
+            <div class="ag-field"><label for="ag-voce">Voce</label><textarea id="ag-voce" data-campo="voce" placeholder="es. isolamento vocale + migliora voce ~25%."></textarea></div>
+            <div class="ag-field"><label for="ag-foto">Foto, b-roll ed effetti</label><textarea id="ag-foto" data-campo="foto" placeholder="es. foto inclinata dietro la persona scontornata, con un suono flash."></textarea></div>
+            <div class="ag-field"><label for="ag-sempre">Regole sempre valide</label><textarea id="ag-sempre" data-campo="sempre" placeholder="es. parolacce con bip e asterischi; leggere le note del file scadenze per ogni video."></textarea></div>
+        </div>
+        <h3 class="ag-sec">Reference</h3>
+        <div class="ag-grid">
+            <div class="ag-field"><label for="ag-ref_ok">Già sul Mac</label><textarea id="ag-ref_ok" data-campo="ref_ok" placeholder="Un progetto CapCut per riga, es. CAMPOBASE 4 v2 (tagli, suoni e titolo modello)"></textarea></div>
+            <div class="ag-field"><label for="ag-ref_mancano">Da recuperare</label><textarea id="ag-ref_mancano" data-campo="ref_mancano" placeholder="Una cosa per riga, es. colori del titolo di CGARAGE: chiederli al cliente"></textarea></div>
+        </div>
+        <div class="missing" id="ag-err" style="text-align:left"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn2" id="ag-cancel">Annulla</button>
+        <div class="spacer"></div>
+        <button class="btn-primary-sm" id="ag-save">Salva agenzia</button>
       </div>
     </div>
   </div>
@@ -462,8 +549,10 @@
       </div>
       <div class="modal-body">
         <p class="wizard-text">Un template è un normale progetto CapCut che contiene <strong>tutto ciò che per quel
-          cliente usi sempre</strong>. Lo prepari una volta; a ogni video Claude lo studia e lo riusa.
-          Non servono clip video: bastano i pezzi qui sotto, anche con testi di esempio.</p>
+          cliente usi sempre</strong>. Quando aggiungi un cliente con «Nuovo template» l'app lo crea da sola,
+          «TEMPLATE &lt;CLIENTE&gt;», sempre con la stessa forma: titolo, titoletto, elenco, sottotitoli, musica,
+          suoni e colore, con il colore del cliente e lo stile dell'agenzia. Poi lo apri in CapCut e lo ritocchi
+          come vuoi: a ogni video Claude lo rilegge. Se lo vuoi fare a mano, segui questi passi.</p>
         <ol class="guide-steps">
           <li><strong>Crea il progetto</strong> in CapCut e dagli il nome del cliente, per esempio «TEMPLATE MARIO ROSSI».</li>
           <li><strong>Titolo d'apertura.</strong> All'inizio metti i testi del titolo come li vuoi sempre: più righe,
