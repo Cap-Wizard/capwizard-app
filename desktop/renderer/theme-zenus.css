@@ -1,0 +1,144 @@
+/* ==== Zenus: the look of Gabriele's dashboard. Flat anthracite, thin borders, 12/8 px corners,
+   no gradients, shadows or glows; a little violet only on the main actions.
+   Loaded after styles.css: remove its <link> in index.html to go back to the light blue. */
+:root {
+  --bg: #111113; --bg2: #151517; --panel: #18181b; --panel2: #1f1f23; --panel3: #26262b;
+  --line: #27272a; --line2: #34343a;
+  --text: #f4f4f5; --mute: #a1a1aa; --dim: #71717a;
+  --accent: #8b7cf6; --accent-hover: #a99ef9; --accent-soft: rgba(139, 124, 246, .1); --accent-hi: #a99ef9; --on-accent: #ffffff;
+  --grad: #8b7cf6;
+  --ok: #22c55e; --warn: #f97316; --err: #ef4444;
+  --r: 12px; --shadow: none;
+}
+body *, body *::before, body *::after { box-shadow: none !important; text-shadow: none !important; }
+body { background: var(--bg); }
+body::before { display: none; }
+::selection { background: rgba(139, 124, 246, .35); }
+.modal-overlay { backdrop-filter: none; background: rgba(0, 0, 0, .6); }
+
+/* ---- frame ---- */
+.sidebar { background: var(--bg2); border-right: 1px solid var(--line); }
+.mainbar { background: var(--bg); border-bottom: 1px solid var(--line); }
+.mb-title { font-weight: 500; font-size: 14px; }
+.mb-date { font-weight: 400; color: var(--mute); font-size: 12.5px; }
+.logo { filter: none; }
+h1 { font-weight: 600; letter-spacing: -.01em; }
+h1 span { color: var(--text); }
+.sb-brand { padding-bottom: 14px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+.sb-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; color: var(--dim); margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.vbtn { border-radius: 8px; font-weight: 500; color: var(--mute); padding: 8px 10px; }
+.vbtn svg { color: var(--mute); }
+.vbtn:hover { background: var(--panel2); color: var(--text); }
+.vbtn.on { background: var(--panel3); color: var(--text); font-weight: 600; }
+.vbtn.on svg { color: var(--text); }
+.vbtn b, .vbtn.on b { font-weight: 500; color: var(--dim); }
+.icon-btn { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.icon-btn:hover { background: var(--panel2); }
+.menu { background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; }
+.menu button { border-radius: 6px; }
+.menu button:hover { background: var(--panel2); }
+
+/* ---- surfaces: flat panels with a thin border ---- */
+.step, .card, .phead, .composer, .kpi, .gate-card, .ai-row, .pcard, .qitem, .kit-panel, .tpl-picker, .status-block, .notice {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.modal { background: var(--panel); border: 1px solid var(--line2); border-radius: 12px; }
+.left, .plist { background: var(--bg); }
+.lfoot { background: var(--bg); border-top: 1px solid var(--line); }
+.plist { border-right: 1px solid var(--line); }
+.step h2 { font-weight: 600; }
+.num { background: var(--panel2); border: 1px solid var(--line2); border-radius: 6px; }
+.step.done { border-color: var(--line); }
+.card h3 { color: var(--mute); font-weight: 600; }
+.card h3 i, .rules h4::before { background: var(--dim); }
+.pcard:hover { background: var(--panel); border-color: var(--line2); }
+.pcard.on { background: var(--panel2); border-color: var(--line2); }
+.gutter::before { background: var(--line); }
+.gutter::after { background: var(--line2); }
+.gutter:hover::before, body.resizing .gutter::before { background: var(--dim); }
+.gutter:hover::after, body.resizing .gutter::after { background: var(--mute); }
+
+/* ---- buttons: neutral with a border; violet only for the main action ---- */
+.btn2, .bbtn { background: var(--panel); border: 1px solid var(--line2); color: var(--text); border-radius: 8px; font-weight: 500; }
+.btn2:hover, .bbtn:hover { background: var(--panel2); border-color: var(--line2); }
+.go, .send, .btn-primary-sm, .bbtn.primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 8px; }
+.go:hover:not(:disabled), .send:hover:not(:disabled), .btn-primary-sm:hover, .bbtn.primary:hover {
+  background: #7a6aef; border-color: #7a6aef; filter: none; transform: none; }
+.go { height: 46px; font: 600 13.5px var(--font-ui); letter-spacing: .02em; }
+.go::after { display: none; }
+.go:disabled, .send:disabled { background: var(--panel2); color: var(--dim); border-color: var(--line); }
+.send { font-weight: 600; letter-spacing: .02em; }
+.tgl { background: var(--panel3); }
+.tgl.on { background: var(--accent); }
+.btn-link { color: var(--mute); } .btn-link:hover { color: var(--text); }
+
+/* segmented tabs, like «30 Days · 3 Months · 1 years» */
+.lib-tabs, .tabs { display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.tab { border: 0; border-radius: 7px; background: transparent; color: var(--mute); font-weight: 500; }
+.tab.on { background: var(--panel3); color: var(--text); font-weight: 600; }
+.chip { background: var(--panel); border: 1px solid var(--line2); border-radius: 8px; }
+.chip:hover { background: var(--panel2); border-color: var(--line2); }
+.chip.on { background: var(--panel3); border-color: var(--mute); }
+
+/* ---- fields ---- */
+input[type=text], input[type=password], input[type=date], select, textarea, .step h2 .hsearch, .lib-actions .hsearch {
+  background-color: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--text); }
+input:focus, select:focus, textarea:focus, .step h2 .hsearch:focus, .lib-actions .hsearch:focus { border-color: var(--accent); }
+input::placeholder, textarea::placeholder { color: var(--dim); }
+.composer:focus-within { border-color: var(--line2); }
+.drop, .switch { background: var(--panel); border-color: var(--line2); border-radius: 10px; }
+.drop:hover, body.dragging .drop, .drop.hover { border-color: var(--mute) !important; background: var(--panel2) !important; }
+.drop .path { color: var(--mute); }
+.ref-slot.full { border-color: var(--mute); background: var(--panel2); }
+#console, #sc-console, #mlog, .code-box { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.k-step { color: var(--text); }
+
+/* ---- status tags: tinted fill with a border, like «Received · Pending · Failed» ---- */
+.badge, .due, .qitem .qs, .ai-state { border-radius: 6px; border: 1px solid var(--line2); background: var(--panel2); color: var(--mute); font-weight: 500; }
+.badge.ok, .qitem .qs.ok, .ai-state.st-collegato { background: rgba(34, 197, 94, .1); border-color: rgba(34, 197, 94, .45); color: #4ade80; }
+.badge.run, .qitem .qs.run, .due.soon, .ai-state.st-da-autorizzare { background: rgba(249, 115, 22, .1); border-color: rgba(249, 115, 22, .45); color: #fb923c; }
+.badge.err, .qitem .qs.err, .due.late { background: rgba(239, 68, 68, .1); border-color: rgba(239, 68, 68, .45); color: #f87171; }
+.pst { border-radius: 8px; background: var(--panel); }
+.pst.on { background: var(--panel3); border-color: var(--line2); }
+.ps .bar { background: var(--panel3); }
+.ps.on .bar { background: var(--accent); animation: none; }
+.result-box { background: rgba(34, 197, 94, .06); border-color: rgba(34, 197, 94, .35); }
+
+/* ---- chat ---- */
+.msg { border-radius: 10px; }
+.msg.me { background: var(--panel3); border: 1px solid var(--line2); }
+.msg.ai { background: transparent; border: 1px solid var(--line); }
+
+/* ---- Home: white figures, neutral cards with the client's colour as a small mark ---- */
+.dash-head h2, .lib-head h2 { font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+.kpi { padding: 16px; }
+.kpi b { font-size: 26px; font-weight: 600; color: var(--text); }
+.kpi .ic { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
+.kpi.k-da_revisionare .ic, .kpi.k-fatto .ic, .kpi.k-in_lavorazione .ic { background: var(--panel2); }
+.bcol h3 { color: var(--mute); font-weight: 600; }
+.bcol.c-in_lavorazione h3::before { background: var(--accent); }
+.bcol.over { background: var(--panel); }
+.bempty { border: 1px dashed var(--line2); border-radius: 10px; }
+.bcard, .bcard:hover { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; transform: none; }
+.bcard:hover { border-color: var(--line2); }
+.bclient { color: var(--mute); }
+.bclient i { width: 10px; height: 10px; border-radius: 3px; }
+.bbtn { background: var(--panel2); border: 1px solid var(--line2); }
+.bcard .bx { color: var(--dim); opacity: 1; }
+
+/* ---- Clienti / Agenzie ---- */
+.lib-card, .lib-card:hover { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; transform: none; }
+.lib-card:hover { border-color: var(--line2); }
+.lc-top i { border-radius: 10px; }
+.lc-name b { font-weight: 600; }
+.lib-card dt { font-weight: 500; color: var(--dim); }
+.lib-card dd { font-weight: 500; }
+.ag-clients span { background: var(--panel2); border-color: var(--line2); border-radius: 6px; }
+.lib-empty { border-color: var(--line2); border-radius: 12px; }
+
+/* ---- notices, wizard ---- */
+.notice { border-color: color-mix(in srgb, var(--nc, var(--err)) 40%, var(--line)); }
+.notice .ni { background: var(--panel2); border-radius: 8px; }
+.notice .na button { border-radius: 8px; border: 1px solid var(--line2); background: var(--panel2); }
+.wizard-step.active { background: var(--panel3); }
+.wizard-step.active .step-num { background: var(--accent); border-color: var(--accent); }
+.modal-head, .modal-foot { border-color: var(--line); }
