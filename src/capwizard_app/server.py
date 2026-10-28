@@ -958,6 +958,16 @@ def board_status(req: BoardStatus) -> dict:
     return board.set_status(req.id, req.stato)
 
 
+class BoardOrder(BaseModel):
+    stato: str
+    ids: list[str]
+
+
+@app.put("/api/board/order")
+def board_order(req: BoardOrder) -> dict:
+    return board.set_order(req.stato, req.ids)
+
+
 @app.post("/api/board/todos")
 def board_todo_add(req: TodoRequest) -> dict:
     return board.add_todo(req.model_dump())

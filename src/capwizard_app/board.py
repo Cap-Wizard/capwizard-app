@@ -51,11 +51,30 @@ def _norm(name: str) -> str:
 
 
 def set_status(item_id: str, stato: str) -> dict:
+    """A card changes column; it lands on top of it (its old place in the order is dropped)."""
     if stato not in _KEYS:
         return {"ok": False, "msg": "stato sconosciuto"}
     with _LOCK:
         data = _load()
         data["status"][item_id] = {"stato": stato, "quando": time.time()}
+        _save(data)
+    return {"ok": True}
+
+
+def set_order(stato: str, ids: list[str]) -> dict:
+    """The cards of a column in the order the user arranged them (a card dragged in from another
+    column changes status too). Cards that arrive later, without a place, go on top."""
+    if stato not in _KEYS:
+        return {"ok": False, "msg": "stato sconosciuto"}
+    with _LOCK:
+        data = _load()
+        now = time.time()
+        for n, item_id in enumerate(ids):
+            entry = data["status"].get(item_id) or {}
+            if entry.get("stato") != stato:
+                entry = {"stato": stato, "quando": now}
+            entry["ordine"] = n
+            data["status"][item_id] = entry
         _save(data)
     return {"ok": True}
 
@@ -133,6 +152,7 @@ def board(projects: list[dict], clients: list[dict], templates: set[str] = froze
         if own == "tolto" or (own == "fatto" and now - status.get(p["id"], {}).get("quando", when) > DONE_SHOWN):
             continue
         items.append({"id": p["id"], "tipo": "progetto", "titolo": p["name"], "cliente": p.get("cliente", ""),
+                      "ordine": status.get(p["id"], {}).get("ordine"),
                       "colore": p.get("colore") or "#6b7180", "cover": p.get("cover", ""), "quando": when,
                       "stato": own, "scadenza": (todo or {}).get("scadenza", ""), "note": (todo or {}).get("note", ""),
                       "esiste": p.get("exists", True), "todo_id": (todo or {}).get("id", "")})
@@ -145,8 +165,11 @@ def board(projects: list[dict], clients: list[dict], templates: set[str] = froze
         client = by_id.get(t["cliente"])
         name = client["nome"] if client else t["cliente"]
         items.append({"id": t["id"], "tipo": "da_fare", "titolo": t["titolo"], "cliente": name,
+                      "ordine": status.get(t["id"], {}).get("ordine"),
                       "cliente_id": t["cliente"], "colore": colour.get(name, "#6b7180"), "cover": "",
                       "quando": t["creato"], "stato": own, "scadenza": t["scadenza"], "note": t["note"],
                       "cartella": t["cartella"], "esiste": True})
-    items.sort(key=lambda i: (i["scadenza"] or "9999", -(i["quando"] or 0)))
+    # within a column: cards without a place first (just arrived), then the user's order,
+    # then by deadline and newest
+    items.sort(key=lambda i: (i["ordine"] is not None, i["ordine"] or 0, i["scadenza"] or "9999", -(i["quando"] or 0)))
     return {"stati": [{"id": k, "nome": n} for k, n in STATUSES], "items": items}

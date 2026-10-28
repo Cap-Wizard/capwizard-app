@@ -645,8 +645,10 @@ function wireEditor() {
     document.body.classList.remove("dragging", "editor-drag");
     document.querySelectorAll(".drop").forEach((d) => d.classList.remove("hover"));
   };
+  const isFileDrag = (e) => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files");
   document.addEventListener("dragover", (e) => {
     e.preventDefault();
+    if (!isFileDrag(e)) return;        // a Home card being moved, not files: no veil
     const z = e.target.closest && e.target.closest(".drop");
     dropZone = z ? z.id : null;
     document.querySelectorAll(".drop").forEach((d) => d.classList.toggle("hover", d === z));
@@ -658,6 +660,7 @@ function wireEditor() {
   document.addEventListener("drop", (e) => {
     e.preventDefault();
     endDrag();
+    if (!isFileDrag(e)) return;
     if (!$("view-scarico").hidden) {          // clips of a shooting to sort
       for (const f of e.dataTransfer.files) {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
@@ -1242,7 +1245,7 @@ function followChange(jobId, p) {
 // Home: where every video stands (da fare → da finire → da revisionare → fatto)
 // ---------------------------------------------------------------------------
 
-const DASH = { items: [], stati: [], todo: null, loaded: false };
+const DASH = { items: [], stati: [], todo: null, loaded: false, dragId: null, mark: null };
 const STATI = [["da_fare", "Da fare"], ["in_lavorazione", "Da finire"], ["da_revisionare", "Da revisionare"], ["fatto", "Fatto"]];
 
 // Clienti and Agenzie: the archive sections of the sidebar (counts there, a page each).
@@ -1399,33 +1402,64 @@ function renderBoard() {
     const cards = DASH.items.filter((i) => i.stato === st.id);
     col.innerHTML = `<h3>${escapeHtml(st.nome)}<small>${cards.length}</small></h3><div class="bcards"></div>`;
     const box = col.querySelector(".bcards");
-    for (const it of cards) box.appendChild(boardCard(it));
+    cards.forEach((it, i) => box.appendChild(boardCard(it, i)));
     if (!cards.length) box.innerHTML = `<div class="bempty">${st.id === "da_fare"
       ? "Aggiungi i video da fare con «＋ Video da fare»" : "Trascina qui una scheda"}</div>`;
-    col.ondragover = (e) => { e.preventDefault(); col.classList.add("over"); };
-    col.ondragleave = () => col.classList.remove("over");
+    col.ondragover = (e) => {
+      if (!DASH.dragId) return;
+      e.preventDefault();
+      col.classList.add("over");
+      const { cards: shown, index } = dropIndex(box, e.clientY);
+      const mark = DASH.mark || (DASH.mark = Object.assign(document.createElement("div"), { className: "bins" }));
+      box.insertBefore(mark, shown[index] || null);
+    };
+    col.ondragleave = (e) => {
+      if (col.contains(e.relatedTarget)) return;
+      col.classList.remove("over");
+      if (DASH.mark && DASH.mark.parentNode === box) DASH.mark.remove();
+    };
     col.ondrop = (e) => {
       e.preventDefault();
       col.classList.remove("over");
-      const id = e.dataTransfer.getData("text/plain");
-      if (id) setBoardStatus(id, st.id);
+      const id = DASH.dragId || e.dataTransfer.getData("text/plain");
+      const { index } = dropIndex(box, e.clientY);
+      if (DASH.mark) DASH.mark.remove();
+      if (id) moveCard(id, st.id, index);
     };
     board.appendChild(col);
   }
 }
 
-function boardCard(it) {
+// where in a column a card dropped at height y lands (the dragged card itself doesn't count)
+function dropIndex(box, y) {
+  const cards = [...box.querySelectorAll(".bcard:not(.drag)")];
+  const i = cards.findIndex((c) => { const r = c.getBoundingClientRect(); return y < r.top + r.height / 2; });
+  return { cards, index: i < 0 ? cards.length : i };
+}
+
+function boardCard(it, pos = 0) {
   const card = document.createElement("div");
   card.className = "bcard" + (it.esiste ? "" : " gone");
   card.style.setProperty("--c", it.colore || "#6b7180");
   card.draggable = true;
-  card.ondragstart = (e) => { e.dataTransfer.setData("text/plain", it.id); card.classList.add("drag"); };
-  card.ondragend = () => card.classList.remove("drag");
+  card.ondragstart = (e) => {
+    DASH.dragId = it.id;
+    e.dataTransfer.setData("text/plain", it.id);
+    e.dataTransfer.effectAllowed = "move";
+    card.classList.add("drag");
+  };
+  card.ondragend = () => {
+    DASH.dragId = null;
+    card.classList.remove("drag");
+    if (DASH.mark) DASH.mark.remove();
+    document.querySelectorAll(".bcol.over").forEach((c) => c.classList.remove("over"));
+  };
   const isTodo = it.tipo === "da_fare";
   const next = { da_fare: "in_lavorazione", in_lavorazione: "da_revisionare", da_revisionare: "fatto" }[it.stato];
   const nextName = (DASH.stati.find((s) => s.id === next) || {}).nome;
   card.innerHTML = `<button class="bx" title="Togli dalla Home (finito). Il progetto in CapCut resta.">✕</button>
-    ${it.cover ? `<img src="${it.cover}">` : ""}
+    ${pos > 0 ? '<button class="btop" title="Porta in cima alla colonna">⤒</button>' : ""}
+    ${it.cover ? `<img src="${it.cover}" draggable="false">` : ""}
     <div class="bbody">
       <div class="bclient"><i></i>${escapeHtml(it.cliente || "Senza cliente")}</div>
       <div class="btitle">${escapeHtml(it.titolo)}</div>
@@ -1441,6 +1475,8 @@ function boardCard(it) {
     e.stopPropagation();
     setBoardStatus(it.id, "tolto");
   };
+  const top = card.querySelector(".btop");
+  if (top) top.onclick = (e) => { e.stopPropagation(); moveCard(it.id, it.stato, 0); };
   card.querySelectorAll(".bbtn").forEach((b) => {
     b.onclick = (e) => {
       e.stopPropagation();
@@ -1455,10 +1491,32 @@ function boardCard(it) {
   return card;
 }
 
+// within a column: cards without a place first (just arrived), then the user's order, deadline, newest
+const boardOrder = (a, b) => ((a.ordine != null) - (b.ordine != null)) || ((a.ordine || 0) - (b.ordine || 0))
+  || (a.scadenza || "9999").localeCompare(b.scadenza || "9999") || ((b.quando || 0) - (a.quando || 0));
+
+// put a card at `index` of column `stato` (dragged there, or ⤒): the column keeps that order
+async function moveCard(id, stato, index) {
+  const it = DASH.items.find((i) => i.id === id);
+  if (!it) return;
+  const col = DASH.items.filter((i) => i.stato === stato && i.id !== id);
+  col.splice(Math.max(0, Math.min(index, col.length)), 0, it);
+  it.stato = stato;
+  col.forEach((c, n) => { c.ordine = n; });
+  DASH.items.sort(boardOrder);
+  renderBoard();
+  try {
+    await fetch(`${BACKEND}/api/board/order`, { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stato, ids: col.map((c) => c.id) }) });
+  } catch (_) { loadBoard(); }
+}
+
 async function setBoardStatus(id, stato) {
   const it = DASH.items.find((i) => i.id === id);
   if (!it || it.stato === stato) return;
   it.stato = stato;
+  it.ordine = null;                    // lands on top of its new column
+  DASH.items.sort(boardOrder);
   renderBoard();
   try {
     await fetch(`${BACKEND}/api/board/status`, { method: "PUT", headers: { "Content-Type": "application/json" },
