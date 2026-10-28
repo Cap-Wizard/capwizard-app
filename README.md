@@ -130,6 +130,21 @@ i profili cliente come skill (`skills/reel-<cliente>/SKILL.md`) e il vault Obsid
 - `GET /api/brain` dice com'è andata l'ultima sincronizzazione; `POST /api/brain/sync`
   la rifà subito.
 
+## Bacheca del team (GitHub Projects)
+
+Accanto alla Home (i video di questo Mac) c'è la pagina **Team**: una bacheca GitHub Projects
+privata con le stesse quattro colonne, che vede chiunque abbia accesso (anche da github.com e
+dall'app GitHub sul telefono). Ogni team usa la sua: la si crea o la si sceglie da
+⚙ → «👥 Bacheca del team». Un video ci entra solo quando lo condividi con 👥 dalla tua Home:
+diventa una scheda con cliente, scadenza, note e chi ci lavora; se lo sposti nella tua Home si
+sposta anche nel team, e viceversa.
+
+- Serve GitHub CLI con il permesso per le bacheche, una volta per Mac:
+  `gh auth refresh -h github.com -s project`.
+- Il collegamento sta in `team_board.json` nella cartella dati dell'app; tutto passa da
+  `gh api graphql` con il login di chi usa l'app (`src/capwizard_app/teamboard.py`).
+- La nostra è «CapWizard · Punto della situazione» di Cap-Wizard, aperta al team Editor.
+
 ## Architettura Python
 
 ```

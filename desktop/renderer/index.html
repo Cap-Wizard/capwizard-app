@@ -14,6 +14,7 @@
     <div class="sb-brand"><img class="logo" src="wizard.svg" alt="" /><h1>Cap<span>Wizard</span></h1></div>
     <nav class="views" id="views">
       <button class="vbtn" id="v-dash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
+      <button class="vbtn" id="v-team"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="3"/><circle cx="16.5" cy="9" r="2.5"/><path d="M2.5 19c.7-3 2.9-4.8 5.5-4.8s4.8 1.8 5.5 4.8"/><path d="M14 14.6c.8-.3 1.6-.4 2.5-.4 2.3 0 4.2 1.6 5 4.8"/></svg><span>Team</span><b id="n-team" hidden>0</b></button>
       <button class="vbtn on" id="v-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M12 8v8M8 12h8"/></svg><span>Nuovo video</span></button>
       <button class="vbtn" id="v-proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>I miei progetti</span><b id="n-proj">0</b></button>
       <button class="vbtn" id="v-scarico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.5"/><rect x="3" y="11" width="18" height="5" rx="1.5"/><path d="M7 20h10"/></svg><span>Smistamento clip</span></button>
@@ -38,6 +39,7 @@
         <div class="menu" id="settings-menu" hidden>
           <button id="btn-config-ai">Collegamento a Claude</button>
           <button id="btn-ai-services">✦ Servizi AI <small id="ai-count"></small></button>
+          <button id="btn-team-board">👥 Bacheca del team</button>
           <button id="tb-account" hidden>Gestisci abbonamento</button>
           <button id="tb-logout" hidden>Esci</button>
         </div>
@@ -289,6 +291,21 @@
     <div class="lib-grid" id="ag-grid"></div>
   </div>
 
+  <div id="view-team" class="view dash" hidden>
+    <div class="dash-head">
+      <div>
+        <h2>Il punto della situazione del team</h2>
+        <div class="dash-sub" id="team-sub">Carico la bacheca del team…</div>
+      </div>
+      <div class="dash-actions">
+        <button class="btn2" id="team-gh" hidden>Apri su GitHub ↗</button>
+        <button class="btn2" id="team-settings">Bacheca…</button>
+      </div>
+    </div>
+    <div class="kpis" id="team-kpis"></div>
+    <div class="board" id="team-board"></div>
+  </div>
+
   <div id="view-dash" class="view dash" hidden>
     <div class="dash-head">
       <div>
@@ -334,6 +351,21 @@
         <button class="btn2" id="ai-connectors">Apri i connettori di Claude</button>
         <div class="spacer"></div>
         <button class="btn2" id="ai-refresh">Aggiorna</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== BACHECA DEL TEAM ==================== -->
+  <div id="team-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Bacheca del team</h2>
+        <button class="modal-close" id="team-close">✕</button>
+      </div>
+      <div class="modal-body" id="team-body"></div>
+      <div class="modal-foot">
+        <div class="spacer"></div>
+        <button class="send" id="team-go" hidden>Crea e collega</button>
       </div>
     </div>
   </div>

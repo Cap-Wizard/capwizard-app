@@ -442,7 +442,7 @@ body.projs-view.dragging::after { content: "Rilascia qui gli screenshot della ch
 .bcard:hover { border-color: var(--line2); background: var(--panel2); border-left-color: var(--c); }
 .bcard.drag { opacity: .45; }
 .bcard.gone { opacity: .6; }
-.bcard img { width: 38px; height: 68px; object-fit: cover; border-radius: 8px; flex: none; background: var(--panel3); }
+.bcard > img { width: 38px; height: 68px; object-fit: cover; border-radius: 8px; flex: none; background: var(--panel3); }
 .bbody { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .bclient { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--mute); }
 .bclient i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); flex: none; }
@@ -555,7 +555,7 @@ body.dragging.editor-drag::after { display: none; }
   transition: background .15s, transform .15s, border-color .15s; }
 .bcard:hover { background: color-mix(in srgb, var(--c) 25%, #0c0d10); border-color: color-mix(in srgb, var(--c) 55%, transparent);
   border-left-color: color-mix(in srgb, var(--c) 55%, transparent); transform: translateY(-1px); }
-.bcard img { width: 40px; height: 64px; border-radius: 9px; box-shadow: 0 4px 12px rgba(0, 0, 0, .35); }
+.bcard > img { width: 40px; height: 64px; border-radius: 9px; box-shadow: 0 4px 12px rgba(0, 0, 0, .35); }
 .bclient { color: color-mix(in srgb, var(--c) 55%, #fff); letter-spacing: .04em; }
 .bclient i { width: 14px; height: 14px; border-radius: 4px; }
 .btitle { font-size: 13.5px; font-weight: 700; }
@@ -626,7 +626,7 @@ body.dragging.editor-drag::after { display: none; }
 
 /* ---- Home cards: the video thumbnail fills the card's left edge, top to bottom ---- */
 .bcard { align-items: stretch; overflow: hidden; }
-.bcard img { align-self: stretch; width: 54px; height: auto; min-height: 72px; margin: -10px 0 -10px -10px;
+.bcard > img { align-self: stretch; width: 54px; height: auto; min-height: 72px; margin: -10px 0 -10px -10px;
   border-radius: 0; box-shadow: none; object-fit: cover; }
 
 /* white text on the light blue: a hair of shadow keeps it crisp */
@@ -639,3 +639,19 @@ body.dragging.editor-drag::after { display: none; }
   background: none; color: var(--dim); font-size: 13px; opacity: 0; transition: .15s; }
 .bcard:hover .btop { opacity: 1; }
 .bcard .btop:hover { background: var(--panel3); color: var(--text); }
+
+/* ---- Home: my cards / the team's board ---- */
+.dash-sub a { color: var(--accent-hover); text-decoration: none; }
+.dash-sub a:hover { text-decoration: underline; }
+.dash-sub .warn { color: var(--warn); }
+.due.team { background: var(--accent-soft); color: var(--accent-hover); }
+.tcard { border-left-width: 3px; }
+.who { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--mute); margin-right: 4px; }
+.who img { width: 18px; height: 18px; border-radius: 50%; flex: none; object-fit: cover; background: var(--panel3); }
+.who.none { font-style: italic; color: var(--dim); }
+.team-empty { grid-column: 1 / -1; max-width: 520px; margin: 30px auto; text-align: center; color: var(--mute); }
+.team-empty .te-ic { font-size: 34px; }
+.team-empty h3 { color: var(--text); font-size: 17px; margin: 10px 0 8px; }
+.team-empty p { font-size: 13px; line-height: 1.55; margin: 0 0 16px; }
+pre.cmd { background: var(--bg2, #0b0c0f); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12.5px;
+  color: var(--text); white-space: pre-wrap; user-select: all; }

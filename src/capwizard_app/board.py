@@ -61,6 +61,11 @@ def set_status(item_id: str, stato: str) -> dict:
     return {"ok": True}
 
 
+def status_of(item_id: str) -> str:
+    """The column a card was put in by hand ("" when it's still where the app placed it)."""
+    return _load()["status"].get(item_id, {}).get("stato", "")
+
+
 def set_order(stato: str, ids: list[str]) -> dict:
     """The cards of a column in the order the user arranged them (a card dragged in from another
     column changes status too). Cards that arrive later, without a place, go on top."""

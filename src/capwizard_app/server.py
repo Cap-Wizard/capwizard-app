@@ -40,7 +40,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent, aiservices, board, brain, scarico, vault
+from capwizard_app import agent, aiservices, board, brain, scarico, teamboard, vault
 
 
 # ---------------------------------------------------------------------------
@@ -950,11 +950,16 @@ def board_get() -> dict:
     clients = agent.list_clients()
     templates = {c["template"] for c in clients if c.get("template")}
     templates |= {(p.get("settings") or {}).get("template") or "" for p in registry.list_projects()}
-    return board.board(projects_list()["projects"], clients, templates - {"", "—"})
+    out = board.board(projects_list()["projects"], clients, templates - {"", "—"})
+    shared = teamboard.links()
+    for it in out["items"]:
+        it["team"] = shared.get(it["id"], "")
+    return out
 
 
 @app.put("/api/board/status")
 def board_status(req: BoardStatus) -> dict:
+    teamboard.follow_soon(req.id, req.stato, log=lambda m: print(m, flush=True))
     return board.set_status(req.id, req.stato)
 
 
@@ -965,7 +970,98 @@ class BoardOrder(BaseModel):
 
 @app.put("/api/board/order")
 def board_order(req: BoardOrder) -> dict:
-    return board.set_order(req.stato, req.ids)
+    moved = [i for i in req.ids if board.status_of(i) != req.stato]
+    out = board.set_order(req.stato, req.ids)
+    for i in moved:
+        teamboard.follow_soon(i, req.stato, log=lambda m: print(m, flush=True))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The team's board: a private GitHub Project shared by the team (see teamboard.py)
+# ---------------------------------------------------------------------------
+
+def _team(fn, *args, **kw) -> dict:
+    try:
+        return fn(*args, **kw)
+    except teamboard.TeamBoardError as e:
+        return {"ok": False, "msg": str(e)}
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "msg": f"GitHub non risponde: {e}"}
+
+
+@app.get("/api/team-board")
+def team_board(refresh: bool = False) -> dict:
+    st = teamboard.status()
+    if not st["collegata"]:
+        return {"stato": st, "items": []}
+    res = _team(lambda: {"items": teamboard.items(refresh)})
+    return {"stato": st, "items": res.get("items", []), "msg": res.get("msg", "")}
+
+
+@app.get("/api/team-board/owners")
+def team_board_owners() -> dict:
+    return _team(teamboard.owners)
+
+
+class TeamCreate(BaseModel):
+    owner: str
+    owner_id: str
+    titolo: str = ""
+    team: str = ""
+
+
+@app.post("/api/team-board/create")
+def team_board_create(req: TeamCreate) -> dict:
+    return _team(teamboard.create, req.owner, req.owner_id, req.titolo, req.team)
+
+
+class TeamConnect(BaseModel):
+    owner: str
+    project_id: str
+
+
+@app.post("/api/team-board/connect")
+def team_board_connect(req: TeamConnect) -> dict:
+    return _team(teamboard.connect, req.owner, req.project_id)
+
+
+@app.post("/api/team-board/disconnect")
+def team_board_disconnect() -> dict:
+    return teamboard.disconnect()
+
+
+class TeamShare(BaseModel):
+    id: str = ""
+    titolo: str
+    cliente: str = ""
+    scadenza: str = ""
+    note: str = ""
+    stato: str = "da_fare"
+
+
+@app.post("/api/team-board/share")
+def team_board_share(req: TeamShare) -> dict:
+    return _team(teamboard.share, req.model_dump())
+
+
+class TeamMove(BaseModel):
+    stato: str
+    after: str | None = None      # put it right below this card ("" = on top); None = keep its place
+
+
+@app.put("/api/team-board/items/{item_id}")
+def team_board_move(item_id: str, req: TeamMove) -> dict:
+    res = _team(teamboard.set_status, item_id, req.stato, req.after)
+    local = next((k for k, v in teamboard.links().items() if v == item_id), "")
+    if res.get("ok") and local:               # one of my own cards: my Home follows
+        board.set_status(local, req.stato)
+    return res
+
+
+@app.delete("/api/team-board/items/{item_id}")
+def team_board_unshare(item_id: str) -> dict:
+    return _team(teamboard.unshare, item_id)
 
 
 @app.post("/api/board/todos")

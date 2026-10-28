@@ -130,6 +130,14 @@ function notice(id, { icon = "⚠️", title, text = "", tone = "err", actions =
   n.querySelector(".nx").onclick = () => dropNotice(id);
 }
 
+// a short message that leaves by itself (the team board's "shared", "couldn't move it"…)
+function notify(text, tone = "ok") {
+  const id = `msg-${Date.now()}`;
+  notice(id, { icon: tone === "ok" ? "✓" : "⚠️", title: text, tone: tone === "ok" ? "warn" : "err" });
+  if (tone === "ok") document.getElementById(`notice-${id}`).style.setProperty("--nc", "var(--ok)");
+  setTimeout(() => dropNotice(id), tone === "ok" ? 3500 : 8000);
+}
+
 function dropNotice(id) {
   const n = document.getElementById(`notice-${id}`);
   if (!n || n.classList.contains("out")) return;
@@ -142,19 +150,20 @@ function dropNotice(id) {
 // ---------------------------------------------------------------------------
 
 function showView(name) {
-  for (const v of ["view-auth", "view-subscribe", "view-dash", "view-home", "view-editor", "view-scarico",
+  for (const v of ["view-auth", "view-subscribe", "view-dash", "view-team", "view-home", "view-editor", "view-scarico",
                    "view-clients", "view-agencies"]) {
     $(v).hidden = v !== `view-${name}`;
   }
-  const inApp = ["home", "editor", "dash", "scarico", "clients", "agencies"].includes(name);
+  const inApp = ["home", "editor", "dash", "team", "scarico", "clients", "agencies"].includes(name);
   $("views").hidden = !inApp;
   $("v-clients").classList.toggle("on", name === "clients");
   $("v-agencies").classList.toggle("on", name === "agencies");
-  $("mb-title").textContent = { dash: "Home", editor: "Nuovo video", home: "I miei progetti", scarico: "Smistamento clip",
+  $("mb-title").textContent = { dash: "Home", team: "Team", editor: "Nuovo video", home: "I miei progetti", scarico: "Smistamento clip",
                                 clients: "Clienti", agencies: "Agenzie" }[name] || "";
   if (name === "clients") renderClientsView();
   if (name === "agencies") renderAgenciesView();
   $("v-dash").classList.toggle("on", name === "dash");
+  $("v-team").classList.toggle("on", name === "team");
   $("v-new").classList.toggle("on", name === "editor");
   $("v-proj").classList.toggle("on", name === "home");
   $("v-scarico").classList.toggle("on", name === "scarico");
@@ -167,6 +176,7 @@ function showView(name) {
   if (state.email) $("tb-email").textContent = state.email;
   if (name === "home" && state.backendReady) loadProjects();
   if (name === "dash" && state.backendReady) loadBoard();
+  if (name === "team" && state.backendReady) { renderTeamBoard(); loadTeam(true); }
   if (name === "scarico" && state.backendReady) loadScaricoCodes();
 }
 
@@ -1246,6 +1256,8 @@ function followChange(jobId, p) {
 // ---------------------------------------------------------------------------
 
 const DASH = { items: [], stati: [], todo: null, loaded: false, dragId: null, mark: null };
+// the team's board (a private GitHub Project, see teamboard.py)
+const TEAM = { stato: {}, items: [], loaded: false, msg: "", owners: null };
 const STATI = [["da_fare", "Da fare"], ["in_lavorazione", "Da finire"], ["da_revisionare", "Da revisionare"], ["fatto", "Fatto"]];
 
 // Clienti and Agenzie: the archive sections of the sidebar (counts there, a page each).
@@ -1367,6 +1379,7 @@ async function loadBoard() {
     DASH.stati = data.stati || [];
     DASH.loaded = true;
     renderBoard();
+    loadTeam();                        // the team view, and whether my cards can be shared
   } catch (e) { console.error("board", e); $("dash-sub").textContent = "Non riesco a leggere i progetti."; }
 }
 
@@ -1380,31 +1393,39 @@ function dueInfo(scadenza) {
 }
 
 function renderBoard() {
-  const count = (k) => DASH.items.filter((i) => i.stato === k).length;
-  const late = DASH.items.filter((i) => i.stato !== "fatto" && i.scadenza
-    && new Date(i.scadenza + "T23:59") < new Date()).length;
-  const tiles = [
-    ["da_fare", "Da fare", "🗂"], ["in_lavorazione", "Da finire", "✂️"],
-    ["da_revisionare", "Da revisionare", "👀"], ["fatto", "Fatti (30 giorni)", "✅"],
-  ];
-  $("kpis").innerHTML = tiles.map(([k, n, ic]) =>
-    `<div class="kpi k-${k}"><div class="ic">${ic}</div><div><b>${count(k)}</b><span>${n}</span></div></div>`).join("");
-  const open = DASH.items.length - count("fatto");
+  const late = renderKpis(DASH.items, $("kpis"), "Fatti (30 giorni)");
+  const open = DASH.items.filter((i) => i.stato !== "fatto").length;
   $("dash-sub").textContent = open
     ? `${open} video in giro${late ? ` · ${late} oltre la scadenza` : ""}. Trascina una scheda per cambiarne lo stato.`
     : "Tutto in ordine: nessun video in sospeso.";
+  renderColumns($("board"), DASH.items, boardCard, moveCard,
+    (st) => (st === "da_fare" ? "Aggiungi i video da fare con «＋ Video da fare»" : "Trascina qui una scheda"));
+}
 
-  const board = $("board");
+// the four counters above the board; returns how many cards are past their deadline
+function renderKpis(items, el, doneLabel) {
+  const count = (k) => items.filter((i) => i.stato === k).length;
+  const tiles = [
+    ["da_fare", "Da fare", "🗂"], ["in_lavorazione", "Da finire", "✂️"],
+    ["da_revisionare", "Da revisionare", "👀"], ["fatto", doneLabel, "✅"],
+  ];
+  el.innerHTML = tiles.map(([k, n, ic]) =>
+    `<div class="kpi k-${k}"><div class="ic">${ic}</div><div><b>${count(k)}</b><span>${n}</span></div></div>`).join("");
+  return items.filter((i) => i.stato !== "fatto" && i.scadenza && new Date(i.scadenza + "T23:59") < new Date()).length;
+}
+
+// the four columns in `board`, each card made by makeCard(item, position); a card dropped at a place calls onMove(id, column, index)
+function renderColumns(board, items, makeCard, onMove, emptyText) {
   board.innerHTML = "";
-  for (const st of DASH.stati) {
+  const stati = DASH.stati.length ? DASH.stati : STATI.map(([id, nome]) => ({ id, nome }));
+  for (const st of stati) {
     const col = document.createElement("section");
     col.className = `bcol c-${st.id}`;
-    const cards = DASH.items.filter((i) => i.stato === st.id);
+    const cards = items.filter((i) => i.stato === st.id);
     col.innerHTML = `<h3>${escapeHtml(st.nome)}<small>${cards.length}</small></h3><div class="bcards"></div>`;
     const box = col.querySelector(".bcards");
-    cards.forEach((it, i) => box.appendChild(boardCard(it, i)));
-    if (!cards.length) box.innerHTML = `<div class="bempty">${st.id === "da_fare"
-      ? "Aggiungi i video da fare con «＋ Video da fare»" : "Trascina qui una scheda"}</div>`;
+    cards.forEach((it, i) => box.appendChild(makeCard(it, i)));
+    if (!cards.length) box.innerHTML = `<div class="bempty">${emptyText(st.id)}</div>`;
     col.ondragover = (e) => {
       if (!DASH.dragId) return;
       e.preventDefault();
@@ -1424,7 +1445,7 @@ function renderBoard() {
       const id = DASH.dragId || e.dataTransfer.getData("text/plain");
       const { index } = dropIndex(box, e.clientY);
       if (DASH.mark) DASH.mark.remove();
-      if (id) moveCard(id, st.id, index);
+      if (id) onMove(id, st.id, index);
     };
     board.appendChild(col);
   }
@@ -1437,14 +1458,11 @@ function dropIndex(box, y) {
   return { cards, index: i < 0 ? cards.length : i };
 }
 
-function boardCard(it, pos = 0) {
-  const card = document.createElement("div");
-  card.className = "bcard" + (it.esiste ? "" : " gone");
-  card.style.setProperty("--c", it.colore || "#6b7180");
+function draggableCard(card, id) {
   card.draggable = true;
   card.ondragstart = (e) => {
-    DASH.dragId = it.id;
-    e.dataTransfer.setData("text/plain", it.id);
+    DASH.dragId = id;
+    e.dataTransfer.setData("text/plain", id);
     e.dataTransfer.effectAllowed = "move";
     card.classList.add("drag");
   };
@@ -1454,6 +1472,13 @@ function boardCard(it, pos = 0) {
     if (DASH.mark) DASH.mark.remove();
     document.querySelectorAll(".bcol.over").forEach((c) => c.classList.remove("over"));
   };
+}
+
+function boardCard(it, pos = 0) {
+  const card = document.createElement("div");
+  card.className = "bcard" + (it.esiste ? "" : " gone");
+  card.style.setProperty("--c", it.colore || "#6b7180");
+  draggableCard(card, it.id);
   const isTodo = it.tipo === "da_fare";
   const next = { da_fare: "in_lavorazione", in_lavorazione: "da_revisionare", da_revisionare: "fatto" }[it.stato];
   const nextName = (DASH.stati.find((s) => s.id === next) || {}).nome;
@@ -1464,11 +1489,12 @@ function boardCard(it, pos = 0) {
       <div class="bclient"><i></i>${escapeHtml(it.cliente || "Senza cliente")}</div>
       <div class="btitle">${escapeHtml(it.titolo)}</div>
       ${it.note ? `<div class="bnote">${escapeHtml(it.note)}</div>` : ""}
-      <div class="bmeta">${dueInfo(it.scadenza)}${it.esiste ? "" : '<span class="due late">non più in CapCut</span>'}</div>
+      <div class="bmeta">${dueInfo(it.scadenza)}${it.esiste ? "" : '<span class="due late">non più in CapCut</span>'}${it.team ? '<span class="due team">👥 nel team</span>' : ""}</div>
       <div class="bacts">
         ${isTodo ? '<button class="bbtn primary" data-a="monta">Monta</button>' : '<button class="bbtn" data-a="apri">Apri</button>'}
         ${isTodo || it.todo_id ? '<button class="bbtn" data-a="edit">✎</button>' : ""}
         ${next ? `<button class="bbtn" data-a="next" title="Sposta in ${escapeHtml(nextName || "")}">→ ${escapeHtml(nextName || "")}</button>` : ""}
+        ${TEAM.stato.collegata && !it.team ? '<button class="bbtn" data-a="share" title="Condividi col team">👥</button>' : ""}
       </div>
     </div>`;
   card.querySelector(".bx").onclick = (e) => {
@@ -1485,6 +1511,7 @@ function boardCard(it, pos = 0) {
       else if (a === "apri") openFromBoard(it);
       else if (a === "edit") openTodo(it.todo_id ? { ...it, id: it.todo_id, tipo: "da_fare" } : it);
       else if (a === "next") setBoardStatus(it.id, next);
+      else if (a === "share") shareCard(it, b);
     };
   });
   card.onclick = () => (isTodo ? openTodo(it) : openFromBoard(it));    // the whole card opens the project's chat
@@ -1597,6 +1624,227 @@ async function renderProjectStatus(p) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Team board
+// ---------------------------------------------------------------------------
+
+async function loadTeam(refresh = false) {
+  try {
+    const d = await (await fetch(`${BACKEND}/api/team-board${refresh ? "?refresh=true" : ""}`)).json();
+    TEAM.stato = d.stato || {};
+    TEAM.items = d.items || [];
+    TEAM.msg = d.msg || "";
+    TEAM.loaded = true;
+  } catch (e) { TEAM.msg = "Non riesco a leggere la bacheca del team."; }
+  const open = TEAM.items.filter((i) => i.stato !== "fatto").length;
+  $("n-team").textContent = open;
+  $("n-team").hidden = !open;
+  if (!$("view-team").hidden) renderTeamBoard();
+  if (!$("view-dash").hidden) renderBoard();        // my cards: whether they can be shared
+}
+
+function renderTeamBoard() {
+  const st = TEAM.stato;
+  $("team-gh").hidden = !st.collegata;
+  if (!TEAM.loaded) {
+    $("team-sub").textContent = "Carico la bacheca del team…";
+    $("team-kpis").innerHTML = ""; $("team-board").innerHTML = "";
+    return;
+  }
+  if (!st.collegata) {
+    $("team-sub").textContent = "La bacheca del team non è ancora collegata.";
+    $("team-kpis").innerHTML = "";
+    $("team-board").innerHTML = `<div class="team-empty"><div class="te-ic">👥</div>
+      <h3>Il punto della situazione di tutto il team</h3>
+      <p>Collega una bacheca GitHub privata: chi è nel team vede gli stessi video, chi ci lavora e a che punto sono,
+        qui e su github.com. Dalla tua Home condividi un video con il pulsante 👥.</p>
+      <button class="send" id="team-setup">Collega la bacheca del team</button></div>`;
+    $("team-setup").onclick = openTeamModal;
+    return;
+  }
+  const late = renderKpis(TEAM.items, $("team-kpis"), "Fatti");
+  const open = TEAM.items.filter((i) => i.stato !== "fatto").length;
+  $("team-sub").innerHTML = `${escapeHtml(st.titolo || "Bacheca del team")} · ${open} video in giro`
+    + `${late ? ` · ${late} oltre la scadenza` : ""}. Trascina una scheda per cambiarne lo stato.`
+    + (TEAM.msg ? ` <span class="warn">${escapeHtml(TEAM.msg)}</span>` : "");
+  renderColumns($("team-board"), TEAM.items, teamCard, moveTeamCard,
+    (k) => (k === "da_fare" ? "Condividi un video dalla tua Home con 👥" : "Trascina qui una scheda"));
+}
+
+function teamCard(it, pos = 0) {
+  const card = document.createElement("div");
+  const mine = state.projects.find((p) => p.id === it.locale) || DASH.items.find((i) => i.id === it.locale);
+  const client = state.clients.find((c) => c.nome === it.cliente);
+  card.className = "bcard tcard";
+  card.style.setProperty("--c", (client && client.colore) || "#6b7180");
+  draggableCard(card, it.id);
+  const next = { da_fare: "in_lavorazione", in_lavorazione: "da_revisionare", da_revisionare: "fatto" }[it.stato];
+  const nextName = (STATI.find(([k]) => k === next) || [])[1];
+  const who = it.chi.length
+    ? it.chi.map((c) => `<span class="who"><img src="${escapeHtml(c.avatar)}" alt="">${escapeHtml(c.login)}</span>`).join("")
+    : '<span class="who none">nessuno</span>';
+  card.innerHTML = `<button class="bx" title="Togli dalla bacheca del team">✕</button>
+    ${pos > 0 ? '<button class="btop" title="Porta in cima alla colonna">⤒</button>' : ""}
+    ${mine && mine.cover ? `<img src="${mine.cover}" draggable="false">` : ""}
+    <div class="bbody">
+      <div class="bclient"><i></i>${escapeHtml(it.cliente || "Senza cliente")}</div>
+      <div class="btitle">${escapeHtml(it.titolo)}</div>
+      ${it.note ? `<div class="bnote">${escapeHtml(it.note)}</div>` : ""}
+      <div class="bmeta">${who}${dueInfo(it.scadenza)}</div>
+      <div class="bacts">
+        ${mine ? '<button class="bbtn" data-a="apri">Apri</button>' : ""}
+        ${next ? `<button class="bbtn" data-a="next" title="Sposta in ${escapeHtml(nextName || "")}">→ ${escapeHtml(nextName || "")}</button>` : ""}
+      </div>
+    </div>`;
+  card.querySelector(".bx").onclick = async (e) => {
+    e.stopPropagation();
+    if (!confirm(`Togliere «${it.titolo}» dalla bacheca del team? Il progetto resta dov'è.`)) return;
+    TEAM.items = TEAM.items.filter((x) => x.id !== it.id);
+    const local = DASH.items.find((i) => i.team === it.id);
+    if (local) local.team = "";
+    renderTeamBoard();
+    await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(it.id)}`, { method: "DELETE" }).catch(() => {});
+  };
+  const top = card.querySelector(".btop");
+  if (top) top.onclick = (e) => { e.stopPropagation(); moveTeamCard(it.id, it.stato, 0); };
+  card.querySelectorAll(".bbtn").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      if (b.dataset.a === "apri") openFromBoard({ id: it.locale });
+      else if (b.dataset.a === "next") moveTeamCard(it.id, next, 0);
+    };
+  });
+  if (mine) card.onclick = () => openFromBoard({ id: it.locale });
+  return card;
+}
+
+// a team card dropped at `index` of a column: GitHub keeps the column and the place
+async function moveTeamCard(id, stato, index) {
+  const it = TEAM.items.find((i) => i.id === id);
+  if (!it) return;
+  const col = TEAM.items.filter((i) => i.stato === stato && i.id !== id);
+  const at = Math.max(0, Math.min(index, col.length));
+  const after = at > 0 ? col[at - 1].id : "";
+  it.stato = stato;
+  TEAM.items = TEAM.items.filter((i) => i.id !== id);
+  const pos = after ? TEAM.items.findIndex((i) => i.id === after) + 1
+    : (TEAM.items.findIndex((i) => i.stato === stato) + 1 || TEAM.items.length + 1) - 1;
+  TEAM.items.splice(Math.max(0, pos), 0, it);
+  const local = DASH.items.find((i) => i.id === it.locale);
+  if (local) local.stato = stato;          // one of mine: my Home follows (the backend does the same)
+  renderTeamBoard();
+  try {
+    const r = await (await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(id)}`, { method: "PUT",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stato, after }) })).json();
+    if (!r.ok) { notify(r.msg || "Non sono riuscito a spostarla su GitHub.", "err"); loadTeam(true); }
+  } catch (_) { loadTeam(true); }
+}
+
+async function shareCard(it, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
+  try {
+    const r = await (await fetch(`${BACKEND}/api/team-board/share`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: it.id, titolo: it.titolo, cliente: it.cliente || "", scadenza: it.scadenza || "",
+        note: it.note || "", stato: it.stato }) })).json();
+    if (!r.ok) throw new Error(r.msg || "non riuscito");
+    it.team = r.id;
+    notify(`«${it.titolo}» è nella bacheca del team.`, "ok");
+    TEAM.loaded = false;
+  } catch (e) {
+    notify(`Non sono riuscito a condividerlo: ${e.message}`, "err");
+  }
+  renderBoard();
+}
+
+async function openTeamModal() {
+  $("settings-menu").hidden = true;
+  $("team-modal").hidden = false;
+  $("team-body").innerHTML = '<div class="empty">Controllo GitHub…</div>';
+  $("team-go").hidden = true;
+  await loadTeam(true);
+  const st = TEAM.stato;
+  const body = $("team-body");
+  if (!st.gh) {
+    body.innerHTML = `<p class="ai-intro">Per la bacheca del team serve <b>GitHub CLI</b>, collegata al tuo account GitHub.
+      Da Terminale:</p><pre class="cmd">brew install gh
+gh auth login</pre><p class="ai-foot">Poi premi «Ricontrolla».</p>`;
+    return teamFoot("Ricontrolla", openTeamModal);
+  }
+  if (!st.permesso) {
+    body.innerHTML = `<p class="ai-intro">GitHub CLI c'è, ma non ha ancora il permesso di usare le bacheche (GitHub Projects).
+      Da Terminale, e poi conferma nel browser:</p><pre class="cmd">gh auth refresh -h github.com -s project</pre>
+      <p class="ai-foot">Serve una volta sola, su ogni Mac del team. Poi premi «Ricontrolla».</p>`;
+    return teamFoot("Ricontrolla", openTeamModal);
+  }
+  if (st.collegata) {
+    body.innerHTML = `<p class="ai-intro">Collegata a <b>${escapeHtml(st.titolo)}</b> di <b>${escapeHtml(st.owner)}</b>.
+      Chi ha accesso alla bacheca vede gli stessi video nella vista «👥 Team» della Home.</p>
+      <div class="row2 pair"><button class="btn2" id="team-gh">Apri su GitHub ↗</button>
+      <button class="btn2 danger" id="team-off">Scollega</button></div>`;
+    $("team-gh").onclick = () => window.api && window.api.openExternal(st.url);
+    $("team-off").onclick = async () => {
+      if (!confirm("Scollegare la bacheca del team da questo Mac? Su GitHub resta tutto com'è.")) return;
+      await fetch(`${BACKEND}/api/team-board/disconnect`, { method: "POST" });
+      DASH.items.forEach((i) => { i.team = ""; });
+      openTeamModal();
+    };
+    return teamFoot("", null);
+  }
+  body.innerHTML = '<div class="empty">Cerco i tuoi account e le tue organizzazioni…</div>';
+  const d = await (await fetch(`${BACKEND}/api/team-board/owners`)).json().catch(() => ({}));
+  if (!d.owners) { body.innerHTML = `<p class="ai-intro">${escapeHtml(d.msg || "GitHub non risponde.")}</p>`; return teamFoot("Ricontrolla", openTeamModal); }
+  TEAM.owners = d.owners;
+  // most likely the team's: an organisation named like the app, then one with teams, then any
+  const orgs = d.owners.filter((o) => o.tipo === "organizzazione");
+  const def = orgs.find((o) => /wizard/i.test(o.login)) || orgs.find((o) => (o.team || []).length) || orgs[0] || d.owners[0];
+  body.innerHTML = `<p class="ai-intro">Scegli dove sta la bacheca: di solito l'<b>organizzazione</b> del team, così tutti la vedono.
+    È privata: la vede solo chi ha accesso.</p>
+    <label>Dove</label>
+    <select id="tm-owner">${d.owners.map((o) => `<option value="${escapeHtml(o.login)}" ${o === def ? "selected" : ""}>${escapeHtml(o.login)} (${o.tipo})</option>`).join("")}</select>
+    <label>Bacheca</label>
+    <select id="tm-board"></select>
+    <div id="tm-new"><label>Nome della nuova bacheca</label>
+      <input type="text" id="tm-title" value="CapWizard · Punto della situazione">
+      <div id="tm-team-row"><label>Aperta al team</label><select id="tm-team"></select></div></div>`;
+  const fill = () => {
+    const o = TEAM.owners.find((x) => x.login === $("tm-owner").value);
+    $("tm-board").innerHTML = '<option value="">＋ Nuova bacheca privata</option>'
+      + o.bacheche.map((b) => `<option value="${escapeHtml(b.id)}">${escapeHtml(b.title)}</option>`).join("");
+    $("tm-team").innerHTML = '<option value="">— nessun team —</option>'
+      + (o.team || []).map((t) => `<option value="${escapeHtml(t.slug)}">${escapeHtml(t.name)}</option>`).join("");
+    if ((o.team || []).length === 1) $("tm-team").value = o.team[0].slug;
+    $("tm-team-row").hidden = !(o.team || []).length;
+    $("tm-new").hidden = !!$("tm-board").value;
+    $("team-go").textContent = $("tm-board").value ? "Collega" : "Crea e collega";
+  };
+  $("tm-owner").onchange = fill;
+  $("tm-board").onchange = fill;
+  teamFoot("Crea e collega", async () => {
+    const o = TEAM.owners.find((x) => x.login === $("tm-owner").value);
+    const pid = $("tm-board").value;
+    $("team-go").disabled = true; $("team-go").textContent = "Un attimo…";
+    const r = await (await fetch(`${BACKEND}/api/team-board/${pid ? "connect" : "create"}`, { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(pid ? { owner: o.login, project_id: pid }
+        : { owner: o.login, owner_id: o.id, titolo: $("tm-title").value, team: $("tm-team").value }) })).json()
+      .catch((e) => ({ ok: false, msg: String(e) }));
+    $("team-go").disabled = false;
+    if (!r.ok) { notify(r.msg || "Non riuscito.", "err"); fill(); return; }
+    notify(`Bacheca del team collegata: «${r.titolo}».`, "ok");
+    $("team-modal").hidden = true;
+    loadBoard();
+    showView("team");
+  });
+  fill();
+}
+
+function teamFoot(label, action) {
+  const go = $("team-go");
+  go.hidden = !label;
+  go.textContent = label;
+  go.onclick = action;
+}
+
 async function openFromBoard(it) {
   showView("home");
   await loadProjects();
@@ -1605,6 +1853,11 @@ async function openFromBoard(it) {
 }
 
 function wireBoard() {
+  $("v-team").onclick = () => showView("team");
+  $("team-settings").onclick = openTeamModal;
+  $("team-gh").onclick = () => window.api && window.api.openExternal(TEAM.stato.url);
+  $("btn-team-board").onclick = openTeamModal;
+  $("team-close").onclick = () => { $("team-modal").hidden = true; };
   $("dash-add").onclick = () => openTodo(null);
   $("dash-new").onclick = () => showView("editor");
   $("td-close").onclick = () => { $("todo-modal").hidden = true; };
