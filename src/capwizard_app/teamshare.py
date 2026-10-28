@@ -190,6 +190,9 @@ def send(item_id: str, folder: str, nome: str, chi: str = "", log=print) -> dict
             b = os.path.basename(p)
             if b in used:
                 b = f"{os.path.basename(os.path.dirname(p))} - {b}"
+            stem, ext, k = os.path.splitext(b)[0], os.path.splitext(b)[1], 2
+            while b in used:                    # same name in the same-named folder too: never overwrite a clip
+                b, k = f"{stem} ({k}){ext}", k + 1
             used.add(b)
             names[p] = b
             shutil.copy2(p, part / "media" / b)
@@ -216,7 +219,9 @@ def take(item_id: str, nome: str, log=print) -> dict:
     man = json.loads((pkg / "manifest.json").read_text())
 
     def work(job: dict) -> str:
-        target = nome if not (CAPCUT_PROJECTS_DIR / nome).exists() else f"{nome} - da {man.get('da', 'team')}"
+        # the name comes from the team card and the manifest from the share: a folder name, never a path
+        base = safe(nome)
+        target = base if not (CAPCUT_PROJECTS_DIR / base).exists() else safe(f"{base} - da {man.get('da', 'team')}")
         if (CAPCUT_PROJECTS_DIR / target).exists():
             raise RuntimeError(f"Hai già un progetto CapCut «{target}».")
         with tempfile.TemporaryDirectory() as tmp:

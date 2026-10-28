@@ -139,6 +139,22 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
+  // The window only ever shows the app's own page: it holds the backend token and the native
+  // helpers, so a link must never load another page in it. Web links open in the browser.
+  mainWindow.webContents.on("will-navigate", (e, url) => {
+    e.preventDefault();
+    openWebLink(url);
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    openWebLink(url);
+    return { action: "deny" };
+  });
+}
+
+function openWebLink(url) {
+  try {
+    if (["https:", "http:", "mailto:"].includes(new URL(url).protocol)) shell.openExternal(url);
+  } catch (_) { /* not a URL */ }
 }
 
 app.whenReady().then(async () => {
@@ -227,12 +243,18 @@ ipcMain.handle("select-images", async () => {
   return r.canceled ? [] : r.filePaths;
 });
 
+// Programs and scripts are never launched from here: a path of a project, a report or a
+// folder opens; anything that would run (an .app, a .command…) is only shown in the Finder.
+const RUNNABLE = /\.(app|command|tool|sh|zsh|bash|csh|terminal|pkg|mpkg|dmg|workflow|scpt|scptd|applescript|action|jar|py|pl|rb|js|bin|exe|prefPane|webloc|inetloc|fileloc)$/i;
+
 ipcMain.handle("open-path", async (_e, p) => {
-  if (p) await shell.openPath(p);
+  if (typeof p !== "string" || !p) return;
+  if (RUNNABLE.test(p.replace(/\/+$/, ""))) shell.showItemInFolder(p);
+  else await shell.openPath(p);
 });
 
 ipcMain.handle("open-external", async (_e, url) => {
-  if (url) await shell.openExternal(url);
+  if (typeof url === "string") openWebLink(url);
 });
 
 ipcMain.handle("cloud-url", () => CLOUD_URL);
@@ -248,10 +270,7 @@ ipcMain.handle("auth-get-token", () => {
     const f = tokenFile();
     if (!fs.existsSync(f)) return null;
     const buf = fs.readFileSync(f);
-    if (safeStorage.isEncryptionAvailable()) {
-      return safeStorage.decryptString(buf);
-    }
-    return buf.toString("utf-8");   // fallback (unencrypted) if keychain unavailable
+    return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : null;
   } catch (_) {
     return null;
   }
@@ -259,10 +278,9 @@ ipcMain.handle("auth-get-token", () => {
 
 ipcMain.handle("auth-set-token", (_e, token) => {
   try {
-    const data = safeStorage.isEncryptionAvailable()
-      ? safeStorage.encryptString(token)
-      : Buffer.from(token, "utf-8");
-    fs.writeFileSync(tokenFile(), data);
+    // never on disk in clear: without the Keychain the login lasts until the app is closed
+    if (typeof token !== "string" || !safeStorage.isEncryptionAvailable()) return false;
+    fs.writeFileSync(tokenFile(), safeStorage.encryptString(token), { mode: 0o600 });
     return true;
   } catch (_) {
     return false;

@@ -22,9 +22,11 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import threading
@@ -156,7 +158,8 @@ app = FastAPI(title="CapWizard API", version="0.2.0-alpha.2")
 # in a browser on this Mac can call it. Electron hands the backend a random token at launch
 # (CAPWIZARD_TOKEN) and the renderer sends it on every request; a web page can't know it.
 # The renderer loads from file://, whose origin is "null".
-TOKEN = os.environ.get("CAPWIZARD_TOKEN", "")
+# Started by hand without one, the API still is not open to every web page: it gets a random one.
+TOKEN = os.environ.get("CAPWIZARD_TOKEN") or secrets.token_hex(24)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["null"], allow_methods=["*"], allow_headers=["*"],
@@ -164,7 +167,16 @@ app.add_middleware(
 
 
 def _token_ok(given: str | None) -> bool:
-    return not TOKEN or hmac.compare_digest(given or "", TOKEN)
+    return hmac.compare_digest(given or "", TOKEN)
+
+
+class _HideToken(logging.Filter):
+    """The job log's websocket carries the token in its address: never print it in the log."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "t=" in msg:
+            record.msg, record.args = re.sub(r"([?&]t=)[^&\s\"']+", r"\1…", msg), ()
+        return True
 
 
 @app.middleware("http")
@@ -1301,7 +1313,10 @@ def run() -> None:
     brain.start(on_vault=lambda v: setattr(vault, "VAULT", v), log=lambda m: print(m, flush=True))
 
     import uvicorn
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    config = uvicorn.Config(app, host=args.host, port=args.port, log_level="info")   # sets up uvicorn's logging
+    for name in ("uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).addFilter(_HideToken())
+    uvicorn.Server(config).run()
 
 
 if __name__ == "__main__":

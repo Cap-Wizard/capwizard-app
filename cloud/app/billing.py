@@ -51,6 +51,9 @@ def create_portal_session(user: User, session: Session) -> str:
 
 def verify_webhook(payload: bytes, sig_header: str):
     """Verify the Stripe signature and return the event, or raise ValueError."""
+    # without the secret anyone could sign an event (with an empty key) and switch a subscription on
+    if not settings.STRIPE_WEBHOOK_SECRET:
+        raise ValueError("STRIPE_WEBHOOK_SECRET non impostato")
     stripe = _stripe()
     try:
         return stripe.Webhook.construct_event(

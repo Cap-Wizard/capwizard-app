@@ -303,7 +303,7 @@ function renderChips() {
     const chip = document.createElement("button");
     chip.className = "chip" + (state.client && state.client.id === c.id ? " on" : "");
     chip.style.setProperty("--c", c.colore);
-    chip.innerHTML = `<i style="background:${c.colore}"></i>${escapeHtml(c.nome)}`;
+    chip.innerHTML = `<i style="background:${safeColor(c.colore)}"></i>${escapeHtml(c.nome)}`;
     chip.onclick = () => chooseClient(c);
     box.appendChild(chip);
   }
@@ -945,6 +945,8 @@ function finishRun() {
 
 function renderSteps(current, finished = false) {
   $("steps").innerHTML = "";
+  $("steps").style.setProperty("--n", state.steps.length || 6);
+  $("steps").style.setProperty("--half", Math.ceil((state.steps.length || 6) / 2));
   state.steps.forEach((label, i) => {
     const n = i + 1;
     const el = document.createElement("div");
@@ -1038,7 +1040,7 @@ function renderProjects() {
   for (const [cliente, ps] of Object.entries(groups)) {
     const g = document.createElement("div");
     g.className = "group";
-    g.innerHTML = `<h4><i style="background:${ps[0].colore}"></i>${escapeHtml(cliente)}<small>${ps.length}</small></h4>`;
+    g.innerHTML = `<h4><i style="background:${safeColor(ps[0].colore)}"></i>${escapeHtml(cliente)}<small>${ps.length}</small></h4>`;
     for (const p of ps) {
       const card = document.createElement("div");
       card.className = "pcard" + (state.currentProject && state.currentProject.id === p.id ? " on" : "");
@@ -1319,7 +1321,7 @@ function renderClientsView() {
   $("cl-sub").textContent = `${state.clients.length} clienti · ${(state.vault.agenzie || []).length} agenzie`;
   $("cl-grid").innerHTML = list.length ? list.map((c) => {
     const n = videosOf(c.nome);
-    return `<article class="lib-card" style="--c:${c.colore}" data-id="${escapeHtml(c.id)}">
+    return `<article class="lib-card" style="--c:${safeColor(c.colore)}" data-id="${escapeHtml(c.id)}">
       <div class="lc-top"><i>${escapeHtml((c.nome.match(/[A-Za-zÀ-ÿ0-9]/) || ["?"])[0])}</i>
         <div class="lc-name"><b>${escapeHtml(c.nome)}</b><span>${escapeHtml(c.agenzia || "Profilo")}</span></div></div>
       <dl>
@@ -1355,7 +1357,7 @@ function renderAgenciesView() {
     return `<article class="lib-card ag" data-ag="${escapeHtml(a)}">
       <div class="lc-top"><i>${escapeHtml(a[0] || "?")}</i>
         <div class="lc-name"><b>${escapeHtml(a)}</b><span>${stile ? "Stile " + escapeHtml(stile) : "Stile da scrivere"}</span></div></div>
-      <div class="ag-clients">${cl.length ? cl.map((c) => `<span style="--c:${c.colore}"><i></i>${escapeHtml(c.nome)}</span>`).join("")
+      <div class="ag-clients">${cl.length ? cl.map((c) => `<span style="--c:${safeColor(c.colore)}"><i></i>${escapeHtml(c.nome)}</span>`).join("")
         : '<em>Nessun cliente ancora</em>'}</div>
       <dl><div><dt>Clienti</dt><dd>${cl.length}</dd></div><div><dt>Video</dt><dd>${videos || "—"}</dd></div></dl>
       <div class="lc-acts"><button class="bbtn" data-a="clients">Vedi i clienti</button>
@@ -1384,9 +1386,11 @@ async function loadBoard() {
 }
 
 function dueInfo(scadenza) {
-  if (!scadenza) return "";
-  const days = Math.round((new Date(scadenza + "T23:59") - new Date()) / 86400000);
-  const label = new Date(scadenza).toLocaleDateString("it-IT", { day: "2-digit", month: "short" });
+  // a day (YYYY-MM-DD) read as local time: new Date("2026-10-28") would be midnight UTC
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(scadenza || "") ? new Date(scadenza + "T23:59") : null;
+  if (!end || isNaN(end)) return "";
+  const days = Math.round((end - new Date()) / 86400000);
+  const label = end.toLocaleDateString("it-IT", { day: "2-digit", month: "short" });
   const cls = days < 0 ? "late" : days <= 2 ? "soon" : "";
   const when = days < 0 ? `scaduto ${label}` : days === 0 ? "oggi" : days === 1 ? "domani" : label;
   return `<span class="due ${cls}">⏰ ${when}</span>`;
@@ -2058,8 +2062,10 @@ function redoProject(p) {
 
 function md(t) {
   let out = "";
-  let inTable = false;
+  let inTable = false, inList = false;
   for (const l of t.split("\n")) {
+    const item = /^\s*[-*] /.test(l);
+    if (inList && !item) { out += "</ul>"; inList = false; }
     const h = escapeHtml(l).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
     if (/^\|/.test(l)) {
       if (/^\|[-\s|:]+\|$/.test(l)) continue;
@@ -2069,10 +2075,10 @@ function md(t) {
     }
     if (inTable) { out += "</table>"; inTable = false; }
     if (/^#{1,4} /.test(l)) out += `<h4>${h.replace(/^#+ /, "")}</h4>`;
-    else if (/^\s*[-*] /.test(l)) out += `<li>${h.replace(/^\s*[-*] /, "")}</li>`;
+    else if (item) { if (!inList) { out += "<ul>"; inList = true; } out += `<li>${h.replace(/^\s*[-*] /, "")}</li>`; }
     else if (l.trim()) out += `<p>${h}</p>`;
   }
-  return out + (inTable ? "</table>" : "");
+  return out + (inTable ? "</table>" : "") + (inList ? "</ul>" : "");
 }
 
 // ---------------------------------------------------------------------------
@@ -2180,7 +2186,7 @@ function cacheActive(active) {
 function cachedGraceOk() {
   try {
     const c = JSON.parse(localStorage.getItem("capwizard_sub") || "{}");
-    if (!c.active) return false;
+    if (!c.active || !(c.ts <= Date.now())) return false;     // a date in the future would never expire
     return (Date.now() - c.ts) < OFFLINE_GRACE_DAYS * 86400 * 1000;
   } catch (_) { return false; }
 }
@@ -2702,6 +2708,11 @@ async function execScarico() {
   scLog(`— finito: ${res.cartella} —`, "ok");
   if (window.api) window.api.openPath(res.cartella);
   checkScarico();
+}
+
+// a client's colour goes into style attributes: only a plain CSS colour, never markup
+function safeColor(c) {
+  return /^(#[0-9a-f]{3,8}|[a-z]{3,20}|(rgb|hsl)a?\([\d\s.,%]+\))$/i.test(String(c || "").trim()) ? String(c).trim() : "#6b7180";
 }
 
 function escapeHtml(s) {

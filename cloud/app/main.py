@@ -6,6 +6,10 @@ it to log in and to check whether the subscription is active.
 """
 from __future__ import annotations
 
+import threading
+import time
+from collections import defaultdict, deque
+
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -80,6 +84,8 @@ def register(creds: Credentials, session: Session = Depends(get_session)) -> Tok
     email = creds.email.lower().strip()
     if len(creds.password) < 8:
         raise HTTPException(status_code=400, detail="La password deve avere almeno 8 caratteri.")
+    if len(creds.password.encode("utf-8")) > 72:     # bcrypt reads only the first 72 bytes
+        raise HTTPException(status_code=400, detail="La password può avere al massimo 72 caratteri.")
     existing = session.exec(select(User).where(User.email == email)).first()
     if existing:
         raise HTTPException(status_code=409, detail="Email già registrata.")
@@ -90,11 +96,39 @@ def register(creds: Credentials, session: Session = Depends(get_session)) -> Tok
     return TokenOut(token=make_token(user.id))
 
 
+# Failed logins per account and per address: guessing a password takes ages, not minutes.
+_FAILS: dict[str, deque] = defaultdict(deque)
+_FAILS_LOCK = threading.Lock()
+MAX_FAILS, FAIL_WINDOW = 10, 15 * 60
+
+
+def _too_many(*keys: str) -> bool:
+    now = time.time()
+    with _FAILS_LOCK:
+        for k in keys:
+            q = _FAILS[k]
+            while q and now - q[0] > FAIL_WINDOW:
+                q.popleft()
+            if len(q) >= MAX_FAILS:
+                return True
+    return False
+
+
+def _failed(*keys: str) -> None:
+    with _FAILS_LOCK:
+        for k in keys:
+            _FAILS[k].append(time.time())
+
+
 @app.post("/auth/login", response_model=TokenOut)
-def login(creds: Credentials, session: Session = Depends(get_session)) -> TokenOut:
+def login(creds: Credentials, request: Request, session: Session = Depends(get_session)) -> TokenOut:
     email = creds.email.lower().strip()
+    keys = (f"e:{email}", f"ip:{request.client.host if request.client else '?'}")
+    if _too_many(*keys):
+        raise HTTPException(status_code=429, detail="Troppi tentativi: riprova tra un quarto d'ora.")
     user = session.exec(select(User).where(User.email == email)).first()
     if not user or not verify_password(creds.password, user.password_hash):
+        _failed(*keys)
         raise HTTPException(status_code=401, detail="Email o password errati.")
     return TokenOut(token=make_token(user.id))
 
@@ -132,7 +166,7 @@ async def stripe_webhook(request: Request, session: Session = Depends(get_sessio
     sig = request.headers.get("stripe-signature", "")
     try:
         event = billing.verify_webhook(payload, sig)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="webhook non valido")
     billing.handle_event(event, session)
     return {"received": True}
