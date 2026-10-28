@@ -5,6 +5,7 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
+    "postinstall": "node scripts/dev-bundle-name.js",
     "build:backend": "scripts/build-backend.sh",
     "dist": "npm run build:backend && electron-builder --mac --arm64"
   },
