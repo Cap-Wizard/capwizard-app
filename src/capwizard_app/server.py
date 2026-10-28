@@ -40,7 +40,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent, aiservices, board, brain, scarico, teamboard, vault
+from capwizard_app import agent, aiservices, board, brain, scarico, teamboard, teamshare, vault
 
 
 # ---------------------------------------------------------------------------
@@ -996,7 +996,11 @@ def team_board(refresh: bool = False) -> dict:
     if not st["collegata"]:
         return {"stato": st, "items": []}
     res = _team(lambda: {"items": teamboard.items(refresh)})
-    return {"stato": st, "items": res.get("items", []), "msg": res.get("msg", "")}
+    here = {v: k for k, v in teamboard.links().items()}
+    pkgs = teamshare.packages()
+    items = [dict(it, qui=here.get(it["id"], ""), pacchetto=pkgs.get(teamshare.safe(it["titolo"]), {}).get("da", ""))
+             for it in res.get("items", [])]
+    return {"stato": st, "items": items, "msg": res.get("msg", ""), "cartella": teamshare.config()}
 
 
 @app.get("/api/team-board/owners")
@@ -1062,6 +1066,52 @@ def team_board_move(item_id: str, req: TeamMove) -> dict:
 @app.delete("/api/team-board/items/{item_id}")
 def team_board_unshare(item_id: str) -> dict:
     return _team(teamboard.unshare, item_id)
+
+
+# the team folder (a Samba share) to pass CapCut projects with their clips (see teamshare.py)
+
+@app.get("/api/team-share")
+def team_share() -> dict:
+    return {"cartella": teamshare.config(), "lavori": teamshare.jobs()}
+
+
+class TeamShareConfig(BaseModel):
+    cartella: str = ""
+    indirizzo: str = ""
+
+
+@app.put("/api/team-share")
+def team_share_config(req: TeamShareConfig) -> dict:
+    return teamshare.set_config(req.cartella, req.indirizzo)
+
+
+@app.post("/api/team-share/mount")
+def team_share_mount() -> dict:
+    return teamshare.mount()
+
+
+class TeamShareSend(BaseModel):
+    item_id: str
+    project_id: str
+
+
+@app.post("/api/team-share/send")
+def team_share_send(req: TeamShareSend) -> dict:
+    p = _project(req.project_id)
+    if not p or not p.get("result_path"):
+        return {"ok": False, "msg": "Non trovo il progetto su questo Mac."}
+    return teamshare.send(req.item_id, p["result_path"], p["name"], teamboard.status().get("io", ""),
+                          log=lambda m: print(m, flush=True))
+
+
+class TeamShareTake(BaseModel):
+    item_id: str
+    nome: str
+
+
+@app.post("/api/team-share/take")
+def team_share_take(req: TeamShareTake) -> dict:
+    return teamshare.take(req.item_id, req.nome, log=lambda m: print(m, flush=True))
 
 
 @app.post("/api/board/todos")

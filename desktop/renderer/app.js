@@ -1257,7 +1257,7 @@ function followChange(jobId, p) {
 
 const DASH = { items: [], stati: [], todo: null, loaded: false, dragId: null, mark: null };
 // the team's board (a private GitHub Project, see teamboard.py)
-const TEAM = { stato: {}, items: [], loaded: false, msg: "", owners: null };
+const TEAM = { stato: {}, items: [], loaded: false, msg: "", owners: null, cartella: {}, lavori: {}, poll: null };
 const STATI = [["da_fare", "Da fare"], ["in_lavorazione", "Da finire"], ["da_revisionare", "Da revisionare"], ["fatto", "Fatto"]];
 
 // Clienti and Agenzie: the archive sections of the sidebar (counts there, a page each).
@@ -1634,6 +1634,7 @@ async function loadTeam(refresh = false) {
     TEAM.stato = d.stato || {};
     TEAM.items = d.items || [];
     TEAM.msg = d.msg || "";
+    TEAM.cartella = d.cartella || {};
     TEAM.loaded = true;
   } catch (e) { TEAM.msg = "Non riesco a leggere la bacheca del team."; }
   const open = TEAM.items.filter((i) => i.stato !== "fatto").length;
@@ -1666,6 +1667,7 @@ function renderTeamBoard() {
   const open = TEAM.items.filter((i) => i.stato !== "fatto").length;
   $("team-sub").innerHTML = `${escapeHtml(st.titolo || "Bacheca del team")} · ${open} video in giro`
     + `${late ? ` · ${late} oltre la scadenza` : ""}. Trascina una scheda per cambiarne lo stato.`
+    + (TEAM.cartella.cartella && !TEAM.cartella.raggiungibile ? ' <span class="warn">Cartella del team non collegata.</span>' : "")
     + (TEAM.msg ? ` <span class="warn">${escapeHtml(TEAM.msg)}</span>` : "");
   renderColumns($("team-board"), TEAM.items, teamCard, moveTeamCard,
     (k) => (k === "da_fare" ? "Condividi un video dalla tua Home con 👥" : "Trascina qui una scheda"));
@@ -1673,7 +1675,10 @@ function renderTeamBoard() {
 
 function teamCard(it, pos = 0) {
   const card = document.createElement("div");
-  const mine = state.projects.find((p) => p.id === it.locale) || DASH.items.find((i) => i.id === it.locale);
+  const here = it.qui || it.locale;      // the project on this Mac: shared from here, or taken from the team folder
+  const mine = state.projects.find((p) => p.id === here) || DASH.items.find((i) => i.id === here);
+  const job = TEAM.lavori[it.id];
+  const busy = job && job.attivo;
   const client = state.clients.find((c) => c.nome === it.cliente);
   card.className = "bcard tcard";
   card.style.setProperty("--c", (client && client.colore) || "#6b7180");
@@ -1690,10 +1695,13 @@ function teamCard(it, pos = 0) {
       <div class="bclient"><i></i>${escapeHtml(it.cliente || "Senza cliente")}</div>
       <div class="btitle">${escapeHtml(it.titolo)}</div>
       ${it.note ? `<div class="bnote">${escapeHtml(it.note)}</div>` : ""}
-      <div class="bmeta">${who}${dueInfo(it.scadenza)}</div>
+      <div class="bmeta">${who}${dueInfo(it.scadenza)}${it.pacchetto ? '<span class="due team" title="Progetto e video sono nella cartella del team">📦 sul server</span>' : ""}</div>
       <div class="bacts">
         ${mine ? '<button class="bbtn" data-a="apri">Apri</button>' : ""}
         ${next ? `<button class="bbtn" data-a="next" title="Sposta in ${escapeHtml(nextName || "")}">→ ${escapeHtml(nextName || "")}</button>` : ""}
+        ${busy ? `<button class="bbtn" disabled>${job.fase === "passo" ? `📦 ${job.pct}%` : "⬇︎ copio…"}</button>`
+          : mine ? `<button class="bbtn" data-a="passa" title="Metti progetto e video nella cartella del team, per chi deve continuarlo">📦 ${it.pacchetto ? "Aggiorna" : "Passa"}</button>`
+          : it.pacchetto ? `<button class="bbtn primary" data-a="prendi" title="Mettilo nel tuo CapCut (passato da ${escapeHtml(it.pacchetto)})">⬇︎ Prendi</button>` : ""}
       </div>
     </div>`;
   card.querySelector(".bx").onclick = async (e) => {
@@ -1710,11 +1718,13 @@ function teamCard(it, pos = 0) {
   card.querySelectorAll(".bbtn").forEach((b) => {
     b.onclick = (e) => {
       e.stopPropagation();
-      if (b.dataset.a === "apri") openFromBoard({ id: it.locale });
+      if (b.dataset.a === "apri") openFromBoard({ id: here });
       else if (b.dataset.a === "next") moveTeamCard(it.id, next, 0);
+      else if (b.dataset.a === "passa") passProject(it, here);
+      else if (b.dataset.a === "prendi") takeProject(it);
     };
   });
-  if (mine) card.onclick = () => openFromBoard({ id: it.locale });
+  if (mine) card.onclick = () => openFromBoard({ id: here });
   return card;
 }
 
@@ -1738,6 +1748,53 @@ async function moveTeamCard(id, stato, index) {
       headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stato, after }) })).json();
     if (!r.ok) { notify(r.msg || "Non sono riuscito a spostarla su GitHub.", "err"); loadTeam(true); }
   } catch (_) { loadTeam(true); }
+}
+
+// ---- passing the CapCut project itself, through the team folder (a Samba share) ----
+
+async function passProject(it, projectId) {
+  if (!TEAM.cartella.raggiungibile) return needTeamFolder();
+  const r = await (await fetch(`${BACKEND}/api/team-share/send`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_id: it.id, project_id: projectId }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non riesco a passarlo.", "err");
+  watchTeamJobs();
+}
+
+async function takeProject(it) {
+  if (!TEAM.cartella.raggiungibile) return needTeamFolder();
+  if (!confirm(`Metto «${it.titolo}» nel tuo CapCut, con i suoi video copiati su questo Mac?`)) return;
+  const r = await (await fetch(`${BACKEND}/api/team-share/take`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_id: it.id, nome: it.titolo }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non riesco a prenderlo.", "err");
+  watchTeamJobs();
+}
+
+function needTeamFolder() {
+  notify(TEAM.cartella.cartella ? "La cartella del team non è raggiungibile: collega il server." : "Imposta prima la cartella del team (il server Samba).", "err");
+  openTeamModal();
+}
+
+// copies run for minutes: follow them on the cards, then say how it went
+function watchTeamJobs() {
+  clearInterval(TEAM.poll);
+  const tick = async () => {
+    let d;
+    try { d = await (await fetch(`${BACKEND}/api/team-share`)).json(); } catch (_) { return; }
+    const before = TEAM.lavori;
+    TEAM.lavori = d.lavori || {};
+    TEAM.cartella = d.cartella || TEAM.cartella;
+    for (const [id, j] of Object.entries(TEAM.lavori)) {
+      if (!j.attivo && before[id] && before[id].attivo) {
+        notify(j.errore ? `Non riuscito: ${j.errore}` : j.msg, j.errore ? "err" : "ok");
+        loadTeam(true);
+        if (!j.errore && j.fase !== "passo") loadProjects();
+      }
+    }
+    if (!Object.values(TEAM.lavori).some((j) => j.attivo)) clearInterval(TEAM.poll);
+    if (!$("view-team").hidden) renderTeamBoard();
+  };
+  TEAM.poll = setInterval(tick, 1000);
+  tick();
 }
 
 async function shareCard(it, btn) {
@@ -1778,10 +1835,44 @@ gh auth login</pre><p class="ai-foot">Poi premi «Ricontrolla».</p>`;
   }
   if (st.collegata) {
     body.innerHTML = `<p class="ai-intro">Collegata a <b>${escapeHtml(st.titolo)}</b> di <b>${escapeHtml(st.owner)}</b>.
-      Chi ha accesso alla bacheca vede gli stessi video nella vista «👥 Team» della Home.</p>
-      <div class="row2 pair"><button class="btn2" id="team-gh">Apri su GitHub ↗</button>
-      <button class="btn2 danger" id="team-off">Scollega</button></div>`;
-    $("team-gh").onclick = () => window.api && window.api.openExternal(st.url);
+      Chi ha accesso alla bacheca vede gli stessi video nella pagina Team.</p>
+      <div class="row2 pair"><button class="btn2" id="team-gh2">Apri su GitHub ↗</button>
+      <button class="btn2 danger" id="team-off">Scollega</button></div>
+      <label>Cartella del team <span class="opt">il server Samba con il materiale: lì passano i progetti CapCut</span></label>
+      <div class="row2"><input type="text" id="tm-share-path" placeholder="es. /Volumes/CapWizard" readonly>
+        <button class="btn2" id="tm-share-pick">Scegli…</button></div>
+      <label>Indirizzo del server <span class="opt">per collegarlo da qui</span></label>
+      <div class="row2"><input type="text" id="tm-share-addr" placeholder="smb://nas.local/CapWizard">
+        <button class="btn2" id="tm-share-mount">Collega</button></div>
+      <p class="ai-foot" id="tm-share-state"></p>`;
+    const cfg = TEAM.cartella || {};
+    $("tm-share-path").value = cfg.cartella || "";
+    $("tm-share-addr").value = cfg.indirizzo || "";
+    const showShare = (c) => {
+      $("tm-share-state").textContent = !c.cartella ? "Nessuna cartella: scegli quella del server quando è collegato (di solito in /Volumes)."
+        : c.raggiungibile ? "✓ Raggiungibile: dalle schede del team puoi passare e prendere i progetti."
+        : "✕ Non raggiungibile ora: collega il server.";
+    };
+    showShare(cfg);
+    const saveShare = async () => {
+      const c = await (await fetch(`${BACKEND}/api/team-share`, { method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cartella: $("tm-share-path").value, indirizzo: $("tm-share-addr").value }) })).json();
+      TEAM.cartella = c;
+      showShare(c);
+    };
+    $("tm-share-pick").onclick = async () => {
+      const f = window.api && await window.api.selectFolder();
+      if (f) { $("tm-share-path").value = f; saveShare(); }
+    };
+    $("tm-share-addr").onchange = saveShare;
+    $("tm-share-mount").onclick = async () => {
+      await saveShare();
+      const r = await (await fetch(`${BACKEND}/api/team-share/mount`, { method: "POST" })).json();
+      if (!r.ok) return notify(r.msg, "err");
+      notify("Il Finder collega il server (la prima volta chiede la password). Poi scegli la cartella.", "ok");
+      setTimeout(async () => { await loadTeam(); showShare(TEAM.cartella); }, 6000);
+    };
+    $("team-gh2").onclick = () => window.api && window.api.openExternal(st.url);
     $("team-off").onclick = async () => {
       if (!confirm("Scollegare la bacheca del team da questo Mac? Su GitHub resta tutto com'è.")) return;
       await fetch(`${BACKEND}/api/team-board/disconnect`, { method: "POST" });

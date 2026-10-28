@@ -484,15 +484,17 @@ def porta_media(folder: str, nome: str) -> str:
     return f"📦 Copiati {len(mapping)} file in `{dst_dir}` (CapCut li apre già collegati)."
 
 
-def install(staging: str, nome: str, log=print) -> str:
+def install(staging: str, nome: str, log=print, cutout: bool = True) -> str:
     """Copy a project built in `staging` into CapCut's projects, cut out the person for the title and link the media.
-    With CapCut closed it is also added to the home list (root_meta_info); with CapCut open, restart CapCut to see it."""
+    With CapCut closed it is also added to the home list (root_meta_info); with CapCut open, restart CapCut to see it.
+    A project passed on by a teammate (teamshare.take) is already finished: no cut-out."""
     dst = CAPCUT_PROJECTS_DIR / nome
     if dst.exists():
         raise RuntimeError(f"Esiste già un progetto CapCut «{nome}».")
     shutil.copytree(staging, dst, ignore=shutil.ignore_patterns("draft.extra", "crypto_key_store.dat*", ".locked"))
-    log("📦 Installo il progetto: scontorno la persona per il titolo e collego le clip…")
-    cut = scontorna(str(dst), nome, log)
+    log("📦 Installo il progetto: scontorno la persona per il titolo e collego le clip…" if cutout
+        else "📦 Installo il progetto e copio le clip dove CapCut le apre…")
+    cut = scontorna(str(dst), nome, log) if cutout else ""
     media = porta_media(str(dst), nome)
     meta_p, info_p = dst / "draft_meta_info.json", dst / "draft_info.json"
     meta, d = json.load(open(meta_p)), json.load(open(info_p))

@@ -145,6 +145,14 @@ sposta anche nel team, e viceversa.
   `gh api graphql` con il login di chi usa l'app (`src/capwizard_app/teamboard.py`).
 - La nostra è «CapWizard · Punto della situazione» di Cap-Wizard, aperta al team Editor.
 
+**Passare il progetto CapCut.** Il progetto pesa pochi MB ma i suoi video gigabyte, e stanno dove
+li aveva chi l'ha montato: per passarlo serve la **cartella del team**, un server Samba montato su
+ogni Mac (in «Bacheca del team»: la cartella, es. `/Volumes/CapWizard`, e l'indirizzo `smb://…`
+per collegarlo). Sulla scheda del team chi ha il progetto preme **📦 Passa**: progetto e video
+vanno in `CapWizard/Progetti/<nome>/` con i percorsi resi relativi (`capwizard-media://…`). Sugli
+altri Mac la scheda mostra **⬇︎ Prendi**: il progetto entra nel loro CapCut come quelli montati
+dall'app, con i video copiati in `~/Movies/CapCut Editor/<nome>/` (`src/capwizard_app/teamshare.py`).
+
 ## Architettura Python
 
 ```

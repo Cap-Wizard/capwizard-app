@@ -303,6 +303,14 @@ def links() -> dict:
     return dict(_settings().get("links", {}))
 
 
+def link(local_id: str, item_id: str) -> None:
+    """Tie a team card to a project of this Mac (e.g. one just taken from the team folder)."""
+    s = _settings()
+    if s.get("project_id"):
+        s.setdefault("links", {})[local_id] = item_id
+        _save(s)
+
+
 def follow_soon(local_id: str, stato: str, log=print) -> None:
     """A shared card moved on my Home: move it on the team's board too, in the background."""
     item = linked(local_id)
