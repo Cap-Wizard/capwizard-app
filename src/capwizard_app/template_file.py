@@ -127,8 +127,9 @@ def export(client_id: str, dest: str, cosa: str = "completo", log=print) -> dict
                 description = (f"Monta e corregge i reel di {c['nome']}" + (f" ({fields['agenzia']})" if fields["agenzia"] else "")
                                + f" in CapCut con {tpl}: colore, font, regole e lezioni del cliente.")
                 stile = vault.read_note(f"Stile {c['stile']}") if c.get("stile") else ""
+                stile = re.sub(r"^#+ .*\n", "", _links(stile), count=1).strip() if stile else ""   # (no \ inside f-strings before 3.12)
                 body = (_intro(c["nome"]) + re.sub(r"^# .*\n", "", _links(vault.rules_text(client_id)), count=1)
-                        + (f"\n\n## Stile dell'agenzia\n\n{re.sub(r'^#+ .*\n', '', _links(stile), count=1).strip()}" if stile else ""))
+                        + (f"\n\n## Stile dell'agenzia\n\n{stile}" if stile else ""))
                 (root / name).mkdir()
             else:
                 md = Path(c["path"])
