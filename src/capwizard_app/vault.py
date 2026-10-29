@@ -226,7 +226,7 @@ def list_clients() -> list[dict]:
         ag, cl = os.path.basename(os.path.dirname(p)), os.path.basename(p)[:-3]
         full = f"{ag} / {cl}"
         base = base_for(full)
-        out.append({"id": cid(ag, cl), "nome": cl, "agenzia": ag, "template": base, "template_ok": bool(base),
+        out.append({"id": cid(ag, cl), "nome": cl.upper(), "agenzia": ag, "template": base, "template_ok": bool(base),
                     "colore": colore(cl), "stile": stile_for(full), "descrizione": f"Cliente di {ag} (Obsidian)",
                     "path": p, "source": "vault"})
     return out
@@ -341,7 +341,9 @@ def brief(job: dict, progetti_cliente: set[str] = frozenset()) -> str:
     ag, cl = split_id(job["client"])
     cliente = f"{ag} / {cl}"
     stile = job.get("stile") or stile_for(cliente)
-    clips = [clip_info(c) for c in videos_in(job["input_path"]) + videos_in(job["input_path"] + "/*")]
+    tolte = {os.path.normpath(c) for c in job.get("exclude") or []}
+    br = job.get("broll_path")
+    clips = [clip_info(c) for c in videos_in(job["input_path"]) + videos_in(job["input_path"] + "/*") if os.path.normpath(c) not in tolte]
     parts = [f"# Lavoro: {job['name']}", f"- Cliente: **{cliente}** · Stile: **{stile}** · Musica: **{'sì' if job.get('musica', True) else 'no'}**"
              + (" · **🎬 VIDEO CINE**" if job.get("cine") else ""),
              f"- Cartella clip: `{job['input_path']}`", f"- Note di Daniel: {job.get('notes') or '—'}", "",
@@ -349,13 +351,19 @@ def brief(job: dict, progetti_cliente: set[str] = frozenset()) -> str:
              "Se più clip dicono le stesse cose sono take rifatte da Daniel finché non andava bene: tieni l'ULTIMA take completa "
              "(numero/ora più alti), a meno che sia chiaramente peggiore; mai due take della stessa frase nel video."]
     parts += [clip_line(c) for c in clips] or ["- (nessuna clip direttamente nella cartella: guarda nelle sottocartelle, es. CLIP/)"]
-    br = job.get("broll_path")
+    clip_tolte = sorted(c for c in tolte if not br or not c.startswith(os.path.normpath(br) + os.sep))
+    if clip_tolte:
+        parts += ["", "## Clip tolte da Daniel nell'app: NON usarle mai (non sono nemmeno trascritte)"]
+        parts += [f"- {os.path.relpath(c, job['input_path'])}" for c in clip_tolte]
     if br and os.path.isdir(br):
         parts += ["", f"## B-roll dati a parte (`{br}`)",
                   "Usali SOLO quando servono (quando si parla di ciò che mostrano, o per coprire un taglio/una pausa), non per forza tutti e non sempre: "
                   "muti, sopra il parlato, 1,5–3 s l'uno, mai sopra titolo e CTA. Quelli a 50p o 100 fps (🐢) sono girati per lo slow motion: "
                   "mettili rallentati (50p → velocità 0,5; 100 fps → 0,3) clonando la velocità da un segmento della base."]
-        parts += [clip_line(clip_info(c), br) for c in videos_in(br, recursive=True)]
+        parts += [clip_line(clip_info(c), br) for c in videos_in(br, recursive=True) if os.path.normpath(c) not in tolte]
+        br_tolti = sorted(c for c in tolte if c.startswith(os.path.normpath(br) + os.sep))
+        if br_tolti:
+            parts += ["B-roll tolti da Daniel nell'app, NON usarli mai: " + ", ".join(os.path.relpath(c, br) for c in br_tolti)]
     if job.get("musica", True):
         parts += sezione_musica(cliente, set(progetti_cliente))
     for f in istruzioni_video(job, ag, cl):
@@ -521,9 +529,10 @@ def drop_patch(folder) -> None:
         shutil.rmtree(patch, ignore_errors=True)
 
 
-def install(staging: str, nome: str, log=print) -> str:
+def install(staging: str, nome: str, log=print, cutout: bool = True) -> str:
     """Copy a project built in `staging` into CapCut's projects, cut out the person for the title and link the media.
-    With CapCut closed it is also added to the home list (root_meta_info); with CapCut open, restart CapCut to see it."""
+    With CapCut closed it is also added to the home list (root_meta_info); with CapCut open, restart CapCut to see it.
+    A project passed on by a teammate (teamshare.take) is already finished: no cut-out."""
     dst = CAPCUT_PROJECTS_DIR / nome
     if dst.exists():
         raise RuntimeError(f"Esiste già un progetto CapCut «{nome}».")
@@ -533,8 +542,9 @@ def install(staging: str, nome: str, log=print) -> str:
     skip = ["crypto_key_store.dat*", ".locked", ".keep_draft_extra"] + ([] if keep_extra else ["draft.extra"])
     shutil.copytree(staging, dst, ignore=shutil.ignore_patterns(*skip))
     drop_patch(dst)
-    log("📦 Installo il progetto: scontorno la persona per il titolo e collego le clip…")
-    cut = scontorna(str(dst), nome, log)
+    log("📦 Installo il progetto: scontorno la persona per il titolo e collego le clip…" if cutout
+        else "📦 Installo il progetto e copio le clip dove CapCut le apre…")
+    cut = scontorna(str(dst), nome, log) if cutout else ""
     media = porta_media(str(dst), nome)
     meta_p, info_p = dst / "draft_meta_info.json", dst / "draft_info.json"
     meta, d = json.load(open(meta_p)), json.load(open(info_p))

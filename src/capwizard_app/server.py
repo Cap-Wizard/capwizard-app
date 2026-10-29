@@ -22,9 +22,11 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import threading
@@ -40,7 +42,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent, ai_render, aiservices, board, brain, scarico, vault
+from capwizard_app import agent, ai_render, aiservices, board, brain, scarico, teamboard, teamshare, template_file, vault
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +134,7 @@ class GenerateRequest(BaseModel):
     projects_dir: str | None = None
     broll_path: str | None = None     # b-roll the client gave in another folder
     reference: list[str] = []         # videos to imitate (rhythm, sounds, titles, subtitles)
+    exclude: list[str] = []           # clips taken out with their ✕ in the app: never used
     cine: bool = False                # "video cine": per-clip colour, b-roll on the cuts (vault clients)
     ai_media: bool = True             # Claude may use the AI services chosen in the app (b-roll, images…)
 
@@ -155,7 +158,8 @@ app = FastAPI(title="CapWizard API", version="0.2.0-alpha.2")
 # in a browser on this Mac can call it. Electron hands the backend a random token at launch
 # (CAPWIZARD_TOKEN) and the renderer sends it on every request; a web page can't know it.
 # The renderer loads from file://, whose origin is "null".
-TOKEN = os.environ.get("CAPWIZARD_TOKEN", "")
+# Started by hand without one, the API still is not open to every web page: it gets a random one.
+TOKEN = os.environ.get("CAPWIZARD_TOKEN") or secrets.token_hex(24)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["null"], allow_methods=["*"], allow_headers=["*"],
@@ -163,7 +167,16 @@ app.add_middleware(
 
 
 def _token_ok(given: str | None) -> bool:
-    return not TOKEN or hmac.compare_digest(given or "", TOKEN)
+    return hmac.compare_digest(given or "", TOKEN)
+
+
+class _HideToken(logging.Filter):
+    """The job log's websocket carries the token in its address: never print it in the log."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "t=" in msg:
+            record.msg, record.args = re.sub(r"([?&]t=)[^&\s\"']+", r"\1…", msg), ()
+        return True
 
 
 @app.middleware("http")
@@ -560,6 +573,48 @@ def client_params_save(client_id: str, req: ClientParams) -> dict:
     return out
 
 
+# a client's template as one zip (its skill and its CapCut folder): see template_file.py
+
+class TemplateExport(BaseModel):
+    client_id: str
+    path: str
+    cosa: str = "completo"          # completo | skill | cartella
+
+
+@app.post("/api/template-file/export")
+def template_file_export(req: TemplateExport) -> dict:
+    try:
+        return template_file.export(req.client_id, req.path, req.cosa, log=lambda m: print(m, flush=True))
+    except (OSError, ValueError) as e:
+        return {"ok": False, "msg": f"Esportazione non riuscita: {e}"}
+
+
+class TemplateFile(BaseModel):
+    path: str
+
+
+@app.post("/api/template-file/read")
+def template_file_read(req: TemplateFile) -> dict:
+    return template_file.read(req.path)
+
+
+class TemplateInstall(BaseModel):
+    path: str
+    cliente: str
+    agenzia: str = ""
+    colore: str
+    font: str = ""
+
+
+@app.post("/api/template-file/install")
+def template_file_install(req: TemplateInstall) -> dict:
+    try:
+        return template_file.install(req.path, req.cliente, req.agenzia, req.colore, req.font,
+                                     log=lambda m: print(m, flush=True))
+    except (OSError, ValueError, RuntimeError) as e:
+        return {"ok": False, "msg": f"Caricamento non riuscito: {e}"}
+
+
 @app.get("/api/brain")
 def brain_status() -> dict:
     """Where the shared client repo is and how its last sync went."""
@@ -623,7 +678,29 @@ def folder_info(path: str) -> dict:
         lengths = [d or 0.0 for d, _ in info]
         thumbs = list(ex.map(lambda cd: _thumb(cd[0], 160, min(1.0, cd[1] / 2)), list(zip(clips, lengths))[:8]))
     return {"ok": True, "n": len(clips), "durata": round(sum(lengths)), "thumbs": [t for t in thumbs if t],
-            "lenti": sum(1 for _, f in info if vault.is_slowmo(f))}
+            "lenti": sum(1 for _, f in info if vault.is_slowmo(f)),
+            # every clip, so each one can be taken out; the frames after the first 8 come from /api/thumbs
+            "clips": [{"path": str(c), "durata": d, "lento": bool(vault.is_slowmo(f)), "thumb": thumbs[k] if k < len(thumbs) else ""}
+                      for k, (c, (d, f)) in enumerate(zip(clips, ((d or 0.0, f) for d, f in info)))]}
+
+
+class ThumbsRequest(BaseModel):
+    paths: list[str]
+
+
+@app.post("/api/thumbs")
+def thumbs_of(req: ThumbsRequest) -> dict:
+    """Frames of the clips the strip shows after the first 8 (asked a few at a time)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(p: str) -> str:
+        src = Path(p)
+        if not src.is_file():
+            return ""
+        d = vault.probe(p)[0] or 0.0
+        return _thumb(src, 160, min(1.0, d / 2))
+    with ThreadPoolExecutor(6) as ex:
+        return {"thumbs": list(ex.map(one, req.paths[:40]))}
 
 
 @app.post("/api/jobs/{job_id}/stop")
@@ -978,12 +1055,277 @@ def board_get() -> dict:
     clients = agent.list_clients()
     templates = {c["template"] for c in clients if c.get("template")}
     templates |= {(p.get("settings") or {}).get("template") or "" for p in registry.list_projects()}
-    return board.board(projects_list()["projects"], clients, templates - {"", "—"})
+    out = board.board(projects_list()["projects"], clients, templates - {"", "—"})
+    shared = teamboard.links()
+    for it in out["items"]:
+        it["team"] = shared.get(it["id"]) or shared.get(it.get("todo_id") or "", "")
+    return out
 
 
 @app.put("/api/board/status")
 def board_status(req: BoardStatus) -> dict:
+    teamboard.follow_soon(req.id, req.stato, log=lambda m: print(m, flush=True))
     return board.set_status(req.id, req.stato)
+
+
+class BoardOrder(BaseModel):
+    stato: str
+    ids: list[str]
+
+
+@app.put("/api/board/order")
+def board_order(req: BoardOrder) -> dict:
+    moved = [i for i in req.ids if board.status_of(i) != req.stato]
+    out = board.set_order(req.stato, req.ids)
+    for i in moved:
+        teamboard.follow_soon(i, req.stato, log=lambda m: print(m, flush=True))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The team's board: a private GitHub Project shared by the team (see teamboard.py)
+# ---------------------------------------------------------------------------
+
+def _team(fn, *args, **kw) -> dict:
+    try:
+        return fn(*args, **kw)
+    except teamboard.TeamBoardError as e:
+        return {"ok": False, "msg": str(e)}
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "msg": f"GitHub non risponde: {e}"}
+
+
+@app.get("/api/team-board")
+def team_board(refresh: bool = False) -> dict:
+    st = teamboard.status()
+    if not st["collegata"]:
+        return {"stato": st, "items": []}
+    res = _team(lambda: {"items": teamboard.items(refresh)})
+    here = {v: k for k, v in teamboard.links().items()}
+    pkgs = teamshare.packages()
+    items = [dict(it, qui=here.get(it["id"], ""), pacchetto=pkgs.get(teamshare.safe(it["titolo"]), {}).get("da", ""))
+             for it in res.get("items", [])]
+    return {"stato": st, "items": items, "msg": res.get("msg", ""), "cartella": teamshare.config()}
+
+
+@app.get("/api/team-board/owners")
+def team_board_owners() -> dict:
+    return _team(teamboard.owners)
+
+
+class TeamCreate(BaseModel):
+    owner: str
+    owner_id: str
+    titolo: str = ""
+    team: str = ""
+
+
+@app.post("/api/team-board/create")
+def team_board_create(req: TeamCreate) -> dict:
+    return _team(teamboard.create, req.owner, req.owner_id, req.titolo, req.team)
+
+
+class TeamConnect(BaseModel):
+    owner: str
+    project_id: str
+
+
+@app.post("/api/team-board/connect")
+def team_board_connect(req: TeamConnect) -> dict:
+    return _team(teamboard.connect, req.owner, req.project_id)
+
+
+@app.post("/api/team-board/disconnect")
+def team_board_disconnect() -> dict:
+    return teamboard.disconnect()
+
+
+class TeamShare(BaseModel):
+    id: str = ""
+    titolo: str
+    cliente: str = ""
+    scadenza: str = ""
+    note: str = ""
+    stato: str = "da_fare"
+
+
+@app.post("/api/team-board/share")
+def team_board_share(req: TeamShare) -> dict:
+    return _team(teamboard.share, req.model_dump())
+
+
+class TeamMove(BaseModel):
+    stato: str
+    after: str | None = None      # put it right below this card ("" = on top); None = keep its place
+
+
+@app.put("/api/team-board/items/{item_id}")
+def team_board_move(item_id: str, req: TeamMove) -> dict:
+    res = _team(teamboard.set_status, item_id, req.stato, req.after)
+    local = next((k for k, v in teamboard.links().items() if v == item_id), "")
+    if res.get("ok") and local:               # one of my own cards: my Home follows
+        board.set_status(local, req.stato)
+    return res
+
+
+@app.delete("/api/team-board/items/{item_id}")
+def team_board_unshare(item_id: str) -> dict:
+    return _team(teamboard.unshare, item_id)
+
+
+# videos to edit: a folder of clips goes on the team's list with a price, one person takes each
+
+@app.get("/api/team-board/folder")
+def team_board_folder(path: str) -> dict:
+    """The videos in a folder: one per subfolder of clips (the «Smistamento clip» layout), else one per video file."""
+    base = Path(path)
+    if not base.is_dir():
+        return {"ok": False, "msg": "Non è una cartella."}
+    def clips(d: Path) -> int:
+        return sum(1 for p in d.iterdir() if p.is_file() and p.suffix.lower() in VIDEO_EXT and not p.name.startswith("._"))
+    try:
+        entries = sorted((p for p in base.iterdir() if not p.name.startswith(".")), key=lambda p: p.name.lower())
+        videos = [{"titolo": d.name, "cartella": str(d), "clip": n} for d in entries if d.is_dir() and (n := clips(d))]
+        if not videos:
+            videos = [{"titolo": f.stem, "cartella": str(base), "clip": 1} for f in entries
+                      if f.is_file() and f.suffix.lower() in VIDEO_EXT and not f.name.startswith("._")]
+    except OSError as e:
+        return {"ok": False, "msg": f"Non riesco a leggere la cartella: {e}"}
+    up = str(base).upper()
+    hits = [c for c in agent.list_clients() if len(c["nome"]) >= 3 and c["nome"].upper() in up]
+    client = max(hits, key=lambda c: len(c["nome"])) if hits else None
+    return {"ok": True, "nome": base.name, "videos": videos, "cliente": client["nome"] if client else ""}
+
+
+class TeamVideo(BaseModel):
+    titolo: str
+    prezzo: float | None = None
+    cartella: str = ""
+
+
+class TeamVideos(BaseModel):
+    videos: list[TeamVideo]
+    cliente: str = ""
+
+
+@app.post("/api/team-board/videos")
+def team_board_videos(req: TeamVideos) -> dict:
+    return _team(teamboard.add_videos, [v.model_dump() for v in req.videos], req.cliente.strip())
+
+
+class TeamVideoEdit(BaseModel):
+    titolo: str
+    cliente: str = ""
+    prezzo: float | None = None
+
+
+@app.put("/api/team-board/items/{item_id}/video")
+def team_board_video_edit(item_id: str, req: TeamVideoEdit) -> dict:
+    return _team(teamboard.edit_video, item_id, req.titolo, req.cliente.strip().upper(), req.prezzo)
+
+
+@app.post("/api/team-board/items/{item_id}/take")
+def team_board_take(item_id: str) -> dict:
+    """«Edita»: the video is mine on the board, and a card on my Home with its client, folder and price."""
+    it = next((i for i in _team(lambda: {"items": teamboard.items(True)}).get("items", []) if i["id"] == item_id), None)
+    if not it:
+        return {"ok": False, "msg": "Questo video non c'è più nella lista del team."}
+    had = next((k for k, v in teamboard.links().items() if v == item_id), "")
+    if had:                                   # already on my Home
+        return {"ok": True, "todo": had}
+    res = _team(teamboard.take, item_id)
+    if not res.get("ok"):
+        return res
+    client = next((c for c in agent.list_clients() if c["nome"].upper() == (it["cliente"] or "").upper()), None)
+    note = f"Prezzo: {it['prezzo']:g} €" if it.get("prezzo") is not None else ""
+    todo = board.add_todo({"titolo": it["titolo"], "cliente": client["id"] if client else it["cliente"],
+                           "cartella": it["cartella"] if it["cartella"] and Path(it["cartella"]).is_dir() else "",
+                           "note": "\n".join(x for x in (note, it.get("note") or "") if x)})
+    if todo.get("ok"):
+        teamboard.link(todo["todo"]["id"], item_id)
+    return {"ok": True, "todo": todo.get("todo", {}).get("id", "")}
+
+
+@app.post("/api/team-board/items/{item_id}/release")
+def team_board_release(item_id: str) -> dict:
+    """The ✕ on a video taken from the team: it goes back to everyone's list and leaves my Home."""
+    mine = [k for k, v in teamboard.links().items() if v == item_id]
+    res = _team(teamboard.release, item_id)
+    if res.get("ok"):
+        for local in mine:
+            if local.startswith("todo:"):
+                board.remove_todo(local)
+    return res
+
+
+# the team folder (a Samba share) to pass CapCut projects with their clips (see teamshare.py)
+
+@app.get("/api/team-share")
+def team_share() -> dict:
+    return {"cartella": teamshare.config(), "lavori": teamshare.jobs()}
+
+
+class TeamShareConfig(BaseModel):
+    cartella: str = ""
+    indirizzo: str = ""
+
+
+@app.put("/api/team-share")
+def team_share_config(req: TeamShareConfig) -> dict:
+    return teamshare.set_config(req.cartella, req.indirizzo)
+
+
+@app.post("/api/team-share/mount")
+def team_share_mount() -> dict:
+    return teamshare.mount()
+
+
+class TeamShareSend(BaseModel):
+    item_id: str
+    project_id: str
+
+
+@app.post("/api/team-share/send")
+def team_share_send(req: TeamShareSend) -> dict:
+    p = _project(req.project_id)
+    if not p or not p.get("result_path"):
+        return {"ok": False, "msg": "Non trovo il progetto su questo Mac."}
+    return teamshare.send(req.item_id, p["result_path"], p["name"], teamboard.status().get("io", ""),
+                          log=lambda m: print(m, flush=True))
+
+
+class TeamShareTake(BaseModel):
+    item_id: str
+    nome: str
+
+
+@app.post("/api/team-share/take")
+def team_share_take(req: TeamShareTake) -> dict:
+    return teamshare.take(req.item_id, req.nome, log=lambda m: print(m, flush=True))
+
+
+# client templates through the same folder: the CapCut project, with sounds, music and pictures
+
+@app.get("/api/team-share/templates")
+def team_share_templates() -> dict:
+    return {"cartella": teamshare.config(), "templates": teamshare.templates(), "lavori": teamshare.jobs()}
+
+
+class TeamTemplate(BaseModel):
+    nome: str
+
+
+@app.post("/api/team-share/templates/send")
+def team_share_template_send(req: TeamTemplate) -> dict:
+    res = teamshare.send_template(req.nome, teamboard.status().get("io", ""), log=lambda m: print(m, flush=True))
+    if res.get("ok"):
+        brain.push_soon(f"Template {req.nome} caricato nella cartella del team")   # and its client profile on GitHub
+    return res
+
+
+@app.post("/api/team-share/templates/take")
+def team_share_template_take(req: TeamTemplate) -> dict:
+    return teamshare.take_template(req.nome, log=lambda m: print(m, flush=True))
 
 
 @app.post("/api/board/todos")
@@ -1173,7 +1515,10 @@ def run() -> None:
     brain.start(on_vault=lambda v: setattr(vault, "VAULT", v), log=lambda m: print(m, flush=True))
 
     import uvicorn
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    config = uvicorn.Config(app, host=args.host, port=args.port, log_level="info")   # sets up uvicorn's logging
+    for name in ("uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).addFilter(_HideToken())
+    uvicorn.Server(config).run()
 
 
 if __name__ == "__main__":

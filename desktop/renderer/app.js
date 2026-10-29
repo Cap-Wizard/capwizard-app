@@ -130,6 +130,14 @@ function notice(id, { icon = "⚠️", title, text = "", tone = "err", actions =
   n.querySelector(".nx").onclick = () => dropNotice(id);
 }
 
+// a short message that leaves by itself (the team board's "shared", "couldn't move it"…)
+function notify(text, tone = "ok") {
+  const id = `msg-${Date.now()}`;
+  notice(id, { icon: tone === "ok" ? "✓" : "⚠️", title: text, tone: tone === "ok" ? "warn" : "err" });
+  if (tone === "ok") document.getElementById(`notice-${id}`).style.setProperty("--nc", "var(--ok)");
+  setTimeout(() => dropNotice(id), tone === "ok" ? 3500 : 8000);
+}
+
 function dropNotice(id) {
   const n = document.getElementById(`notice-${id}`);
   if (!n || n.classList.contains("out")) return;
@@ -142,19 +150,20 @@ function dropNotice(id) {
 // ---------------------------------------------------------------------------
 
 function showView(name) {
-  for (const v of ["view-auth", "view-subscribe", "view-dash", "view-home", "view-editor", "view-scarico",
+  for (const v of ["view-auth", "view-subscribe", "view-dash", "view-team", "view-home", "view-editor", "view-scarico",
                    "view-clients", "view-agencies"]) {
     $(v).hidden = v !== `view-${name}`;
   }
-  const inApp = ["home", "editor", "dash", "scarico", "clients", "agencies"].includes(name);
+  const inApp = ["home", "editor", "dash", "team", "scarico", "clients", "agencies"].includes(name);
   $("views").hidden = !inApp;
   $("v-clients").classList.toggle("on", name === "clients");
   $("v-agencies").classList.toggle("on", name === "agencies");
-  $("mb-title").textContent = { dash: "Home", editor: "Nuovo video", home: "I miei progetti", scarico: "Smistamento clip",
+  $("mb-title").textContent = { dash: "Home", team: "Team", editor: "Nuovo video", home: "I miei progetti", scarico: "Smistamento clip",
                                 clients: "Clienti", agencies: "Agenzie" }[name] || "";
   if (name === "clients") renderClientsView();
   if (name === "agencies") renderAgenciesView();
   $("v-dash").classList.toggle("on", name === "dash");
+  $("v-team").classList.toggle("on", name === "team");
   $("v-new").classList.toggle("on", name === "editor");
   $("v-proj").classList.toggle("on", name === "home");
   $("v-scarico").classList.toggle("on", name === "scarico");
@@ -167,6 +176,7 @@ function showView(name) {
   if (state.email) $("tb-email").textContent = state.email;
   if (name === "home" && state.backendReady) loadProjects();
   if (name === "dash" && state.backendReady) loadBoard();
+  if (name === "team" && state.backendReady) { renderTeamBoard(); loadTeam(true); }
   if (name === "scarico" && state.backendReady) loadScaricoCodes();
 }
 
@@ -293,7 +303,7 @@ function renderChips() {
     const chip = document.createElement("button");
     chip.className = "chip" + (state.client && state.client.id === c.id ? " on" : "");
     chip.style.setProperty("--c", c.colore);
-    chip.innerHTML = `<i style="background:${c.colore}"></i>${escapeHtml(c.nome)}`;
+    chip.innerHTML = `<i style="background:${safeColor(c.colore)}"></i>${escapeHtml(c.nome)}`;
     chip.onclick = () => chooseClient(c);
     box.appendChild(chip);
   }
@@ -422,21 +432,10 @@ async function loadKit() {
 // Step 2: clips
 // ---------------------------------------------------------------------------
 
-let brTok = 0;
-async function setBroll(path) {
-  const tok = ++brTok;
+async function setBroll(path, exclude = []) {
   $("broll-path").value = path;
-  $("broll-label").innerHTML = path ? `${escapeHtml(path)} <button class="btn-link mini" id="br-clear">✕ togli</button>` : "";
-  $("thumbs-broll").innerHTML = "";
-  $("br-info").textContent = path ? "carico…" : "";
-  if (!path) return;
-  $("br-clear").onclick = (e) => { e.stopPropagation(); setBroll(""); };
-  try {
-    const i = await (await fetch(`${BACKEND}/api/folder-info?path=${encodeURIComponent(path)}`)).json();
-    if (tok !== brTok) return;
-    $("br-info").textContent = i.ok && i.n ? `${i.n} b-roll${i.lenti ? " · 🐢 " + i.lenti + " slow-mo" : ""}` : "nessun video";
-    for (const t of i.thumbs || []) { const img = document.createElement("img"); img.src = t; $("thumbs-broll").appendChild(img); }
-  } catch (_) { $("br-info").textContent = ""; }
+  $("broll-label").textContent = path;
+  await loadStrip(strips.broll, path, exclude);
 }
 
 // Reference videos: one box per video plus an empty one to add more. Dropped on a full box, a video replaces it.
@@ -469,25 +468,82 @@ function renderRefs() {
   $("ref-info").textContent = state.refs.length ? `${state.refs.length} video` : "facoltativo";
 }
 
-async function setFolder(path) {
+async function setFolder(path, exclude = []) {
   $("input-path").value = path;
   $("input-path-label").textContent = path;
-  $("s2-info").textContent = "carico…";
-  $("thumbs").innerHTML = "";
   suggestName();
   check();
-  if (state.batch) previewBatch();
+  if (path && state.batch) previewBatch();
+  await loadStrip(strips.clips, path, exclude);
+}
+
+// The clips box and the b-roll box: one frame per video, each with its ✕, and a ✕ on the box for all of them.
+const strips = {
+  clips: { input: "input-path", thumbs: "thumbs", info: "s2-info", clear: "clips-clear", unit: "clip", none: "nessuna clip trovata", tolto: ["tolta", "tolte"],
+           empty: () => setFolder(""), items: [], excluded: new Set(), tok: 0 },
+  broll: { input: "broll-path", thumbs: "thumbs-broll", info: "br-info", clear: "broll-clear", unit: "b-roll", none: "nessun video", tolto: ["tolto", "tolti"],
+           empty: () => setBroll(""), items: [], excluded: new Set(), tok: 0 },
+};
+
+async function loadStrip(s, path, exclude = []) {
+  const tok = ++s.tok;
+  $(s.thumbs).innerHTML = "";
+  $(s.clear).hidden = !path;
+  $(s.info).textContent = path ? "carico…" : "";
+  s.items = [];
+  s.excluded = new Set();
+  if (!path) return;
   try {
     const i = await (await fetch(`${BACKEND}/api/folder-info?path=${encodeURIComponent(path)}`)).json();
-    if ($("input-path").value !== path) return;
-    $("s2-info").textContent = i.ok && i.n
-      ? `${i.n} clip · ${Math.floor(i.durata / 60)}:${String(i.durata % 60).padStart(2, "0")} min${i.lenti ? " · 🐢 " + i.lenti + " slow-mo" : ""}` : "nessuna clip trovata";
-    for (const t of i.thumbs || []) {
-      const img = document.createElement("img");
-      img.src = t;
-      $("thumbs").appendChild(img);
+    if (tok !== s.tok) return;
+    const tolte = new Set(exclude);
+    s.items = (i.clips || []).filter((c) => !tolte.has(c.path));
+    s.excluded = new Set((i.clips || []).filter((c) => tolte.has(c.path)).map((c) => c.path));   // only this folder's
+    if (!i.ok || !s.items.length) { $(s.info).textContent = s.none; return; }
+    renderStrip(s);
+    // the frames after the first 8, a few at a time so the strip fills while the user looks
+    for (let k = 0; k < s.items.length && tok === s.tok; k += 12) {
+      const part = s.items.slice(k, k + 12).filter((c) => !c.thumb);
+      if (!part.length) continue;
+      const r = await (await fetch(`${BACKEND}/api/thumbs`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                              body: JSON.stringify({ paths: part.map((c) => c.path) }) })).json();
+      if (tok !== s.tok) return;
+      part.forEach((c, j) => {
+        c.thumb = r.thumbs[j] || "";
+        const img = $(s.thumbs).querySelector(`[data-path="${CSS.escape(c.path)}"] img`);
+        if (img && c.thumb) img.src = c.thumb;
+      });
     }
-  } catch (_) { $("s2-info").textContent = ""; }
+  } catch (_) { if (tok === s.tok) $(s.info).textContent = ""; }
+}
+
+function renderStrip(s) {
+  const box = $(s.thumbs);
+  box.innerHTML = "";
+  for (const c of s.items) {
+    const d = document.createElement("div");
+    d.className = "clip-th";
+    d.dataset.path = c.path;
+    d.title = c.path.split("/").pop();
+    d.innerHTML = `<img${c.thumb ? ` src="${c.thumb}"` : ""}><button title="Togli questo video">✕</button>`;
+    d.querySelector("button").onclick = (e) => {
+      e.stopPropagation();
+      s.excluded.add(c.path);
+      s.items = s.items.filter((x) => x !== c);
+      if (!s.items.length) { s.empty(); return; }
+      d.remove();
+      stripInfo(s);
+    };
+    box.appendChild(d);
+  }
+  stripInfo(s);
+}
+
+function stripInfo(s) {
+  const n = s.items.length, dur = Math.round(s.items.reduce((a, c) => a + (c.durata || 0), 0));
+  const lenti = s.items.filter((c) => c.lento).length, tolte = s.excluded.size;
+  $(s.info).textContent = `${n} ${s.unit} · ${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, "0")} min`
+    + (lenti ? ` · 🐢 ${lenti} slow-mo` : "") + (tolte ? ` · ${tolte} ${s.tolto[tolte === 1 ? 0 : 1]}` : "");
 }
 
 // Name = client + folder, until the user writes their own.
@@ -566,6 +622,9 @@ function wireEditor() {
   $("v-new").onclick = () => showView("editor");
   $("v-proj").onclick = () => showView("home");
   $("v-client").onclick = () => openClientModal(null);
+  $("v-client-load").onclick = () => openTemplateLoad();
+  $("cm-tdrop").onclick = async () => { const p = window.api && await window.api.selectSkill(); if (p) readTemplatePath(p); };
+  $("ex-close").onclick = closeExportModal;
   $("v-agency").onclick = openAgencyModal;
   $("v-clients").onclick = () => showView("clients");
   $("v-agencies").onclick = () => showView("agencies");
@@ -577,6 +636,8 @@ function wireEditor() {
     const p = window.api && await window.api.selectFolder();
     if (p) setFolder(p);
   };
+  $("clips-clear").onclick = (e) => { e.stopPropagation(); setFolder(""); };
+  $("broll-clear").onclick = (e) => { e.stopPropagation(); setBroll(""); };
   $("drop-broll").onclick = async () => {
     const p = window.api && await window.api.selectFolder();
     if (p) setBroll(p);
@@ -597,8 +658,10 @@ function wireEditor() {
     document.body.classList.remove("dragging", "editor-drag");
     document.querySelectorAll(".drop").forEach((d) => d.classList.remove("hover"));
   };
+  const isFileDrag = (e) => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files");
   document.addEventListener("dragover", (e) => {
     e.preventDefault();
+    if (!isFileDrag(e)) return;        // a Home card being moved, not files: no veil
     const z = e.target.closest && e.target.closest(".drop");
     dropZone = z ? z.id : null;
     document.querySelectorAll(".drop").forEach((d) => d.classList.toggle("hover", d === z));
@@ -610,11 +673,26 @@ function wireEditor() {
   document.addEventListener("drop", (e) => {
     e.preventDefault();
     endDrag();
+    if (!isFileDrag(e)) return;
     if (!$("view-scarico").hidden) {          // clips of a shooting to sort
       for (const f of e.dataTransfer.files) {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
         if (p) addScaricoPath(p);
       }
+      return;
+    }
+    const first = e.dataTransfer.files[0];
+    const firstPath = first && window.api && window.api.pathForFile ? window.api.pathForFile(first) : "";
+    if (!$("client-modal").hidden && state.importing) {      // a template (zip, folder or skill) to load
+      if (firstPath) readTemplatePath(firstPath);
+      return;
+    }
+    if ($("client-modal").hidden && !$("view-team").hidden) {      // a folder of videos for the team's list
+      if (firstPath) openTeamAdd(firstPath);
+      return;
+    }
+    if ($("client-modal").hidden && !$("view-clients").hidden) {   // dropped on Clienti: same as «Carica template»
+      if (firstPath) openTemplateLoad(firstPath);
       return;
     }
     if (!$("client-modal").hidden) {          // videos / screenshots for a new client to study
@@ -705,6 +783,7 @@ function buildRequest() {
   const target = $("ai-target").value;
   return {
     input_path: $("input-path").value.trim(),
+    exclude: [...strips.clips.excluded, ...strips.broll.excluded],   // taken out with their ✕: Claude never uses them
     name: $("name").value.trim(),
     template: $("template").value || null,
     client: state.client ? state.client.id : null,
@@ -827,7 +906,7 @@ async function addToQueue() {
     if (r.error) { $("missing").textContent = "⚠️ " + r.error; check(); return; }
     addLog(`＋ In coda: ${body.name} · ${state.client ? state.client.nome : body.template}`, "step");
     // ready for the next video of the same client: clear folder, b-roll, name and notes
-    $("input-path").value = ""; $("input-path-label").textContent = ""; $("thumbs").innerHTML = ""; $("s2-info").textContent = "";
+    setFolder("");
     setBroll(""); $("name").value = ""; $("name").dataset.auto = "1"; $("notes").value = "";
   } catch (e) { addLog(`Il motore dell'app non risponde (${e}).`, "err"); }
   check();
@@ -895,6 +974,8 @@ function finishRun() {
 
 function renderSteps(current, finished = false) {
   $("steps").innerHTML = "";
+  $("steps").style.setProperty("--n", state.steps.length || 6);
+  $("steps").style.setProperty("--half", Math.ceil((state.steps.length || 6) / 2));
   state.steps.forEach((label, i) => {
     const n = i + 1;
     const el = document.createElement("div");
@@ -988,7 +1069,7 @@ function renderProjects() {
   for (const [cliente, ps] of Object.entries(groups)) {
     const g = document.createElement("div");
     g.className = "group";
-    g.innerHTML = `<h4><i style="background:${ps[0].colore}"></i>${escapeHtml(cliente)}<small>${ps.length}</small></h4>`;
+    g.innerHTML = `<h4><i style="background:${safeColor(ps[0].colore)}"></i>${escapeHtml(cliente)}<small>${ps.length}</small></h4>`;
     for (const p of ps) {
       const card = document.createElement("div");
       card.className = "pcard" + (state.currentProject && state.currentProject.id === p.id ? " on" : "");
@@ -1207,7 +1288,9 @@ function followChange(jobId, p) {
 // Home: where every video stands (da fare → da finire → da revisionare → fatto)
 // ---------------------------------------------------------------------------
 
-const DASH = { items: [], stati: [], todo: null, loaded: false };
+const DASH = { items: [], stati: [], todo: null, loaded: false, dragId: null, mark: null };
+// the team's board (a private GitHub Project, see teamboard.py)
+const TEAM = { stato: {}, items: [], loaded: false, msg: "", owners: null, cartella: {}, add: [] };
 const STATI = [["da_fare", "Da fare"], ["in_lavorazione", "Da finire"], ["da_revisionare", "Da revisionare"], ["fatto", "Fatto"]];
 
 // Clienti and Agenzie: the archive sections of the sidebar (counts there, a page each).
@@ -1259,17 +1342,11 @@ function videosOf(nome) {
 
 function renderClientsView() {
   const q = $("cl-search").value.trim().toLowerCase();
-  const ags = [...new Set(state.clients.map((c) => c.agenzia || "Profili"))];
-  const ag = state.clAg && ags.includes(state.clAg) ? state.clAg : "";
-  $("cl-tabs").innerHTML = ags.length > 1 ? ["", ...ags].map((a) =>
-    `<button class="tab${a === ag ? " on" : ""}" data-ag="${escapeHtml(a)}">${escapeHtml(a || "Tutte")}</button>`).join("") : "";
-  $("cl-tabs").querySelectorAll(".tab").forEach((b) => { b.onclick = () => { state.clAg = b.dataset.ag; renderClientsView(); }; });
-  const list = state.clients.filter((c) => (!ag || (c.agenzia || "Profili") === ag)
-    && (!q || [c.nome, c.agenzia, c.template].some((x) => (x || "").toLowerCase().includes(q))));
+  const list = state.clients.filter((c) => !q || [c.nome, c.agenzia, c.template].some((x) => (x || "").toLowerCase().includes(q)));
   $("cl-sub").textContent = `${state.clients.length} clienti · ${(state.vault.agenzie || []).length} agenzie`;
   $("cl-grid").innerHTML = list.length ? list.map((c) => {
     const n = videosOf(c.nome);
-    return `<article class="lib-card" style="--c:${c.colore}" data-id="${escapeHtml(c.id)}">
+    return `<article class="lib-card" style="--c:${safeColor(c.colore)}" data-id="${escapeHtml(c.id)}">
       <div class="lc-top"><i>${escapeHtml((c.nome.match(/[A-Za-zÀ-ÿ0-9]/) || ["?"])[0])}</i>
         <div class="lc-name"><b>${escapeHtml(c.nome)}</b><span>${escapeHtml(c.agenzia || "Profilo")}</span></div></div>
       <dl>
@@ -1281,6 +1358,8 @@ function renderClientsView() {
         <button class="bbtn primary" data-a="new">Nuovo video</button>
         <button class="bbtn" data-a="proj">Progetti</button>
         ${c.source === "vault" ? '<button class="bbtn" data-a="edit">Modifica</button>' : ""}
+        <button class="bbtn" data-a="export" ${c.template_ok ? "" : "disabled"}
+          title="${c.template_ok ? "Un file .skill con profilo e template CapCut, da dare a chi monta" : "Il template CapCut non c'è su questo Mac"}">Esporta</button>
       </div></article>`;
   }).join("") : `<div class="lib-empty">${q ? `Nessun cliente con «${escapeHtml(q)}»` : "Nessun cliente: crea il primo con «＋ Nuovo template»."}</div>`;
   $("cl-grid").querySelectorAll(".lib-card").forEach((card) => {
@@ -1290,6 +1369,7 @@ function renderClientsView() {
         if (b.dataset.a === "new") { showView("editor"); chooseClient(c); }
         else if (b.dataset.a === "proj") { showView("home"); $("psearch").value = c.nome; renderProjects(); }
         else if (b.dataset.a === "edit") openClientModal(c);
+        else if (b.dataset.a === "export") exportTemplate(c);
       };
     });
   });
@@ -1305,7 +1385,7 @@ function renderAgenciesView() {
     return `<article class="lib-card ag" data-ag="${escapeHtml(a)}">
       <div class="lc-top"><i>${escapeHtml(a[0] || "?")}</i>
         <div class="lc-name"><b>${escapeHtml(a)}</b><span>${stile ? "Stile " + escapeHtml(stile) : "Stile da scrivere"}</span></div></div>
-      <div class="ag-clients">${cl.length ? cl.map((c) => `<span style="--c:${c.colore}"><i></i>${escapeHtml(c.nome)}</span>`).join("")
+      <div class="ag-clients">${cl.length ? cl.map((c) => `<span style="--c:${safeColor(c.colore)}"><i></i>${escapeHtml(c.nome)}</span>`).join("")
         : '<em>Nessun cliente ancora</em>'}</div>
       <dl><div><dt>Clienti</dt><dd>${cl.length}</dd></div><div><dt>Video</dt><dd>${videos || "—"}</dd></div></dl>
       <div class="lc-acts"><button class="bbtn" data-a="clients">Vedi i clienti</button>
@@ -1313,7 +1393,7 @@ function renderAgenciesView() {
   }).join("") : '<div class="lib-empty">Nessuna agenzia: aggiungi la prima con «＋ Nuova agenzia».</div>';
   $("ag-grid").querySelectorAll(".lib-card").forEach((card) => {
     const a = card.dataset.ag;
-    card.querySelector('[data-a="clients"]').onclick = () => { state.clAg = a; showView("clients"); };
+    card.querySelector('[data-a="clients"]').onclick = () => { $("cl-search").value = a; showView("clients"); };
     card.querySelector('[data-a="new"]').onclick = async () => {
       await openClientModal(null);
       $("cm-ag").value = a;
@@ -1329,73 +1409,119 @@ async function loadBoard() {
     DASH.stati = data.stati || [];
     DASH.loaded = true;
     renderBoard();
+    loadTeam();                        // the team view, and whether my cards can be shared
   } catch (e) { console.error("board", e); $("dash-sub").textContent = "Non riesco a leggere i progetti."; }
 }
 
 function dueInfo(scadenza) {
-  if (!scadenza) return "";
-  const days = Math.round((new Date(scadenza + "T23:59") - new Date()) / 86400000);
-  const label = new Date(scadenza).toLocaleDateString("it-IT", { day: "2-digit", month: "short" });
+  // a day (YYYY-MM-DD) read as local time: new Date("2026-10-28") would be midnight UTC
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(scadenza || "") ? new Date(scadenza + "T23:59") : null;
+  if (!end || isNaN(end)) return "";
+  const days = Math.round((end - new Date()) / 86400000);
+  const label = end.toLocaleDateString("it-IT", { day: "2-digit", month: "short" });
   const cls = days < 0 ? "late" : days <= 2 ? "soon" : "";
   const when = days < 0 ? `scaduto ${label}` : days === 0 ? "oggi" : days === 1 ? "domani" : label;
   return `<span class="due ${cls}">⏰ ${when}</span>`;
 }
 
 function renderBoard() {
-  const count = (k) => DASH.items.filter((i) => i.stato === k).length;
-  const late = DASH.items.filter((i) => i.stato !== "fatto" && i.scadenza
-    && new Date(i.scadenza + "T23:59") < new Date()).length;
-  const tiles = [
-    ["da_fare", "Da fare", "🗂"], ["in_lavorazione", "Da finire", "✂️"],
-    ["da_revisionare", "Da revisionare", "👀"], ["fatto", "Fatti (30 giorni)", "✅"],
-  ];
-  $("kpis").innerHTML = tiles.map(([k, n, ic]) =>
-    `<div class="kpi k-${k}"><div class="ic">${ic}</div><div><b>${count(k)}</b><span>${n}</span></div></div>`).join("");
-  const open = DASH.items.length - count("fatto");
+  const late = renderKpis(DASH.items, $("kpis"), "Fatti (30 giorni)");
+  const open = DASH.items.filter((i) => i.stato !== "fatto").length;
   $("dash-sub").textContent = open
     ? `${open} video in giro${late ? ` · ${late} oltre la scadenza` : ""}. Trascina una scheda per cambiarne lo stato.`
     : "Tutto in ordine: nessun video in sospeso.";
+  renderColumns($("board"), DASH.items, boardCard, moveCard,
+    (st) => (st === "da_fare" ? "Aggiungi i video da fare con «＋ Video da fare»" : "Trascina qui una scheda"));
+}
 
-  const board = $("board");
+// the four counters above the board; returns how many cards are past their deadline
+function renderKpis(items, el, doneLabel) {
+  const count = (k) => items.filter((i) => i.stato === k).length;
+  const tiles = [
+    ["da_fare", "Da fare", "🗂"], ["in_lavorazione", "Da finire", "✂️"],
+    ["da_revisionare", "Da revisionare", "👀"], ["fatto", doneLabel, "✅"],
+  ];
+  el.innerHTML = tiles.map(([k, n, ic]) =>
+    `<div class="kpi k-${k}"><div class="ic">${ic}</div><div><b>${count(k)}</b><span>${n}</span></div></div>`).join("");
+  return items.filter((i) => i.stato !== "fatto" && i.scadenza && new Date(i.scadenza + "T23:59") < new Date()).length;
+}
+
+// the four columns in `board`, each card made by makeCard(item, position); a card dropped at a place calls onMove(id, column, index)
+function renderColumns(board, items, makeCard, onMove, emptyText) {
   board.innerHTML = "";
-  for (const st of DASH.stati) {
+  const stati = DASH.stati.length ? DASH.stati : STATI.map(([id, nome]) => ({ id, nome }));
+  for (const st of stati) {
     const col = document.createElement("section");
     col.className = `bcol c-${st.id}`;
-    const cards = DASH.items.filter((i) => i.stato === st.id);
+    const cards = items.filter((i) => i.stato === st.id);
     col.innerHTML = `<h3>${escapeHtml(st.nome)}<small>${cards.length}</small></h3><div class="bcards"></div>`;
     const box = col.querySelector(".bcards");
-    for (const it of cards) box.appendChild(boardCard(it));
-    if (!cards.length) box.innerHTML = `<div class="bempty">${st.id === "da_fare"
-      ? "Aggiungi i video da fare con «＋ Video da fare»" : "Trascina qui una scheda"}</div>`;
-    col.ondragover = (e) => { e.preventDefault(); col.classList.add("over"); };
-    col.ondragleave = () => col.classList.remove("over");
+    cards.forEach((it, i) => box.appendChild(makeCard(it, i)));
+    if (!cards.length) box.innerHTML = `<div class="bempty">${emptyText(st.id)}</div>`;
+    col.ondragover = (e) => {
+      if (!DASH.dragId) return;
+      e.preventDefault();
+      col.classList.add("over");
+      const { cards: shown, index } = dropIndex(box, e.clientY);
+      const mark = DASH.mark || (DASH.mark = Object.assign(document.createElement("div"), { className: "bins" }));
+      box.insertBefore(mark, shown[index] || null);
+    };
+    col.ondragleave = (e) => {
+      if (col.contains(e.relatedTarget)) return;
+      col.classList.remove("over");
+      if (DASH.mark && DASH.mark.parentNode === box) DASH.mark.remove();
+    };
     col.ondrop = (e) => {
       e.preventDefault();
       col.classList.remove("over");
-      const id = e.dataTransfer.getData("text/plain");
-      if (id) setBoardStatus(id, st.id);
+      const id = DASH.dragId || e.dataTransfer.getData("text/plain");
+      const { index } = dropIndex(box, e.clientY);
+      if (DASH.mark) DASH.mark.remove();
+      if (id) onMove(id, st.id, index);
     };
     board.appendChild(col);
   }
 }
 
-function boardCard(it) {
+// where in a column a card dropped at height y lands (the dragged card itself doesn't count)
+function dropIndex(box, y) {
+  const cards = [...box.querySelectorAll(".bcard:not(.drag)")];
+  const i = cards.findIndex((c) => { const r = c.getBoundingClientRect(); return y < r.top + r.height / 2; });
+  return { cards, index: i < 0 ? cards.length : i };
+}
+
+function draggableCard(card, id) {
+  card.draggable = true;
+  card.ondragstart = (e) => {
+    DASH.dragId = id;
+    e.dataTransfer.setData("text/plain", id);
+    e.dataTransfer.effectAllowed = "move";
+    card.classList.add("drag");
+  };
+  card.ondragend = () => {
+    DASH.dragId = null;
+    card.classList.remove("drag");
+    if (DASH.mark) DASH.mark.remove();
+    document.querySelectorAll(".bcol.over").forEach((c) => c.classList.remove("over"));
+  };
+}
+
+function boardCard(it, pos = 0) {
   const card = document.createElement("div");
   card.className = "bcard" + (it.esiste ? "" : " gone");
   card.style.setProperty("--c", it.colore || "#6b7180");
-  card.draggable = true;
-  card.ondragstart = (e) => { e.dataTransfer.setData("text/plain", it.id); card.classList.add("drag"); };
-  card.ondragend = () => card.classList.remove("drag");
+  draggableCard(card, it.id);
   const isTodo = it.tipo === "da_fare";
   const next = { da_fare: "in_lavorazione", in_lavorazione: "da_revisionare", da_revisionare: "fatto" }[it.stato];
   const nextName = (DASH.stati.find((s) => s.id === next) || {}).nome;
-  card.innerHTML = `<button class="bx" title="Togli dalla Home (finito). Il progetto in CapCut resta.">✕</button>
-    ${it.cover ? `<img src="${it.cover}">` : ""}
+  card.innerHTML = `<button class="bx" title="${it.team ? "Rimettilo nella lista del team" : "Togli dalla Home (finito). Il progetto in CapCut resta."}">✕</button>
+    ${pos > 0 ? '<button class="btop" title="Porta in cima alla colonna">⤒</button>' : ""}
+    ${it.cover ? `<img src="${it.cover}" draggable="false">` : ""}
     <div class="bbody">
       <div class="bclient"><i></i>${escapeHtml(it.cliente || "Senza cliente")}</div>
       <div class="btitle">${escapeHtml(it.titolo)}</div>
       ${it.note ? `<div class="bnote">${escapeHtml(it.note)}</div>` : ""}
-      <div class="bmeta">${dueInfo(it.scadenza)}${it.esiste ? "" : '<span class="due late">non più in CapCut</span>'}</div>
+      <div class="bmeta">${dueInfo(it.scadenza)}${it.esiste ? "" : '<span class="due late">non più in CapCut</span>'}${it.team ? '<span class="due team">👥 nel team</span>' : ""}</div>
       <div class="bacts">
         ${isTodo ? '<button class="bbtn primary" data-a="monta">Monta</button>' : '<button class="bbtn" data-a="apri">Apri</button>'}
         ${isTodo || it.todo_id ? '<button class="bbtn" data-a="edit">✎</button>' : ""}
@@ -1404,8 +1530,11 @@ function boardCard(it) {
     </div>`;
   card.querySelector(".bx").onclick = (e) => {
     e.stopPropagation();
-    setBoardStatus(it.id, "tolto");
+    if (it.team) releaseTeamVideo(it);
+    else setBoardStatus(it.id, "tolto");
   };
+  const top = card.querySelector(".btop");
+  if (top) top.onclick = (e) => { e.stopPropagation(); moveCard(it.id, it.stato, 0); };
   card.querySelectorAll(".bbtn").forEach((b) => {
     b.onclick = (e) => {
       e.stopPropagation();
@@ -1420,10 +1549,32 @@ function boardCard(it) {
   return card;
 }
 
+// within a column: cards without a place first (just arrived), then the user's order, deadline, newest
+const boardOrder = (a, b) => ((a.ordine != null) - (b.ordine != null)) || ((a.ordine || 0) - (b.ordine || 0))
+  || (a.scadenza || "9999").localeCompare(b.scadenza || "9999") || ((b.quando || 0) - (a.quando || 0));
+
+// put a card at `index` of column `stato` (dragged there, or ⤒): the column keeps that order
+async function moveCard(id, stato, index) {
+  const it = DASH.items.find((i) => i.id === id);
+  if (!it) return;
+  const col = DASH.items.filter((i) => i.stato === stato && i.id !== id);
+  col.splice(Math.max(0, Math.min(index, col.length)), 0, it);
+  it.stato = stato;
+  col.forEach((c, n) => { c.ordine = n; });
+  DASH.items.sort(boardOrder);
+  renderBoard();
+  try {
+    await fetch(`${BACKEND}/api/board/order`, { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stato, ids: col.map((c) => c.id) }) });
+  } catch (_) { loadBoard(); }
+}
+
 async function setBoardStatus(id, stato) {
   const it = DASH.items.find((i) => i.id === id);
   if (!it || it.stato === stato) return;
   it.stato = stato;
+  it.ordine = null;                    // lands on top of its new column
+  DASH.items.sort(boardOrder);
   renderBoard();
   try {
     await fetch(`${BACKEND}/api/board/status`, { method: "PUT", headers: { "Content-Type": "application/json" },
@@ -1504,6 +1655,344 @@ async function renderProjectStatus(p) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Team board
+// ---------------------------------------------------------------------------
+
+async function loadTeam(refresh = false) {
+  try {
+    const d = await (await fetch(`${BACKEND}/api/team-board${refresh ? "?refresh=true" : ""}`)).json();
+    TEAM.stato = d.stato || {};
+    TEAM.items = d.items || [];
+    TEAM.msg = d.msg || "";
+    TEAM.cartella = d.cartella || {};
+    TEAM.loaded = true;
+  } catch (e) { TEAM.msg = "Non riesco a leggere la bacheca del team."; }
+  const open = teamOpen().length;
+  $("n-team").textContent = open;
+  $("n-team").hidden = !open;
+  if (!$("view-team").hidden) renderTeamBoard();
+  if (!$("view-dash").hidden) renderBoard();        // my cards: whether they can be shared
+}
+
+function renderTeamBoard() {
+  const st = TEAM.stato;
+  $("team-gh").hidden = !st.collegata;
+  $("tv-new").hidden = !st.collegata;
+  if (!TEAM.loaded) {
+    $("team-sub").textContent = "Carico la lista del team…";
+    $("tv-list").innerHTML = "";
+    return;
+  }
+  if (!st.collegata) {
+    $("team-sub").textContent = "La bacheca del team non è ancora collegata.";
+    $("tv-add").hidden = true;
+    $("tv-list").innerHTML = `<div class="team-empty"><div class="te-ic">👥</div>
+      <h3>I video da montare di tutto il team</h3>
+      <p>Collega la bacheca GitHub privata del team: chi ha l'accesso vede la stessa lista di video da montare,
+        sceglie quale editare con «Edita» e lo ritrova nella sua Home.</p>
+      <button class="send" id="team-setup">Collega la bacheca del team</button></div>`;
+    $("team-setup").onclick = openTeamModal;
+    return;
+  }
+  const list = teamOpen();
+  const tot = list.reduce((n, i) => n + (i.prezzo || 0), 0);
+  $("team-sub").innerHTML = (list.length
+    ? `${list.length} video da prendere${tot ? ` · ${fmtPrice(tot)} in tutto` : ""}. Premi «Edita» su quello che monti tu.`
+    : "Nessun video da prendere. Trascina qui una cartella di video, o «＋ Aggiungi video».")
+    + (TEAM.cartella.cartella && !TEAM.cartella.raggiungibile ? ' <span class="warn">Cartella del team non collegata.</span>' : "")
+    + (TEAM.msg ? ` <span class="warn">${escapeHtml(TEAM.msg)}</span>` : "");
+  const box = $("tv-list");
+  box.innerHTML = list.length ? `<div class="tv-row tv-th"><span>Video</span><span>Cliente</span><span>Prezzo</span><span></span></div>` : "";
+  if (!list.some((i) => i.id === TEAM.editing)) TEAM.editing = null;
+  for (const it of list) {
+    const client = state.clients.find((c) => c.nome.toUpperCase() === (it.cliente || "").toUpperCase());
+    const row = document.createElement("div");
+    row.className = "tv-row";
+    row.style.setProperty("--c", (client && client.colore) || "#6b7180");
+    row.innerHTML = `<span class="tv-title" title="${escapeHtml(it.titolo)}">${escapeHtml(it.titolo)}</span>
+      <span class="tv-client"><i></i>${escapeHtml(it.cliente || "Senza cliente")}</span>
+      <span class="tv-price">${it.prezzo != null ? fmtPrice(it.prezzo) : "—"}</span>
+      <span class="tv-acts"><button class="tv-more" title="Modifica titolo, cliente e prezzo">⋯</button>
+        <button class="btn-primary-sm tv-edit">Edita</button></span>`;
+    row.querySelector(".tv-edit").onclick = (e) => takeTeamVideo(it, e.target);
+    row.querySelector(".tv-more").onclick = () => { TEAM.editing = TEAM.editing === it.id ? null : it.id; renderTeamBoard(); };
+    box.appendChild(row);
+    if (TEAM.editing === it.id) box.appendChild(teamEditRow(it));
+  }
+}
+
+// the ⋯ of a video: its title, client and price, or off the list
+function teamEditRow(it) {
+  const f = document.createElement("div");
+  f.className = "tv-form";
+  f.innerHTML = `<label>Titolo<input type="text" class="tf-t" value="${escapeHtml(it.titolo)}" /></label>
+    <label>Cliente<input type="text" class="tf-c" list="tv-clients" autocomplete="off" value="${escapeHtml(it.cliente || "")}" /></label>
+    <label>Prezzo<input type="number" class="tf-p" min="0" step="5" placeholder="€" value="${it.prezzo != null ? it.prezzo : ""}" /></label>
+    <span class="tv-form-acts"><button class="btn2 tf-del" title="Toglilo dalla lista del team">Togli</button>
+      <button class="btn2 tf-no">Annulla</button><button class="btn-primary-sm tf-ok">Salva</button></span>`;
+  $("tv-clients").innerHTML = state.clients.map((c) => `<option value="${escapeHtml(c.nome)}">`).join("");
+  const save = async () => {
+    const titolo = f.querySelector(".tf-t").value.trim();
+    if (!titolo) return f.querySelector(".tf-t").focus();
+    const p = f.querySelector(".tf-p").value;
+    const body = { titolo, cliente: f.querySelector(".tf-c").value.trim(), prezzo: p === "" ? null : Number(p) };
+    f.querySelector(".tf-ok").disabled = true; f.querySelector(".tf-ok").textContent = "Salvo…";
+    const r = await (await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(it.id)}/video`, { method: "PUT",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+    if (!r.ok) { f.querySelector(".tf-ok").disabled = false; f.querySelector(".tf-ok").textContent = "Salva"; return notify(r.msg || "Non sono riuscito a salvarlo.", "err"); }
+    Object.assign(it, { titolo, cliente: body.cliente.toUpperCase(), prezzo: body.prezzo });
+    TEAM.editing = null;
+    renderTeamBoard();
+  };
+  f.querySelector(".tf-ok").onclick = save;
+  f.querySelector(".tf-no").onclick = () => { TEAM.editing = null; renderTeamBoard(); };
+  f.querySelector(".tf-del").onclick = async () => {
+    if (!confirm(`Togliere «${it.titolo}» dalla lista del team? Nessuno lo vedrà più.`)) return;
+    const r = await (await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(it.id)}`, { method: "DELETE" }))
+      .json().catch((e) => ({ ok: false, msg: String(e) }));
+    if (r.ok === false) return notify(r.msg || "Non sono riuscito a toglierlo.", "err");
+    TEAM.items = TEAM.items.filter((x) => x.id !== it.id);
+    TEAM.editing = null;
+    renderTeamBoard();
+  };
+  f.onkeydown = (e) => {
+    if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); save(); }
+    if (e.key === "Escape") { TEAM.editing = null; renderTeamBoard(); }
+  };
+  setTimeout(() => f.querySelector(".tf-t").focus(), 0);
+  return f;
+}
+
+// the videos nobody is editing yet: everyone on the team sees these
+function teamOpen() {
+  // the first ones put on the list stay on top: they come first
+  return TEAM.items.filter((i) => i.stato === "da_fare" && !i.chi.length)
+    .sort((a, b) => (a.creato || "").localeCompare(b.creato || ""));
+}
+
+function fmtPrice(n) {
+  return `${Number(n).toLocaleString("it-IT", { maximumFractionDigits: 2 })} €`;
+}
+
+// «Edita»: it leaves the team's list and lands on my Home
+async function takeTeamVideo(it, btn) {
+  btn.disabled = true; btn.textContent = "…";
+  const r = await (await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(it.id)}/take`, { method: "POST" }))
+    .json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) notify(r.msg || "Non sono riuscito a prenderlo.", "err");
+  else notify(`«${it.titolo}» è nella tua Home.`, "ok");
+  await loadTeam(true);
+  loadBoard();
+}
+
+// the ✕ on a video taken from the team: back on everyone's list
+async function releaseTeamVideo(it) {
+  if (!confirm(`Rimetto «${it.titolo}» nella lista del team? Lo rivedranno tutti.`)) return;
+  const r = await (await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(it.team)}/release`, { method: "POST" }))
+    .json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non sono riuscito a rimetterlo nel team.", "err");
+  if (it.tipo !== "da_fare") await setBoardStatus(it.id, "tolto");
+  notify(`«${it.titolo}» è tornato nella lista del team.`, "ok");
+  loadBoard();
+  loadTeam(true);
+}
+
+// ---- adding videos: a folder goes in, its videos come out with a price each ----
+
+async function openTeamAdd(path = null) {
+  if (!TEAM.stato.collegata) return openTeamModal();
+  if (!path) path = window.api && (await window.api.selectFolder());
+  if (!path) return;
+  const d = await (await fetch(`${BACKEND}/api/team-board/folder?path=${encodeURIComponent(path)}`)).json()
+    .catch((e) => ({ ok: false, msg: String(e) }));
+  if (!d.ok) return notify(d.msg || "Non riesco a leggere la cartella.", "err");
+  if (!d.videos.length) return notify(`In «${d.nome}» non ci sono video.`, "err");
+  TEAM.add = d.videos.map((v) => ({ ...v, prezzo: "" }));
+  $("tv-add-title").textContent = d.nome;
+  $("tv-add-sub").textContent = `${d.videos.length} video. Togli con ✕ quelli che non vanno nel team e scrivi il prezzo.`;
+  $("tv-clients").innerHTML = state.clients.map((c) => `<option value="${escapeHtml(c.nome)}">`).join("");
+  $("tv-client").value = d.cliente || "";
+  $("tv-price-all").value = "";
+  $("tv-add").hidden = false;
+  renderTeamAdd();
+  $("tv-price-all").focus();
+}
+
+function renderTeamAdd() {
+  const box = $("tv-rows");
+  box.innerHTML = "";
+  TEAM.add.forEach((v, n) => {
+    const row = document.createElement("div");
+    row.className = "tv-arow";
+    row.innerHTML = `<button class="tv-x" title="Non metterlo nel team">✕</button>
+      <input type="text" class="tv-name" value="${escapeHtml(v.titolo)}" />
+      <span class="tv-clips">${v.clip} clip</span>
+      <input type="number" class="tv-p" min="0" step="5" placeholder="€" value="${escapeHtml(String(v.prezzo))}" />`;
+    row.querySelector(".tv-x").onclick = () => { TEAM.add.splice(n, 1); renderTeamAdd(); };
+    row.querySelector(".tv-name").oninput = (e) => { v.titolo = e.target.value; };
+    row.querySelector(".tv-p").oninput = (e) => { v.prezzo = e.target.value; };
+    box.appendChild(row);
+  });
+  if (!TEAM.add.length) box.innerHTML = '<div class="tt-empty">Nessun video: annulla e scegli un\'altra cartella.</div>';
+  $("tv-send").disabled = !TEAM.add.length;
+}
+
+async function sendTeamAdd() {
+  const videos = TEAM.add.filter((v) => v.titolo.trim())
+    .map((v) => ({ titolo: v.titolo.trim(), cartella: v.cartella, prezzo: v.prezzo === "" ? null : Number(v.prezzo) }));
+  if (!videos.length) return;
+  $("tv-send").disabled = true; $("tv-send").textContent = "Metto nel team…";
+  const r = await (await fetch(`${BACKEND}/api/team-board/videos`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ videos, cliente: $("tv-client").value.trim().toUpperCase() }) })).json()
+    .catch((e) => ({ ok: false, msg: String(e) }));
+  $("tv-send").textContent = "Metti nel team ⏎";
+  $("tv-send").disabled = false;
+  if (!r.ok) return notify(r.msg || "Non sono riuscito a metterli nel team.", "err");
+  notify(`${r.n} video nella lista del team.`, "ok");
+  $("tv-add").hidden = true;
+  TEAM.add = [];
+  loadTeam(true);
+}
+
+async function openTeamModal(opts = {}) {
+  $("settings-menu").hidden = true;
+  $("team-modal").hidden = false;
+  $("team-body").innerHTML = '<div class="empty">Controllo GitHub…</div>';
+  $("team-go").hidden = true;
+  await loadTeam(true);
+  const st = TEAM.stato;
+  const body = $("team-body");
+  if (opts.soloCartella === true) {          // only the team folder: the templates don't need the board
+    body.innerHTML = `<p class="ai-intro">I template passano dalla <b>cartella del team</b>, il server Samba con il materiale.</p>
+      ${shareFolderForm()}`;
+    wireShareFolder();
+    return teamFoot("", null);
+  }
+  if (!st.gh) {
+    body.innerHTML = `<p class="ai-intro">Per la bacheca del team serve <b>GitHub CLI</b>, collegata al tuo account GitHub.
+      Da Terminale:</p><pre class="cmd">brew install gh
+gh auth login</pre><p class="ai-foot">Poi premi «Ricontrolla».</p>`;
+    return teamFoot("Ricontrolla", openTeamModal);
+  }
+  if (!st.permesso) {
+    body.innerHTML = `<p class="ai-intro">GitHub CLI c'è, ma non ha ancora il permesso di usare le bacheche (GitHub Projects).
+      Da Terminale, e poi conferma nel browser:</p><pre class="cmd">gh auth refresh -h github.com -s project</pre>
+      <p class="ai-foot">Serve una volta sola, su ogni Mac del team. Poi premi «Ricontrolla».</p>`;
+    return teamFoot("Ricontrolla", openTeamModal);
+  }
+  if (st.collegata) {
+    body.innerHTML = `<p class="ai-intro">Collegata a <b>${escapeHtml(st.titolo)}</b> di <b>${escapeHtml(st.owner)}</b>.
+      Chi ha accesso alla bacheca vede gli stessi video nella pagina Team.</p>
+      <div class="row2 pair"><button class="btn2" id="team-gh2">Apri su GitHub ↗</button>
+      <button class="btn2 danger" id="team-off">Scollega</button></div>
+      ${shareFolderForm()}`;
+    wireShareFolder();
+    $("team-gh2").onclick = () => window.api && window.api.openExternal(st.url);
+    $("team-off").onclick = async () => {
+      if (!confirm("Scollegare la bacheca del team da questo Mac? Su GitHub resta tutto com'è.")) return;
+      await fetch(`${BACKEND}/api/team-board/disconnect`, { method: "POST" });
+      DASH.items.forEach((i) => { i.team = ""; });
+      openTeamModal();
+    };
+    return teamFoot("", null);
+  }
+  body.innerHTML = '<div class="empty">Cerco i tuoi account e le tue organizzazioni…</div>';
+  const d = await (await fetch(`${BACKEND}/api/team-board/owners`)).json().catch(() => ({}));
+  if (!d.owners) { body.innerHTML = `<p class="ai-intro">${escapeHtml(d.msg || "GitHub non risponde.")}</p>`; return teamFoot("Ricontrolla", openTeamModal); }
+  TEAM.owners = d.owners;
+  // most likely the team's: an organisation named like the app, then one with teams, then any
+  const orgs = d.owners.filter((o) => o.tipo === "organizzazione");
+  const def = orgs.find((o) => /wizard/i.test(o.login)) || orgs.find((o) => (o.team || []).length) || orgs[0] || d.owners[0];
+  body.innerHTML = `<p class="ai-intro">Scegli dove sta la bacheca: di solito l'<b>organizzazione</b> del team, così tutti la vedono.
+    È privata: la vede solo chi ha accesso.</p>
+    <label>Dove</label>
+    <select id="tm-owner">${d.owners.map((o) => `<option value="${escapeHtml(o.login)}" ${o === def ? "selected" : ""}>${escapeHtml(o.login)} (${o.tipo})</option>`).join("")}</select>
+    <label>Bacheca</label>
+    <select id="tm-board"></select>
+    <div id="tm-new"><label>Nome della nuova bacheca</label>
+      <input type="text" id="tm-title" value="CapWizard · Punto della situazione">
+      <div id="tm-team-row"><label>Aperta al team</label><select id="tm-team"></select></div></div>`;
+  const fill = () => {
+    const o = TEAM.owners.find((x) => x.login === $("tm-owner").value);
+    $("tm-board").innerHTML = '<option value="">＋ Nuova bacheca privata</option>'
+      + o.bacheche.map((b) => `<option value="${escapeHtml(b.id)}">${escapeHtml(b.title)}</option>`).join("");
+    $("tm-team").innerHTML = '<option value="">— nessun team —</option>'
+      + (o.team || []).map((t) => `<option value="${escapeHtml(t.slug)}">${escapeHtml(t.name)}</option>`).join("");
+    if ((o.team || []).length === 1) $("tm-team").value = o.team[0].slug;
+    $("tm-team-row").hidden = !(o.team || []).length;
+    $("tm-new").hidden = !!$("tm-board").value;
+    $("team-go").textContent = $("tm-board").value ? "Collega" : "Crea e collega";
+  };
+  $("tm-owner").onchange = fill;
+  $("tm-board").onchange = fill;
+  teamFoot("Crea e collega", async () => {
+    const o = TEAM.owners.find((x) => x.login === $("tm-owner").value);
+    const pid = $("tm-board").value;
+    $("team-go").disabled = true; $("team-go").textContent = "Un attimo…";
+    const r = await (await fetch(`${BACKEND}/api/team-board/${pid ? "connect" : "create"}`, { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(pid ? { owner: o.login, project_id: pid }
+        : { owner: o.login, owner_id: o.id, titolo: $("tm-title").value, team: $("tm-team").value }) })).json()
+      .catch((e) => ({ ok: false, msg: String(e) }));
+    $("team-go").disabled = false;
+    if (!r.ok) { notify(r.msg || "Non riuscito.", "err"); fill(); return; }
+    notify(`Bacheca del team collegata: «${r.titolo}».`, "ok");
+    $("team-modal").hidden = true;
+    loadBoard();
+    showView("team");
+  });
+  fill();
+}
+
+// the team folder (Samba share) settings, in the team modal
+function shareFolderForm() {
+  return `<label>Cartella del team <span class="opt">il server Samba con il materiale: lì passano progetti e template CapCut</span></label>
+    <div class="row2"><input type="text" id="tm-share-path" placeholder="es. /Volumes/CapWizard" readonly>
+      <button class="btn2" id="tm-share-pick">Scegli…</button></div>
+    <label>Indirizzo del server <span class="opt">per collegarlo da qui</span></label>
+    <div class="row2"><input type="text" id="tm-share-addr" placeholder="smb://nas.local/CapWizard">
+      <button class="btn2" id="tm-share-mount">Collega</button></div>
+    <p class="ai-foot" id="tm-share-state"></p>`;
+}
+
+function wireShareFolder() {
+  const cfg = TEAM.cartella || {};
+  $("tm-share-path").value = cfg.cartella || "";
+  $("tm-share-addr").value = cfg.indirizzo || "";
+  const showShare = (c) => {
+    $("tm-share-state").textContent = !c.cartella ? "Nessuna cartella: scegli quella del server quando è collegato (di solito in /Volumes)."
+      : c.raggiungibile ? "✓ Raggiungibile: puoi passare e prendere progetti e template."
+      : "✕ Non raggiungibile ora: collega il server.";
+  };
+  showShare(cfg);
+  const saveShare = async () => {
+    const c = await (await fetch(`${BACKEND}/api/team-share`, { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cartella: $("tm-share-path").value, indirizzo: $("tm-share-addr").value }) })).json();
+    TEAM.cartella = c;
+    showShare(c);
+  };
+  $("tm-share-pick").onclick = async () => {
+    const f = window.api && await window.api.selectFolder();
+    if (f) { $("tm-share-path").value = f; saveShare(); }
+  };
+  $("tm-share-addr").onchange = saveShare;
+  $("tm-share-mount").onclick = async () => {
+    await saveShare();
+    const r = await (await fetch(`${BACKEND}/api/team-share/mount`, { method: "POST" })).json();
+    if (!r.ok) return notify(r.msg, "err");
+    notify("Il Finder collega il server (la prima volta chiede la password). Poi scegli la cartella.", "ok");
+    setTimeout(async () => { await loadTeam(); showShare(TEAM.cartella); }, 6000);
+  };
+}
+
+function teamFoot(label, action) {
+  const go = $("team-go");
+  go.hidden = !label;
+  go.textContent = label;
+  go.onclick = action;
+}
+
 async function openFromBoard(it) {
   showView("home");
   await loadProjects();
@@ -1512,6 +2001,16 @@ async function openFromBoard(it) {
 }
 
 function wireBoard() {
+  $("v-team").onclick = () => showView("team");
+  $("team-settings").onclick = () => openTeamModal();
+  $("tv-new").onclick = () => openTeamAdd();
+  $("tv-cancel").onclick = () => { $("tv-add").hidden = true; TEAM.add = []; };
+  $("tv-send").onclick = sendTeamAdd;
+  $("tv-price-all").oninput = (e) => { TEAM.add.forEach((v) => { v.prezzo = e.target.value; }); renderTeamAdd(); };
+  $("tv-add").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); sendTeamAdd(); } };
+  $("team-gh").onclick = () => window.api && window.api.openExternal(TEAM.stato.url);
+  $("btn-team-board").onclick = () => openTeamModal();
+  $("team-close").onclick = () => { $("team-modal").hidden = true; };
   $("dash-add").onclick = () => openTodo(null);
   $("dash-new").onclick = () => showView("editor");
   $("td-close").onclick = () => { $("todo-modal").hidden = true; };
@@ -1611,7 +2110,7 @@ function redoProject(p) {
   $("notes").value = s.notes || "";
   $("script-path").value = s.script_path || "";
   $("intro-title").value = s.intro_title || "";
-  if (s.input_path) setFolder(s.input_path);
+  if (s.input_path) setFolder(s.input_path, s.exclude || []);
   check();
 }
 
@@ -1621,8 +2120,10 @@ function redoProject(p) {
 
 function md(t) {
   let out = "";
-  let inTable = false;
+  let inTable = false, inList = false;
   for (const l of t.split("\n")) {
+    const item = /^\s*[-*] /.test(l);
+    if (inList && !item) { out += "</ul>"; inList = false; }
     const h = escapeHtml(l).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
     if (/^\|/.test(l)) {
       if (/^\|[-\s|:]+\|$/.test(l)) continue;
@@ -1632,10 +2133,10 @@ function md(t) {
     }
     if (inTable) { out += "</table>"; inTable = false; }
     if (/^#{1,4} /.test(l)) out += `<h4>${h.replace(/^#+ /, "")}</h4>`;
-    else if (/^\s*[-*] /.test(l)) out += `<li>${h.replace(/^\s*[-*] /, "")}</li>`;
+    else if (item) { if (!inList) { out += "<ul>"; inList = true; } out += `<li>${h.replace(/^\s*[-*] /, "")}</li>`; }
     else if (l.trim()) out += `<p>${h}</p>`;
   }
-  return out + (inTable ? "</table>" : "");
+  return out + (inTable ? "</table>" : "") + (inList ? "</ul>" : "");
 }
 
 // ---------------------------------------------------------------------------
@@ -1743,7 +2244,7 @@ function cacheActive(active) {
 function cachedGraceOk() {
   try {
     const c = JSON.parse(localStorage.getItem("capwizard_sub") || "{}");
-    if (!c.active) return false;
+    if (!c.active || !(c.ts <= Date.now())) return false;     // a date in the future would never expire
     return (Date.now() - c.ts) < OFFLINE_GRACE_DAYS * 86400 * 1000;
   } catch (_) { return false; }
 }
@@ -1893,7 +2394,8 @@ function openExternal(url) {
 // ---------------------------------------------------------------------------
 
 function wireClientModal() {
-  $("cm-close").onclick = $("cm-cancel").onclick = () => { $("client-modal").hidden = true; document.body.classList.remove("modal-open"); };
+  $("cm-close").onclick = $("cm-cancel").onclick = () => {
+    $("client-modal").hidden = true; document.body.classList.remove("modal-open"); state.importing = null; };
   $("cm-ag").onchange = updateStudyUI;
   ["cm-name", "cm-links", "cm-msg", "cm-ag-new"].forEach((i) => { $(i).oninput = updateStudyUI; });
   $("cm-drop").onclick = async () => { for (const p of (window.api && await window.api.selectVideos()) || []) addStudyPath(p); };
@@ -1960,6 +2462,7 @@ function updateStudyUI() {
   if (state.editing) return;
   const nuova = $("cm-ag").value === "__new";
   $("cm-ag-new").hidden = !nuova;
+  if (state.importing) { $("cm-save").textContent = "CARICA"; $("cm-name-opt").hidden = true; return; }
   if (nuova) $("cm-study").open = true;
   $("cm-name-opt").hidden = !nuova;
   const study = nuova || hasStudyMaterial();
@@ -1968,6 +2471,10 @@ function updateStudyUI() {
 
 async function openClientModal(c) {
   state.editing = c;
+  state.importing = null;
+  $("cm-file").hidden = true;
+  $("cm-tdrop").hidden = true;
+  $("cm-tdrop").querySelector("b").textContent = "📦 Trascina qui il template";
   state.study = { video: [], shots: [] };
   ["cm-links", "cm-msg", "cm-note", "cm-ag-new"].forEach((i) => { $(i).value = ""; });
   $("cm-study").hidden = !!c;
@@ -2003,6 +2510,7 @@ async function openClientModal(c) {
 async function saveClientModal() {
   let col = $("cm-col").value.trim();
   if (col && !col.startsWith("#")) col = "#" + col;
+  if (state.importing) return installTemplateFile(col);
   const c = state.editing;
   if (!c && ($("cm-ag").value === "__new" || hasStudyMaterial())) return startStudy(col);
   let r;
@@ -2025,6 +2533,98 @@ async function saveClientModal() {
   const fresh = state.clients.find((x) => x.id === id);
   if (fresh) await chooseClient(fresh);
   addLog("✏️ " + r.msg, "ok");
+}
+
+// ---- a client's template as one zip (its skill and its CapCut folder), see template_file.py ----
+
+function exportTemplate(c) {
+  $("ex-title").textContent = `Esporta il template di ${c.nome}`;
+  $("export-modal").querySelectorAll(".ex-opt").forEach((b) => {
+    const needs = b.dataset.cosa !== "skill";
+    b.disabled = needs && !c.template_ok;
+    b.title = b.disabled ? "Il template CapCut non c'è su questo Mac" : "";
+    b.onclick = async () => {
+      const name = b.dataset.cosa === "skill" ? `Skill ${c.nome}` : b.dataset.cosa === "cartella" ? c.template : `Template ${c.nome}`;
+      const dest = window.api && await window.api.saveSkill(name);
+      if (!dest) return;
+      $("export-modal").querySelectorAll(".ex-opt").forEach((x) => { x.disabled = true; });
+      b.querySelector("b").textContent = "Esporto…";
+      const r = await (await fetch(`${BACKEND}/api/template-file/export`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: c.id, path: dest, cosa: b.dataset.cosa }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+      closeExportModal();
+      notify(r.msg || "Esportazione non riuscita.", r.ok ? "ok" : "err");
+    };
+  });
+  const labels = { completo: "Template completo", skill: "Solo skill", cartella: "Solo cartella CapCut" };
+  $("export-modal").querySelectorAll(".ex-opt b").forEach((x) => { x.textContent = labels[x.parentElement.dataset.cosa]; });
+  document.body.classList.add("modal-open");
+  $("export-modal").hidden = false;
+}
+
+function closeExportModal() {
+  $("export-modal").hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+// «Carica template»: the same form as «Nuovo template», with a box to drop the zip (or the folder) on
+async function openTemplateLoad(path = null) {
+  await openClientModal(null);
+  state.importing = { path: null, info: null };
+  $("cm-title").textContent = "Carica template";
+  $("cm-study").hidden = true;
+  $("cm-tdrop").hidden = false;
+  $("cm-ag").innerHTML = '<option value="">Nessuna agenzia</option>'
+    + (state.vault.agenzie || []).map((a) => `<option>${escapeHtml(a)}</option>`).join("") + '<option value="__new">＋ Nuova agenzia…</option>';
+  updateStudyUI();
+  if (path) await readTemplatePath(path);
+}
+
+async function readTemplatePath(path) {
+  const info = await (await fetch(`${BACKEND}/api/template-file/read`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!info.ok) { $("cm-err").textContent = "⚠️ " + (info.msg || "Non è un template."); return; }
+  $("cm-err").textContent = "";
+  state.importing = { path, info };
+  const ags = state.vault.agenzie || [];
+  if (!info.agenzia) $("cm-ag").value = "";
+  else if (ags.includes(info.agenzia)) $("cm-ag").value = info.agenzia;
+  else { $("cm-ag").value = "__new"; $("cm-ag-new").value = info.agenzia; }
+  $("cm-name").value = info.cliente || "";
+  $("cm-col").value = info.colore || "";
+  if (/^#[0-9a-f]{6}$/i.test(info.colore || "")) $("cm-pick").value = info.colore.toLowerCase();
+  $("cm-font").value = info.font || "";
+  const mb = Math.max(1, Math.round((info.byte || 0) / 1e6));
+  const what = info.ha_skill && info.ha_cartella ? "Skill e cartella CapCut" : info.ha_skill ? "Solo la skill" : "Solo la cartella CapCut";
+  $("cm-tdrop").querySelector("b").textContent = `📦 ${path.split("/").pop()}`;
+  $("cm-file").innerHTML = `<span>${what} · template «${escapeHtml(info.template || "—")}» · ${mb} MB${info.file ? ` · ${info.file} file di suoni e grafica` : ""}</span>
+    ${info.ha_cartella && info.template_qui ? `<span class="warn">Hai già «${escapeHtml(info.template)}» in CapCut: lo sostituisco, il tuo va nel backup dell'app.</span>` : ""}
+    ${!info.ha_cartella && !info.template_qui ? `<span class="warn">Il progetto «${escapeHtml(info.template)}» non c'è su questo Mac: carica anche la cartella CapCut.</span>` : ""}
+    ${!info.ha_skill ? "<span>Senza skill: il profilo del cliente lo creo da questi campi.</span>" : ""}
+    ${info.cliente_esiste ? "<span class=\"warn\">C'è già un cliente con questo nome: il suo profilo va nel backup e questo prende il suo posto.</span>" : ""}
+    ${info.ha_skill ? '<span class="mute">La skill contiene istruzioni per Claude: carica solo template di persone di cui ti fidi.</span>' : ""}`;
+  $("cm-file").hidden = false;
+}
+
+async function installTemplateFile(col) {
+  const { path } = state.importing;
+  if (!path) { $("cm-err").textContent = "⚠️ Trascina prima il template nel riquadro."; return; }
+  const ag = ($("cm-ag").value === "__new" ? $("cm-ag-new").value : $("cm-ag").value).trim().toUpperCase();
+  $("cm-save").disabled = true;
+  $("cm-save").textContent = "Carico…";
+  $("cm-err").textContent = "";
+  const r = await (await fetch(`${BACKEND}/api/template-file/install`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, cliente: $("cm-name").value.trim(), agenzia: ag, colore: col.toUpperCase(),
+                           font: $("cm-font").value.trim() }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  $("cm-save").disabled = false;
+  $("cm-save").textContent = "CARICA";
+  if (!r.ok) { $("cm-err").textContent = "⚠️ " + r.msg; return; }
+  state.importing = null;
+  $("client-modal").hidden = true;
+  document.body.classList.remove("modal-open");
+  await loadTemplates();
+  await loadClients();
+  showView("clients");
+  notify(r.msg, "ok");
 }
 
 function openAgencyModal() {
@@ -2314,6 +2914,11 @@ async function execScarico() {
   scLog(`— finito: ${res.cartella} —`, "ok");
   if (window.api) window.api.openPath(res.cartella);
   checkScarico();
+}
+
+// a client's colour goes into style attributes: only a plain CSS colour, never markup
+function safeColor(c) {
+  return /^(#[0-9a-f]{3,8}|[a-z]{3,20}|(rgb|hsl)a?\([\d\s.,%]+\))$/i.test(String(c || "").trim()) ? String(c).trim() : "#6b7180";
 }
 
 function escapeHtml(s) {

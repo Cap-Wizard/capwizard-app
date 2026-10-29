@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; connect-src http://127.0.0.1:8765 ws://127.0.0.1:8765 http://127.0.0.1:8799 https:; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+        content="default-src 'self'; connect-src http://127.0.0.1:8765 ws://127.0.0.1:8765 http://127.0.0.1:8799 https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com;" />
   <title>CapWizard</title>
   <link rel="icon" href="logo.png" />
   <link rel="stylesheet" href="styles.css" />
@@ -14,6 +14,7 @@
     <div class="sb-brand"><img class="logo" src="wizard.svg" alt="" /><h1>Cap<span>Wizard</span></h1></div>
     <nav class="views" id="views">
       <button class="vbtn" id="v-dash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
+      <button class="vbtn" id="v-team"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="3"/><circle cx="16.5" cy="9" r="2.5"/><path d="M2.5 19c.7-3 2.9-4.8 5.5-4.8s4.8 1.8 5.5 4.8"/><path d="M14 14.6c.8-.3 1.6-.4 2.5-.4 2.3 0 4.2 1.6 5 4.8"/></svg><span>Team</span><b id="n-team" hidden>0</b></button>
       <button class="vbtn on" id="v-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M12 8v8M8 12h8"/></svg><span>Nuovo video</span></button>
       <button class="vbtn" id="v-proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>I miei progetti</span><b id="n-proj">0</b></button>
       <button class="vbtn" id="v-scarico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.5"/><rect x="3" y="11" width="18" height="5" rx="1.5"/><path d="M7 20h10"/></svg><span>Smistamento clip</span></button>
@@ -38,6 +39,7 @@
         <div class="menu" id="settings-menu" hidden>
           <button id="btn-config-ai">Collegamento a Claude</button>
           <button id="btn-ai-services">✦ Servizi AI <small id="ai-count"></small></button>
+          <button id="btn-team-board">👥 Bacheca del team</button>
           <button id="tb-account" hidden>Gestisci abbonamento</button>
           <button id="tb-logout" hidden>Esci</button>
         </div>
@@ -105,6 +107,7 @@
         <div class="step" id="s2">
           <h2><span class="num">2</span>Le clip<small id="s2-info"></small></h2>
           <div class="drop" id="drop">
+            <button class="drop-x" id="clips-clear" title="Togli tutte le clip" hidden>✕</button>
             <b>📁 Trascina qui la cartella delle clip</b>
             <span>oppure clicca per sceglierla dal Finder</span>
             <div class="path" id="input-path-label"></div>
@@ -113,6 +116,7 @@
           <div class="thumbs" id="thumbs"></div>
           <label>B-roll in un'altra cartella <span class="opt">facoltativo</span><small id="br-info" class="opt" style="float:right"></small></label>
           <div class="drop drop2" id="drop-broll">
+            <button class="drop-x" id="broll-clear" title="Togli tutti i b-roll" hidden>✕</button>
             <b>🎞️ Trascina qui la cartella dei b-roll</b>
             <span>se il cliente li ha dati a parte</span>
             <div class="path" id="broll-label"></div>
@@ -279,10 +283,10 @@
       <div><h2>Clienti</h2><p class="lib-sub" id="cl-sub"></p></div>
       <div class="lib-actions">
         <input type="search" class="hsearch" id="cl-search" placeholder="Cerca cliente, agenzia o template…" autocomplete="off" />
+        <button class="btn2" id="v-client-load" title="Un template esportato da CapWizard (file .skill): profilo del cliente e progetto CapCut">⬆︎ Carica template</button>
         <button class="btn-primary-sm" id="v-client">＋ Nuovo template</button>
       </div>
     </div>
-    <div class="lib-tabs" id="cl-tabs"></div>
     <div class="lib-grid" id="cl-grid"></div>
   </div>
 
@@ -293,6 +297,36 @@
       <div class="lib-actions"><button class="btn-primary-sm" id="v-agency">＋ Nuova agenzia</button></div>
     </div>
     <div class="lib-grid" id="ag-grid"></div>
+  </div>
+
+  <div id="view-team" class="view dash" hidden>
+    <div class="dash-head">
+      <div>
+        <h2>Video da montare</h2>
+        <div class="dash-sub" id="team-sub">Carico la lista del team…</div>
+      </div>
+      <div class="dash-actions">
+        <button class="btn2" id="team-gh" hidden>Apri su GitHub ↗</button>
+        <button class="btn2" id="team-settings">Bacheca…</button>
+        <button class="btn-primary-sm" id="tv-new" hidden>＋ Aggiungi video</button>
+      </div>
+    </div>
+    <section class="tv-add" id="tv-add" hidden>
+      <div class="tv-add-head">
+        <div><h3 id="tv-add-title">Video da montare</h3><p id="tv-add-sub"></p></div>
+        <div class="tv-add-fields">
+          <label>Cliente<input type="text" id="tv-client" list="tv-clients" placeholder="nessuno" autocomplete="off" /></label>
+          <datalist id="tv-clients"></datalist>
+          <label>Prezzo per tutti<input type="number" id="tv-price-all" min="0" step="5" placeholder="€" /></label>
+        </div>
+      </div>
+      <div class="tv-rows" id="tv-rows"></div>
+      <div class="tv-add-foot">
+        <button class="btn2" id="tv-cancel">Annulla</button>
+        <button class="btn-primary-sm" id="tv-send">Metti nel team ⏎</button>
+      </div>
+    </section>
+    <div class="tv-list" id="tv-list"></div>
   </div>
 
   <div id="view-dash" class="view dash" hidden>
@@ -344,6 +378,21 @@
     </div>
   </div>
 
+  <!-- ==================== BACHECA DEL TEAM ==================== -->
+  <div id="team-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Bacheca del team</h2>
+        <button class="modal-close" id="team-close">✕</button>
+      </div>
+      <div class="modal-body" id="team-body"></div>
+      <div class="modal-foot">
+        <div class="spacer"></div>
+        <button class="send" id="team-go" hidden>Crea e collega</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ==================== VIDEO DA FARE ==================== -->
   <div id="todo-modal" class="modal-overlay" hidden>
     <div class="modal">
@@ -370,6 +419,24 @@
         <button class="btn2 danger" id="td-delete" hidden>Elimina</button>
         <div class="spacer"></div>
         <button class="send" id="td-save">SALVA</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== ESPORTA TEMPLATE ==================== -->
+  <div id="export-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="ex-title">Esporta template</h2>
+        <button class="modal-close" id="ex-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="ai-intro">Uno zip da dare a chi monta. Il progetto in CapCut resta dov'è: nello zip va una copia.</p>
+        <div class="ex-opts">
+          <button class="ex-opt" data-cosa="completo"><b>Template completo</b><span>La skill del cliente e la cartella del progetto CapCut, collegate dal nome</span></button>
+          <button class="ex-opt" data-cosa="skill"><b>Solo skill</b><span>Il profilo del cliente per Claude: colore, font, regole e lezioni</span></button>
+          <button class="ex-opt" data-cosa="cartella"><b>Solo cartella CapCut</b><span>Il progetto del template con suoni, musica e grafica</span></button>
+        </div>
       </div>
     </div>
   </div>
@@ -408,6 +475,11 @@
         <button class="modal-close" id="cm-close">✕</button>
       </div>
       <div class="modal-body">
+        <div class="drop drop2" id="cm-tdrop" hidden>
+          <b>📦 Trascina qui il template</b>
+          <span>lo zip esportato da CapWizard, la cartella del progetto CapCut o la skill del cliente · o clicca per sceglierlo</span>
+        </div>
+        <div class="tf-info" id="cm-file" hidden></div>
         <div id="cm-new">
           <label>Agenzia</label>
           <select id="cm-ag"></select>

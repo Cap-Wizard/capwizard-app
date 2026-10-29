@@ -21,7 +21,7 @@ body::before { display: none; }
 .mainbar { background: var(--bg); border-bottom: 1px solid var(--line); }
 .mb-title { font-weight: 500; font-size: 14px; }
 .mb-date { font-weight: 400; color: var(--mute); font-size: 12.5px; }
-.logo { filter: none; }
+.logo { filter: none; width: 29px; height: 23px; }
 h1 { font-weight: 600; letter-spacing: -.01em; }
 h1 span { color: var(--text); }
 .sb-brand { padding-bottom: 14px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
@@ -142,3 +142,9 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .wizard-step.active { background: var(--panel3); }
 .wizard-step.active .step-num { background: var(--accent); border-color: var(--accent); }
 .modal-head, .modal-foot { border-color: var(--line); }
+
+/* ---- one height, one corner for the controls side by side in a page head ---- */
+.dash-actions > button, .lib-actions > button, .lib-actions .hsearch {
+  height: 38px; padding-top: 0; padding-bottom: 0; border-radius: 8px; box-sizing: border-box; display: inline-flex; align-items: center; }
+/* empty board columns: same box in every column, text in the middle */
+.bempty { min-height: 88px; display: flex; align-items: center; justify-content: center; padding: 14px 16px; line-height: 1.45; }

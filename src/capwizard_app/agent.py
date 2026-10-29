@@ -134,7 +134,9 @@ def list_clients() -> list[dict]:
         colour = meta.get("capwizard-colore") or next(iter(re.findall(r"#[0-9A-Fa-f]{6}\b", text)), "")
         out.append({
             "id": name,
-            "nome": meta.get("capwizard-cliente") or (heading.group(1).strip() if heading else name),
+            "nome": (meta.get("capwizard-cliente") or (heading.group(1).strip() if heading else name)).upper(),
+            **({"agenzia": meta["capwizard-agenzia"]} if meta.get("capwizard-agenzia") else {}),
+            "font": meta.get("capwizard-font", ""),
             "template": template,
             "template_ok": template in templates,
             "colore": colour or "#7c6cff",
@@ -360,6 +362,9 @@ def run_agent(job, req) -> tuple[str, str]:
         extra.append("- Togli anche gli intercalari cioè / tipo / diciamo.")
     if getattr(req, "notes", None):
         extra.append(f"- Note di Nicola (vincolanti): {req.notes}")
+    if getattr(req, "exclude", None):
+        extra.append("- Clip tolte da Nicola nell'app: NON usarle e non trascriverle: "
+                     + ", ".join(str(Path(p).relative_to(req.input_path)) if Path(p).is_relative_to(req.input_path) else p for p in req.exclude))
     if getattr(req, "reference", None):
         extra.append(reference_section(req.reference, work))
     prompt = PROMPT.format(
@@ -603,7 +608,7 @@ gli script della skill). Se una precisione in più richiederebbe strumenti nuovi
 
 Procedura:
 1. Trascrivi le clip (parola per parola):
-   "{py}" "{tools}/trascrivi.py" "{clips}" "{work}/words.json"
+   "{py}" "{tools}/trascrivi.py" "{clips}" "{work}/words.json"{escluse}
    (se c'è la cartella b-roll, guarda i fotogrammi dei b-roll con ffmpeg `{ff}` per capire cosa mostrano).
 2. Costruisci il progetto CapCut clonando la base tecnica «{base}» (`{capcut}/{base}`) in `{staging}` (cartella NUOVA, copia tutta la
    cartella della base e poi riscrivi la timeline), applicando le regole. Scrivi gli script in `{work}/`. Se in
@@ -696,7 +701,12 @@ def run_vault(job, req, client: dict) -> tuple[str, str]:
     work.mkdir(parents=True, exist_ok=True)
     result = work / "risultato.json"
     job_data = {"client": client["id"], "name": req.name, "input_path": req.input_path, "broll_path": getattr(req, "broll_path", None),
-                "cine": bool(getattr(req, "cine", False)), "musica": True, "notes": req.notes, "stile": client.get("stile")}
+                "cine": bool(getattr(req, "cine", False)), "musica": True, "notes": req.notes, "stile": client.get("stile"),
+                "exclude": list(getattr(req, "exclude", None) or [])}
+    escluse = ""
+    if job_data["exclude"]:      # clips taken out in the app: not even transcribed
+        (work / "escluse.txt").write_text("\n".join(job_data["exclude"]) + "\n")
+        escluse = f' "{work}/escluse.txt"'
     job.log("📒 Leggo le regole dal vault (generali → agenzia → cliente) e preparo il brief…")
     brief = vault.brief(job_data, _vault_projects_of(client["id"]))
     (work / "brief.md").write_text(brief)
@@ -707,7 +717,7 @@ def run_vault(job, req, client: dict) -> tuple[str, str]:
     brief += reference_section(getattr(req, "reference", None) or [], work)
     prompt = VAULT_PROMPT.format(vault=vault.VAULT, base=base, brief=brief, py=vault.tools_python(), tools=vault.TOOLS,
                                  clips=req.input_path, work=work, ff=vault.ffmpeg() or "ffmpeg", capcut=CAPCUT_PROJECTS_DIR,
-                                 staging=staging, result=result, name=req.name)
+                                 staging=staging, result=result, name=req.name, escluse=escluse)
     dirs = {str(Path(req.input_path)), str(CAPCUT_PROJECTS_DIR), str(work), str(vault.VAULT), str(vault.TOOLS)}
     if getattr(req, "broll_path", None):
         dirs.add(str(Path(req.broll_path)))
