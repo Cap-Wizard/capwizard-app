@@ -6,6 +6,8 @@ it uses into the team folder, under CapWizard/Progetti/<name>/, with the paths i
 turned into "capwizard-media://<file>". On another Mac «Prendi il progetto» puts it in that
 person's CapCut the same way the app installs a project it built: the clips are copied under
 ~/Movies/CapCut Editor/<name>/ (CapCut is sandboxed) and the timeline points there.
+A client's CapCut template travels the same way, under CapWizard/Template/<name>/, and keeps its name on
+every Mac (the client profile names it).
 
 The folder is the share as mounted on this Mac (e.g. /Volumes/CapWizard), with its smb:// address
 so the app can ask Finder to mount it. Settings live in a small JSON in the app's data folder.
@@ -62,23 +64,23 @@ def mount() -> dict:
     return {"ok": True}
 
 
-def _root() -> Path:
+def _root(kind: str = "Progetti") -> Path:
     folder = _settings().get("cartella", "")
     if not folder:
         raise RuntimeError("Nessuna cartella del team: impostala in «Bacheca del team».")
     if not os.path.isdir(folder):
         raise RuntimeError(f"La cartella del team ({folder}) non è raggiungibile: collega il server e riprova.")
-    return Path(folder) / "CapWizard" / "Progetti"
+    return Path(folder) / "CapWizard" / kind
 
 
 def safe(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]+', "-", name).strip(" .") or "progetto"
 
 
-def packages() -> dict[str, dict]:
-    """The projects waiting in the team folder, by name (empty when the share isn't mounted)."""
+def packages(kind: str = "Progetti") -> dict[str, dict]:
+    """The projects (or templates) waiting in the team folder, by name (empty when the share isn't mounted)."""
     try:
-        root = _root()
+        root = _root(kind)
     except RuntimeError:
         return {}
     out = {}
@@ -166,6 +168,54 @@ def _run(item_id: str, fase: str, work, log=print) -> dict:
     return {"ok": True}
 
 
+def _pack(src: Path, dest: Path, manifest: dict, job: dict) -> tuple[int, int]:
+    """Copy a CapCut project and every media file it uses to dest/ (project/, media/, manifest.json).
+    It is written next to dest and renamed at the end, so a half copy never looks finished."""
+    part = dest.with_name(dest.name + ".parziale")
+    shutil.rmtree(part, ignore_errors=True)
+    shutil.copytree(src, part / "progetto", ignore=_SKIP)
+    docs = _docs(part / "progetto")
+    media = sorted(p for p in _paths(docs) if p.lower().endswith(MEDIA_EXT) and os.path.isfile(p))
+    total = sum(os.path.getsize(p) for p in media) or 1
+    (part / "media").mkdir(parents=True, exist_ok=True)
+    names, used, done = {}, set(), 0
+    for p in media:
+        b = os.path.basename(p)
+        if b in used:
+            b = f"{os.path.basename(os.path.dirname(p))} - {b}"
+        stem, ext, k = os.path.splitext(b)[0], os.path.splitext(b)[1], 2
+        while b in used:                    # same name in the same-named folder too: never overwrite a clip
+            b, k = f"{stem} ({k}){ext}", k + 1
+        used.add(b)
+        names[p] = b
+        shutil.copy2(p, part / "media" / b)
+        done += os.path.getsize(p)
+        job["pct"] = int(done * 100 / total)
+    _rewrite(docs, lambda s: PREFIX + names[s] if s in names else None)
+    (part / "manifest.json").write_text(json.dumps({
+        **manifest, "quando": time.strftime("%Y-%m-%d %H:%M"), "file": len(media), "byte": total},
+        ensure_ascii=False, indent=1))
+    shutil.rmtree(dest, ignore_errors=True)
+    part.rename(dest)
+    return len(media), total
+
+
+def _unpack(pkg: Path, staging: Path) -> None:
+    """A package of the team folder as a CapCut project in staging/, its media read from the share."""
+    shutil.copytree(pkg / "progetto", staging, ignore=_SKIP)
+    media = pkg / "media"
+    _rewrite(_docs(staging), lambda s: str(media / s[len(PREFIX):]) if s.startswith(PREFIX) else None)
+    meta_p = staging / "draft_meta_info.json"
+    meta = json.load(open(meta_p))
+    for k in [k for k in meta if k.startswith("tm_draft_cloud")]:
+        meta.pop(k)                   # a copy, not the one in CapCut's cloud space
+    json.dump(meta, open(meta_p, "w"), ensure_ascii=False)
+
+
+def _me(chi: str = "") -> str:
+    return chi or socket.gethostname().split(".")[0]
+
+
 def send(item_id: str, folder: str, nome: str, chi: str = "", log=print) -> dict:
     """Put my project and all its media in the team folder."""
     src = Path(folder)
@@ -177,34 +227,8 @@ def send(item_id: str, folder: str, nome: str, chi: str = "", log=print) -> dict
         return {"ok": False, "msg": str(e)}
 
     def work(job: dict) -> str:
-        dest = root / safe(nome)
-        part = dest.with_name(dest.name + ".parziale")
-        shutil.rmtree(part, ignore_errors=True)
-        shutil.copytree(src, part / "progetto", ignore=_SKIP)
-        docs = _docs(part / "progetto")
-        media = sorted(p for p in _paths(docs) if p.lower().endswith(MEDIA_EXT) and os.path.isfile(p))
-        total = sum(os.path.getsize(p) for p in media) or 1
-        (part / "media").mkdir(parents=True, exist_ok=True)
-        names, used, done = {}, set(), 0
-        for p in media:
-            b = os.path.basename(p)
-            if b in used:
-                b = f"{os.path.basename(os.path.dirname(p))} - {b}"
-            stem, ext, k = os.path.splitext(b)[0], os.path.splitext(b)[1], 2
-            while b in used:                    # same name in the same-named folder too: never overwrite a clip
-                b, k = f"{stem} ({k}){ext}", k + 1
-            used.add(b)
-            names[p] = b
-            shutil.copy2(p, part / "media" / b)
-            done += os.path.getsize(p)
-            job["pct"] = int(done * 100 / total)
-        _rewrite(docs, lambda s: PREFIX + names[s] if s in names else None)
-        (part / "manifest.json").write_text(json.dumps({
-            "nome": nome, "item": item_id, "da": chi or socket.gethostname().split(".")[0],
-            "quando": time.strftime("%Y-%m-%d %H:%M"), "file": len(media), "byte": total}, ensure_ascii=False, indent=1))
-        shutil.rmtree(dest, ignore_errors=True)
-        part.rename(dest)
-        return f"«{nome}» è nella cartella del team con {len(media)} file ({total / 1e9:.1f} GB)."
+        n, total = _pack(src, root / safe(nome), {"nome": nome, "item": item_id, "da": _me(chi)}, job)
+        return f"«{nome}» è nella cartella del team con {n} file ({total / 1e9:.1f} GB)."
     return _run(item_id, "passo", work, log)
 
 
@@ -226,17 +250,81 @@ def take(item_id: str, nome: str, log=print) -> dict:
             raise RuntimeError(f"Hai già un progetto CapCut «{target}».")
         with tempfile.TemporaryDirectory() as tmp:
             staging = Path(tmp) / "progetto"
-            shutil.copytree(pkg / "progetto", staging, ignore=_SKIP)
-            media = pkg / "media"
-            _rewrite(_docs(staging), lambda s: str(media / s[len(PREFIX):]) if s.startswith(PREFIX) else None)
-            meta_p = staging / "draft_meta_info.json"
-            meta = json.load(open(meta_p))
-            for k in [k for k in meta if k.startswith("tm_draft_cloud")]:
-                meta.pop(k)                   # a copy, not the one in CapCut's cloud space
-            json.dump(meta, open(meta_p, "w"), ensure_ascii=False)
+            _unpack(pkg, staging)
             job["fase"] = "copio i video"
             out = vault.install(str(staging), target, log, cutout=False)
         from capwizard_app import teamboard
         teamboard.link(f"capcut:{target}", item_id)       # the team card now opens it on this Mac
         return out
     return _run(item_id, "prendo", work, log)
+
+
+# ---------------------------------------------------------------------------
+# Client templates: the CapCut project itself, not only the client's profile
+# ---------------------------------------------------------------------------
+
+BACKUP_DIR = registry.app_data_dir() / "backup"
+
+
+def templates() -> list[dict]:
+    """The templates in the team folder, newest first, and whether this Mac already has each one."""
+    out = []
+    for folder, man in packages("Template").items():
+        nome = man.get("nome") or folder
+        out.append({"nome": nome, "da": man.get("da", ""), "quando": man.get("quando", ""),
+                    "file": man.get("file", 0), "byte": man.get("byte", 0),
+                    "qui": (CAPCUT_PROJECTS_DIR / safe(nome)).is_dir()})
+    return sorted(out, key=lambda t: t["quando"], reverse=True)
+
+
+def send_template(nome: str, chi: str = "", log=print) -> dict:
+    """Put one of my CapCut templates, with its sounds, music and pictures, in the team folder."""
+    src = CAPCUT_PROJECTS_DIR / safe(nome)
+    if safe(nome) != nome or not (src / "draft_meta_info.json").exists():
+        return {"ok": False, "msg": f"Non trovo il progetto CapCut «{nome}» su questo Mac."}
+    try:
+        root = _root("Template")
+    except RuntimeError as e:
+        return {"ok": False, "msg": str(e)}
+
+    def work(job: dict) -> str:
+        n, total = _pack(src, root / nome, {"nome": nome, "da": _me(chi)}, job)
+        return f"Il template «{nome}» è nella cartella del team con {n} file ({total / 1e6:.0f} MB)."
+    return _run(f"tpl:{nome}", "passo", work, log)
+
+
+def take_template(nome: str, log=print) -> dict:
+    """Put a template of the team folder in my CapCut, under the same name. One I already have is moved
+    to the app's backup folder first (never deleted) and the new one takes its place in CapCut's list."""
+    try:
+        pkg = _root("Template") / safe(nome)
+    except RuntimeError as e:
+        return {"ok": False, "msg": str(e)}
+    if not (pkg / "manifest.json").exists():
+        return {"ok": False, "msg": "Il template non è (ancora) nella cartella del team."}
+    target = safe(nome)
+
+    def work(job: dict) -> str:
+        dst = CAPCUT_PROJECTS_DIR / target
+        with tempfile.TemporaryDirectory() as tmp:
+            staging = Path(tmp) / "progetto"
+            _unpack(pkg, staging)
+            job["fase"] = "copio i file"
+            if not dst.exists():
+                return vault.install(str(staging), target, log, cutout=False)
+            vault.libera(dst, log)
+            meta_p = staging / "draft_meta_info.json"
+            meta = json.load(open(meta_p))
+            old_id = json.load(open(dst / "draft_meta_info.json")).get("draft_id")
+            if old_id:
+                meta["draft_id"] = old_id        # same place in CapCut's list
+            meta.update(draft_name=target, draft_fold_path=str(dst), draft_root_path=str(CAPCUT_PROJECTS_DIR))
+            json.dump(meta, open(meta_p, "w"), ensure_ascii=False)
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            backup = BACKUP_DIR / f"{target} {time.strftime('%m%d-%H%M%S')}"
+            shutil.move(str(dst), str(backup))
+            shutil.copytree(staging, dst)
+            media = vault.porta_media(str(dst), target)
+        return " ".join(x for x in (f"✅ Template «{target}» aggiornato (il tuo di prima è in {backup}).", media,
+                                    "CapCut è aperto: chiudilo e riaprilo per vedere quello nuovo." if vault.capcut_running() else "") if x)
+    return _run(f"tpl:{nome}", "prendo", work, log)

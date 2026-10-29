@@ -1126,6 +1126,30 @@ def team_share_take(req: TeamShareTake) -> dict:
     return teamshare.take(req.item_id, req.nome, log=lambda m: print(m, flush=True))
 
 
+# client templates through the same folder: the CapCut project, with sounds, music and pictures
+
+@app.get("/api/team-share/templates")
+def team_share_templates() -> dict:
+    return {"cartella": teamshare.config(), "templates": teamshare.templates(), "lavori": teamshare.jobs()}
+
+
+class TeamTemplate(BaseModel):
+    nome: str
+
+
+@app.post("/api/team-share/templates/send")
+def team_share_template_send(req: TeamTemplate) -> dict:
+    res = teamshare.send_template(req.nome, teamboard.status().get("io", ""), log=lambda m: print(m, flush=True))
+    if res.get("ok"):
+        brain.push_soon(f"Template {req.nome} caricato nella cartella del team")   # and its client profile on GitHub
+    return res
+
+
+@app.post("/api/team-share/templates/take")
+def team_share_template_take(req: TeamTemplate) -> dict:
+    return teamshare.take_template(req.nome, log=lambda m: print(m, flush=True))
+
+
 @app.post("/api/board/todos")
 def board_todo_add(req: TodoRequest) -> dict:
     return board.add_todo(req.model_dump())

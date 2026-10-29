@@ -176,7 +176,7 @@ function showView(name) {
   if (state.email) $("tb-email").textContent = state.email;
   if (name === "home" && state.backendReady) loadProjects();
   if (name === "dash" && state.backendReady) loadBoard();
-  if (name === "team" && state.backendReady) { renderTeamBoard(); loadTeam(true); }
+  if (name === "team" && state.backendReady) { renderTeamBoard(); loadTeam(true); loadTeamTemplates(); }
   if (name === "scarico" && state.backendReady) loadScaricoCodes();
 }
 
@@ -1259,7 +1259,8 @@ function followChange(jobId, p) {
 
 const DASH = { items: [], stati: [], todo: null, loaded: false, dragId: null, mark: null };
 // the team's board (a private GitHub Project, see teamboard.py)
-const TEAM = { stato: {}, items: [], loaded: false, msg: "", owners: null, cartella: {}, lavori: {}, poll: null };
+const TEAM = { stato: {}, items: [], loaded: false, msg: "", owners: null, cartella: {}, lavori: {}, poll: null,
+               templates: [] };
 const STATI = [["da_fare", "Da fare"], ["in_lavorazione", "Da finire"], ["da_revisionare", "Da revisionare"], ["fatto", "Fatto"]];
 
 // Clienti and Agenzie: the archive sections of the sidebar (counts there, a page each).
@@ -1775,7 +1776,110 @@ async function takeProject(it) {
 
 function needTeamFolder() {
   notify(TEAM.cartella.cartella ? "La cartella del team non è raggiungibile: collega il server." : "Imposta prima la cartella del team (il server Samba).", "err");
-  openTeamModal();
+  openTeamModal({ soloCartella: !TEAM.stato.collegata });
+}
+
+// ---- client templates (the CapCut project, with sounds, music and pictures) through the team folder ----
+
+async function loadTeamTemplates() {
+  try {
+    const d = await (await fetch(`${BACKEND}/api/team-share/templates`)).json();
+    TEAM.templates = d.templates || [];
+    TEAM.cartella = d.cartella || TEAM.cartella;
+    TEAM.lavori = d.lavori || TEAM.lavori;
+  } catch (_) { TEAM.templates = []; }
+  renderTeamTemplates();
+  if (Object.values(TEAM.lavori).some((j) => j.attivo)) watchTeamJobs();
+}
+
+const tplClients = (nome) => state.clients.filter((c) => c.template === nome).map((c) => c.nome);
+
+function renderTeamTemplates() {
+  const c = TEAM.cartella || {};
+  const list = $("tt-list");
+  $("tt-sub").innerHTML = !c.cartella
+    ? 'Per caricarli serve la cartella del team (il server Samba). <button class="btn-link" id="tt-folder">Imposta la cartella</button>'
+    : !c.raggiungibile ? `<span class="warn">La cartella del team (${escapeHtml(c.cartella)}) non è collegata.</span> <button class="btn-link" id="tt-folder">Collega</button>`
+    : "Il progetto CapCut del template, con suoni, musica e grafica. Chi lo prende lo trova nel suo CapCut con lo stesso nome.";
+  if ($("tt-folder")) $("tt-folder").onclick = () => openTeamModal({ soloCartella: !TEAM.stato.collegata });
+  const busy = (n) => (TEAM.lavori[`tpl:${n}`] || {}).attivo && TEAM.lavori[`tpl:${n}`];
+  const up = Object.entries(TEAM.lavori).filter(([k, j]) => k.startsWith("tpl:") && j.attivo && j.fase === "passo"
+    && !TEAM.templates.some((t) => `tpl:${t.nome}` === k)).map(([k, j]) => ({ nome: k.slice(4), nuovo: true, job: j }));
+  const rows = [...up, ...TEAM.templates];
+  if (!rows.length) {
+    list.innerHTML = c.raggiungibile ? '<div class="tt-empty">Nessun template nella cartella del team: carica il primo.</div>' : "";
+    return;
+  }
+  list.innerHTML = rows.map((t, i) => {
+    const job = t.job || busy(t.nome);
+    const who = tplClients(t.nome);
+    const meta = t.nuovo ? "lo sto caricando…"
+      : [t.da && `da ${escapeHtml(t.da)}`, t.quando && escapeHtml(t.quando), t.byte && `${Math.max(1, Math.round(t.byte / 1e6))} MB`].filter(Boolean).join(" · ");
+    const act = job ? `<button class="bbtn" disabled>${job.fase === "passo" ? `⬆︎ ${job.pct}%` : "⬇︎ copio…"}</button>`
+      : t.qui ? `<button class="bbtn" data-i="${i}" data-a="prendi" title="Sostituisce il tuo con questo; il tuo va nel backup dell'app">⬇︎ Aggiorna il mio</button>`
+        + `<button class="bbtn" data-i="${i}" data-a="carica" title="Rimetti nella cartella del team la tua versione">⬆︎ Ricarica il mio</button>`
+      : `<button class="bbtn primary" data-i="${i}" data-a="prendi" title="Mettilo nel tuo CapCut">⬇︎ Prendi</button>`;
+    return `<div class="tt-card"><div class="tt-ic">🎬</div>
+      <div class="tt-body"><div class="tt-name">${escapeHtml(t.nome)}</div>
+        <div class="tt-meta">${who.length ? `${escapeHtml(who.join(", "))} · ` : ""}${meta}${t.qui && !job ? ' · <span class="ok">ce l\'hai</span>' : ""}</div></div>
+      <div class="tt-acts">${act}</div></div>`;
+  }).join("");
+  list.querySelectorAll("button[data-a]").forEach((b) => {
+    const t = rows[+b.dataset.i];
+    b.onclick = () => (b.dataset.a === "prendi" ? takeTemplate(t) : uploadTemplate(t.nome));
+  });
+}
+
+function toggleTeamTplPicker(open = $("tt-picker").hidden) {
+  $("tt-picker").hidden = !open;
+  if (!open) return;
+  $("tt-search").value = "";
+  renderTeamTplPicker();
+  $("tt-search").focus();
+}
+
+function renderTeamTplPicker() {
+  const q = $("tt-search").value.trim().toLowerCase();
+  const ofClients = new Set(state.clients.map((c) => c.template).filter(Boolean));
+  // the client templates first, then the projects named like a template; the search reaches every project
+  const names = state.templates.filter((n) => (q ? n.toLowerCase().includes(q) || tplClients(n).some((c) => c.toLowerCase().includes(q))
+    : ofClients.has(n) || /template/i.test(n)));
+  names.sort((a, b) => (ofClients.has(b) - ofClients.has(a)) || a.localeCompare(b));
+  $("tt-pick-list").innerHTML = names.length ? names.map((n, i) => {
+    const who = tplClients(n);
+    const there = TEAM.templates.some((t) => t.nome === n);
+    return `<button class="tt-pick" data-i="${i}"><b>${escapeHtml(n)}</b>
+      <span>${who.length ? escapeHtml(who.join(", ")) : "nessun cliente"}${there ? " · già nel team: lo sostituisce" : ""}</span></button>`;
+  }).join("") : `<div class="empty">${state.templates.length ? "Nessun progetto CapCut con questo nome" : "Nessun progetto CapCut trovato"}</div>`;
+  $("tt-pick-list").querySelectorAll(".tt-pick").forEach((b) => {
+    b.onclick = () => { toggleTeamTplPicker(false); uploadTemplate(names[+b.dataset.i]); };
+  });
+}
+
+async function uploadTemplate(nome) {
+  if (!TEAM.cartella.raggiungibile) return needTeamFolder();
+  if (TEAM.templates.some((t) => t.nome === nome)
+      && !confirm(`Nella cartella del team c'è già «${nome}». Lo sostituisco con il tuo?`)) return;
+  const r = await (await fetch(`${BACKEND}/api/team-share/templates/send`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ nome }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non riesco a caricarlo.", "err");
+  TEAM.lavori[`tpl:${nome}`] = { attivo: true, fase: "passo", pct: 0 };
+  renderTeamTemplates();
+  watchTeamJobs();
+}
+
+async function takeTemplate(t) {
+  if (!TEAM.cartella.raggiungibile) return needTeamFolder();
+  const ask = t.qui
+    ? `Hai già «${t.nome}». Lo sostituisco con quello del team${t.da ? ` (di ${t.da})` : ""}? Il tuo non lo cancello: lo sposto nel backup dell'app.`
+    : `Metto «${t.nome}» nel tuo CapCut, con suoni, musica e grafica copiati su questo Mac?`;
+  if (!confirm(ask)) return;
+  const r = await (await fetch(`${BACKEND}/api/team-share/templates/take`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ nome: t.nome }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non riesco a prenderlo.", "err");
+  TEAM.lavori[`tpl:${t.nome}`] = { attivo: true, fase: "prendo", pct: 0 };
+  renderTeamTemplates();
+  watchTeamJobs();
 }
 
 // copies run for minutes: follow them on the cards, then say how it went
@@ -1790,12 +1894,13 @@ function watchTeamJobs() {
     for (const [id, j] of Object.entries(TEAM.lavori)) {
       if (!j.attivo && before[id] && before[id].attivo) {
         notify(j.errore ? `Non riuscito: ${j.errore}` : j.msg, j.errore ? "err" : "ok");
+        if (id.startsWith("tpl:")) { loadTeamTemplates(); if (!j.errore && j.fase !== "passo") { loadTemplates(); loadClients(); } continue; }
         loadTeam(true);
         if (!j.errore && j.fase !== "passo") loadProjects();
       }
     }
     if (!Object.values(TEAM.lavori).some((j) => j.attivo)) clearInterval(TEAM.poll);
-    if (!$("view-team").hidden) renderTeamBoard();
+    if (!$("view-team").hidden) { renderTeamBoard(); renderTeamTemplates(); }
   };
   TEAM.poll = setInterval(tick, 1000);
   tick();
@@ -1817,7 +1922,7 @@ async function shareCard(it, btn) {
   renderBoard();
 }
 
-async function openTeamModal() {
+async function openTeamModal(opts = {}) {
   $("settings-menu").hidden = true;
   $("team-modal").hidden = false;
   $("team-body").innerHTML = '<div class="empty">Controllo GitHub…</div>';
@@ -1825,6 +1930,12 @@ async function openTeamModal() {
   await loadTeam(true);
   const st = TEAM.stato;
   const body = $("team-body");
+  if (opts.soloCartella === true) {          // only the team folder: the templates don't need the board
+    body.innerHTML = `<p class="ai-intro">I template passano dalla <b>cartella del team</b>, il server Samba con il materiale.</p>
+      ${shareFolderForm()}`;
+    wireShareFolder();
+    return teamFoot("", null);
+  }
   if (!st.gh) {
     body.innerHTML = `<p class="ai-intro">Per la bacheca del team serve <b>GitHub CLI</b>, collegata al tuo account GitHub.
       Da Terminale:</p><pre class="cmd">brew install gh
@@ -1842,40 +1953,8 @@ gh auth login</pre><p class="ai-foot">Poi premi «Ricontrolla».</p>`;
       Chi ha accesso alla bacheca vede gli stessi video nella pagina Team.</p>
       <div class="row2 pair"><button class="btn2" id="team-gh2">Apri su GitHub ↗</button>
       <button class="btn2 danger" id="team-off">Scollega</button></div>
-      <label>Cartella del team <span class="opt">il server Samba con il materiale: lì passano i progetti CapCut</span></label>
-      <div class="row2"><input type="text" id="tm-share-path" placeholder="es. /Volumes/CapWizard" readonly>
-        <button class="btn2" id="tm-share-pick">Scegli…</button></div>
-      <label>Indirizzo del server <span class="opt">per collegarlo da qui</span></label>
-      <div class="row2"><input type="text" id="tm-share-addr" placeholder="smb://nas.local/CapWizard">
-        <button class="btn2" id="tm-share-mount">Collega</button></div>
-      <p class="ai-foot" id="tm-share-state"></p>`;
-    const cfg = TEAM.cartella || {};
-    $("tm-share-path").value = cfg.cartella || "";
-    $("tm-share-addr").value = cfg.indirizzo || "";
-    const showShare = (c) => {
-      $("tm-share-state").textContent = !c.cartella ? "Nessuna cartella: scegli quella del server quando è collegato (di solito in /Volumes)."
-        : c.raggiungibile ? "✓ Raggiungibile: dalle schede del team puoi passare e prendere i progetti."
-        : "✕ Non raggiungibile ora: collega il server.";
-    };
-    showShare(cfg);
-    const saveShare = async () => {
-      const c = await (await fetch(`${BACKEND}/api/team-share`, { method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cartella: $("tm-share-path").value, indirizzo: $("tm-share-addr").value }) })).json();
-      TEAM.cartella = c;
-      showShare(c);
-    };
-    $("tm-share-pick").onclick = async () => {
-      const f = window.api && await window.api.selectFolder();
-      if (f) { $("tm-share-path").value = f; saveShare(); }
-    };
-    $("tm-share-addr").onchange = saveShare;
-    $("tm-share-mount").onclick = async () => {
-      await saveShare();
-      const r = await (await fetch(`${BACKEND}/api/team-share/mount`, { method: "POST" })).json();
-      if (!r.ok) return notify(r.msg, "err");
-      notify("Il Finder collega il server (la prima volta chiede la password). Poi scegli la cartella.", "ok");
-      setTimeout(async () => { await loadTeam(); showShare(TEAM.cartella); }, 6000);
-    };
+      ${shareFolderForm()}`;
+    wireShareFolder();
     $("team-gh2").onclick = () => window.api && window.api.openExternal(st.url);
     $("team-off").onclick = async () => {
       if (!confirm("Scollegare la bacheca del team da questo Mac? Su GitHub resta tutto com'è.")) return;
@@ -1933,6 +2012,48 @@ gh auth login</pre><p class="ai-foot">Poi premi «Ricontrolla».</p>`;
   fill();
 }
 
+// the team folder (Samba share) settings, in the team modal
+function shareFolderForm() {
+  return `<label>Cartella del team <span class="opt">il server Samba con il materiale: lì passano progetti e template CapCut</span></label>
+    <div class="row2"><input type="text" id="tm-share-path" placeholder="es. /Volumes/CapWizard" readonly>
+      <button class="btn2" id="tm-share-pick">Scegli…</button></div>
+    <label>Indirizzo del server <span class="opt">per collegarlo da qui</span></label>
+    <div class="row2"><input type="text" id="tm-share-addr" placeholder="smb://nas.local/CapWizard">
+      <button class="btn2" id="tm-share-mount">Collega</button></div>
+    <p class="ai-foot" id="tm-share-state"></p>`;
+}
+
+function wireShareFolder() {
+  const cfg = TEAM.cartella || {};
+  $("tm-share-path").value = cfg.cartella || "";
+  $("tm-share-addr").value = cfg.indirizzo || "";
+  const showShare = (c) => {
+    $("tm-share-state").textContent = !c.cartella ? "Nessuna cartella: scegli quella del server quando è collegato (di solito in /Volumes)."
+      : c.raggiungibile ? "✓ Raggiungibile: puoi passare e prendere progetti e template."
+      : "✕ Non raggiungibile ora: collega il server.";
+  };
+  showShare(cfg);
+  const saveShare = async () => {
+    const c = await (await fetch(`${BACKEND}/api/team-share`, { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cartella: $("tm-share-path").value, indirizzo: $("tm-share-addr").value }) })).json();
+    TEAM.cartella = c;
+    showShare(c);
+    loadTeamTemplates();
+  };
+  $("tm-share-pick").onclick = async () => {
+    const f = window.api && await window.api.selectFolder();
+    if (f) { $("tm-share-path").value = f; saveShare(); }
+  };
+  $("tm-share-addr").onchange = saveShare;
+  $("tm-share-mount").onclick = async () => {
+    await saveShare();
+    const r = await (await fetch(`${BACKEND}/api/team-share/mount`, { method: "POST" })).json();
+    if (!r.ok) return notify(r.msg, "err");
+    notify("Il Finder collega il server (la prima volta chiede la password). Poi scegli la cartella.", "ok");
+    setTimeout(async () => { await loadTeam(); await loadTeamTemplates(); showShare(TEAM.cartella); }, 6000);
+  };
+}
+
 function teamFoot(label, action) {
   const go = $("team-go");
   go.hidden = !label;
@@ -1949,9 +2070,12 @@ async function openFromBoard(it) {
 
 function wireBoard() {
   $("v-team").onclick = () => showView("team");
-  $("team-settings").onclick = openTeamModal;
+  $("team-settings").onclick = () => openTeamModal();
+  $("tt-add").onclick = () => (TEAM.cartella.raggiungibile ? toggleTeamTplPicker() : needTeamFolder());
+  $("tt-search").oninput = renderTeamTplPicker;
+  $("tt-search").onkeydown = (e) => { if (e.key === "Escape") toggleTeamTplPicker(false); };
   $("team-gh").onclick = () => window.api && window.api.openExternal(TEAM.stato.url);
-  $("btn-team-board").onclick = openTeamModal;
+  $("btn-team-board").onclick = () => openTeamModal();
   $("team-close").onclick = () => { $("team-modal").hidden = true; };
   $("dash-add").onclick = () => openTodo(null);
   $("dash-new").onclick = () => showView("editor");
