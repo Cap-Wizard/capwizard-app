@@ -761,3 +761,9 @@ pre.cmd { background: var(--bg2, #0b0c0f); border: 1px solid var(--line); border
 .tv-add input[type="text"], .tv-add input[type="number"] { padding: 7px 10px; border-radius: 9px; background: var(--panel2);
   border: 1px solid var(--line); color: var(--text); font: inherit; font-size: 12.5px; }
 @media (max-width: 720px) { .tv-row { grid-template-columns: minmax(0, 1fr) 70px 100px; } .tv-form { grid-template-columns: 1fr 1fr; } .tv-row .tv-client, .tv-th span:nth-child(2) { display: none; } }
+
+/* back bar for client/agency filtered lists */
+.backbar { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: rgba(255, 255, 255, .05); color: var(--text); font-size: 12.5px; cursor: pointer; }
+.backbar:hover { background: rgba(255, 255, 255, .1); }
+.backbar[hidden] { display: none; }

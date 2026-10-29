@@ -149,6 +149,23 @@ function dropNotice(id) {
 // Views
 // ---------------------------------------------------------------------------
 
+// "Progetti" of a client / "Vedi i clienti" of an agency open a filtered list:
+// show a bar to go back where you came from (and drop the filter)
+function openFiltered(barId, searchId, value, backView, backLabel, open) {
+  $(searchId).value = value;
+  const bar = $(barId);
+  bar.textContent = `← ${backLabel}  ·  ${value}  ✕`;
+  bar.title = `Torna a ${backLabel}`;
+  bar.hidden = false;
+  bar.onclick = () => { clearFiltered(barId, searchId); showView(backView); };
+  open();
+}
+function clearFiltered(barId, searchId) {
+  if ($(barId).hidden) return;
+  $(barId).hidden = true;
+  $(searchId).value = "";
+}
+
 function showView(name) {
   for (const v of ["view-auth", "view-subscribe", "view-dash", "view-team", "view-home", "view-editor", "view-scarico",
                    "view-clients", "view-agencies"]) {
@@ -620,13 +637,13 @@ function wireEditor() {
   $("v-dash").onclick = () => showView("dash");
   wireBoard();
   $("v-new").onclick = () => showView("editor");
-  $("v-proj").onclick = () => showView("home");
+  $("v-proj").onclick = () => { clearFiltered("pback", "psearch"); showView("home"); renderProjects(); };
   $("v-client").onclick = () => openClientModal(null);
   $("v-client-load").onclick = () => openTemplateLoad();
   $("cm-tdrop").onclick = async () => { const p = window.api && await window.api.selectSkill(); if (p) readTemplatePath(p); };
   $("ex-close").onclick = closeExportModal;
   $("v-agency").onclick = openAgencyModal;
-  $("v-clients").onclick = () => showView("clients");
+  $("v-clients").onclick = () => { clearFiltered("clback", "cl-search"); showView("clients"); };
   $("v-agencies").onclick = () => showView("agencies");
   $("cl-search").oninput = renderClientsView;
   $("v-scarico").onclick = () => showView("scarico");
@@ -1367,7 +1384,7 @@ function renderClientsView() {
     card.querySelectorAll("button").forEach((b) => {
       b.onclick = () => {
         if (b.dataset.a === "new") { showView("editor"); chooseClient(c); }
-        else if (b.dataset.a === "proj") { showView("home"); $("psearch").value = c.nome; renderProjects(); }
+        else if (b.dataset.a === "proj") openFiltered("pback", "psearch", c.nome, "clients", "Clienti", () => { showView("home"); renderProjects(); });
         else if (b.dataset.a === "edit") openClientModal(c);
         else if (b.dataset.a === "export") exportTemplate(c);
       };
@@ -1393,7 +1410,7 @@ function renderAgenciesView() {
   }).join("") : '<div class="lib-empty">Nessuna agenzia: aggiungi la prima con «＋ Nuova agenzia».</div>';
   $("ag-grid").querySelectorAll(".lib-card").forEach((card) => {
     const a = card.dataset.ag;
-    card.querySelector('[data-a="clients"]').onclick = () => { $("cl-search").value = a; showView("clients"); };
+    card.querySelector('[data-a="clients"]').onclick = () => openFiltered("clback", "cl-search", a, "agencies", "Agenzie", () => showView("clients"));
     card.querySelector('[data-a="new"]').onclick = async () => {
       await openClientModal(null);
       $("cm-ag").value = a;

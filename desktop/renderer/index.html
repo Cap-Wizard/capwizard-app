@@ -280,7 +280,7 @@
   <!-- ==================== CLIENTI ==================== -->
   <div id="view-clients" class="view lib" hidden>
     <div class="lib-head">
-      <div><h2>Clienti</h2><p class="lib-sub" id="cl-sub"></p></div>
+      <div><button class="backbar" id="clback" hidden></button><h2>Clienti</h2><p class="lib-sub" id="cl-sub"></p></div>
       <div class="lib-actions">
         <input type="search" class="hsearch" id="cl-search" placeholder="Cerca cliente, agenzia o template…" autocomplete="off" />
         <button class="btn2" id="v-client-load" title="Un template esportato da CapWizard (file .skill): profilo del cliente e progetto CapCut">⬆︎ Carica template</button>
@@ -346,6 +346,7 @@
 
   <div id="view-home" class="view projs" hidden>
     <section class="plist">
+      <button class="backbar" id="pback" hidden></button>
       <input type="text" class="search" id="psearch" placeholder="Cerca progetto o cliente…" />
       <div class="pmissing" id="pmissing" hidden></div>
       <div id="groups"></div>
