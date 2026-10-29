@@ -42,7 +42,8 @@ class TeamBoardError(Exception):
 # ---------------------------------------------------------------------------
 
 def _gh() -> str | None:
-    return shutil.which("gh") or next((p for p in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
+    return shutil.which("gh") or next((p for p in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh",
+                                                  os.path.expanduser("~/.local/bin/gh"))  # official release, no brew
                                        if os.path.exists(p)), None)
 
 
