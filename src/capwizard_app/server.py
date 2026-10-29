@@ -1007,7 +1007,7 @@ def board_get() -> dict:
     out = board.board(projects_list()["projects"], clients, templates - {"", "—"})
     shared = teamboard.links()
     for it in out["items"]:
-        it["team"] = shared.get(it["id"], "")
+        it["team"] = shared.get(it["id"]) or shared.get(it.get("todo_id") or "", "")
     return out
 
 
@@ -1120,6 +1120,91 @@ def team_board_move(item_id: str, req: TeamMove) -> dict:
 @app.delete("/api/team-board/items/{item_id}")
 def team_board_unshare(item_id: str) -> dict:
     return _team(teamboard.unshare, item_id)
+
+
+# videos to edit: a folder of clips goes on the team's list with a price, one person takes each
+
+@app.get("/api/team-board/folder")
+def team_board_folder(path: str) -> dict:
+    """The videos in a folder: one per subfolder of clips (the «Smistamento clip» layout), else one per video file."""
+    base = Path(path)
+    if not base.is_dir():
+        return {"ok": False, "msg": "Non è una cartella."}
+    def clips(d: Path) -> int:
+        return sum(1 for p in d.iterdir() if p.is_file() and p.suffix.lower() in VIDEO_EXT and not p.name.startswith("._"))
+    try:
+        entries = sorted((p for p in base.iterdir() if not p.name.startswith(".")), key=lambda p: p.name.lower())
+        videos = [{"titolo": d.name, "cartella": str(d), "clip": n} for d in entries if d.is_dir() and (n := clips(d))]
+        if not videos:
+            videos = [{"titolo": f.stem, "cartella": str(base), "clip": 1} for f in entries
+                      if f.is_file() and f.suffix.lower() in VIDEO_EXT and not f.name.startswith("._")]
+    except OSError as e:
+        return {"ok": False, "msg": f"Non riesco a leggere la cartella: {e}"}
+    up = str(base).upper()
+    hits = [c for c in agent.list_clients() if len(c["nome"]) >= 3 and c["nome"].upper() in up]
+    client = max(hits, key=lambda c: len(c["nome"])) if hits else None
+    return {"ok": True, "nome": base.name, "videos": videos, "cliente": client["nome"] if client else ""}
+
+
+class TeamVideo(BaseModel):
+    titolo: str
+    prezzo: float | None = None
+    cartella: str = ""
+
+
+class TeamVideos(BaseModel):
+    videos: list[TeamVideo]
+    cliente: str = ""
+
+
+@app.post("/api/team-board/videos")
+def team_board_videos(req: TeamVideos) -> dict:
+    return _team(teamboard.add_videos, [v.model_dump() for v in req.videos], req.cliente.strip())
+
+
+class TeamVideoEdit(BaseModel):
+    titolo: str
+    cliente: str = ""
+    prezzo: float | None = None
+
+
+@app.put("/api/team-board/items/{item_id}/video")
+def team_board_video_edit(item_id: str, req: TeamVideoEdit) -> dict:
+    return _team(teamboard.edit_video, item_id, req.titolo, req.cliente.strip().upper(), req.prezzo)
+
+
+@app.post("/api/team-board/items/{item_id}/take")
+def team_board_take(item_id: str) -> dict:
+    """«Edita»: the video is mine on the board, and a card on my Home with its client, folder and price."""
+    it = next((i for i in _team(lambda: {"items": teamboard.items(True)}).get("items", []) if i["id"] == item_id), None)
+    if not it:
+        return {"ok": False, "msg": "Questo video non c'è più nella lista del team."}
+    had = next((k for k, v in teamboard.links().items() if v == item_id), "")
+    if had:                                   # already on my Home
+        return {"ok": True, "todo": had}
+    res = _team(teamboard.take, item_id)
+    if not res.get("ok"):
+        return res
+    client = next((c for c in agent.list_clients() if c["nome"].upper() == (it["cliente"] or "").upper()), None)
+    note = f"Prezzo: {it['prezzo']:g} €" if it.get("prezzo") is not None else ""
+    todo = board.add_todo({"titolo": it["titolo"], "cliente": client["id"] if client else it["cliente"],
+                           "cartella": it["cartella"] if it["cartella"] and Path(it["cartella"]).is_dir() else "",
+                           "note": "\n".join(x for x in (note, it.get("note") or "") if x)})
+    if todo.get("ok"):
+        teamboard.link(todo["todo"]["id"], item_id)
+    return {"ok": True, "todo": todo.get("todo", {}).get("id", "")}
+
+
+@app.post("/api/team-board/items/{item_id}/release")
+def team_board_release(item_id: str) -> dict:
+    """The ✕ on a video taken from the team: it goes back to everyone's list and leaves my Home."""
+    mine = [k for k, v in teamboard.links().items() if v == item_id]
+    res = _team(teamboard.release, item_id)
+    if res.get("ok"):
+        for local in mine:
+            if local.startswith("todo:"):
+                board.remove_todo(local)
+    return res
 
 
 # the team folder (a Samba share) to pass CapCut projects with their clips (see teamshare.py)

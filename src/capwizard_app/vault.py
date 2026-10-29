@@ -212,7 +212,7 @@ def list_clients() -> list[dict]:
         ag, cl = os.path.basename(os.path.dirname(p)), os.path.basename(p)[:-3]
         full = f"{ag} / {cl}"
         base = base_for(full)
-        out.append({"id": cid(ag, cl), "nome": cl, "agenzia": ag, "template": base, "template_ok": bool(base),
+        out.append({"id": cid(ag, cl), "nome": cl.upper(), "agenzia": ag, "template": base, "template_ok": bool(base),
                     "colore": colore(cl), "stile": stile_for(full), "descrizione": f"Cliente di {ag} (Obsidian)",
                     "path": p, "source": "vault"})
     return out

@@ -28,6 +28,7 @@ _ALIASES = {"todo": "da_fare", "in progress": "in_lavorazione", "done": "fatto"}
 DEFAULT_TITLE = "CapWizard · Punto della situazione"
 _PATH = registry.app_data_dir() / "team_board.json"
 _REF = re.compile(r"<!--\s*capwizard:(?P<id>[^>]*?)\s*-->")
+_DIR = re.compile(r"<!--\s*capwizard-cartella:(?P<path>[^>]*?)\s*-->")    # the clips' folder of a video to edit
 _LOCK = threading.Lock()
 _CACHE: dict = {"when": 0.0, "items": None}
 
@@ -205,26 +206,32 @@ def items(refresh: bool = False) -> list[dict]:
         out, after = [], None
         while True:
             page = _q("""query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {
-                items(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id type
-                  content { ... on DraftIssue { title body assignees(first: 5) { nodes { login avatarUrl } } }
+                items(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id type createdAt
+                  content { ... on DraftIssue { id title body assignees(first: 5) { nodes { login avatarUrl } } }
                             ... on Issue { title body url assignees(first: 5) { nodes { login avatarUrl } } }
                             ... on PullRequest { title url } }
                   fieldValues(first: 20) { nodes {
                     ... on ProjectV2ItemFieldSingleSelectValue { optionId field { ... on ProjectV2FieldCommon { id } } }
                     ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { id } } }
-                    ... on ProjectV2ItemFieldDateValue { date field { ... on ProjectV2FieldCommon { id } } } } } } } } } }""",
+                    ... on ProjectV2ItemFieldDateValue { date field { ... on ProjectV2FieldCommon { id } } }
+                    ... on ProjectV2ItemFieldNumberValue { number field { ... on ProjectV2FieldCommon { id } } } } } } } } } }""",
                       id=s["project_id"], after=after)["node"]["items"]
             for n in page["nodes"]:
                 c = n.get("content") or {}
                 vals = {v["field"]["id"]: v for v in n["fieldValues"]["nodes"] if v and v.get("field")}
                 body = c.get("body") or ""
                 ref = _REF.search(body)
+                folder = _DIR.search(body)
                 st = vals.get(s.get("status_field"), {}).get("optionId")
                 out.append({"id": n["id"], "titolo": c.get("title") or "(senza titolo)",
                             "stato": key_of.get(st, "da_fare"),
                             "cliente": vals.get(s.get("cliente_field"), {}).get("text", ""),
                             "scadenza": vals.get(s.get("scadenza_field"), {}).get("date", ""),
-                            "note": _REF.sub("", body).strip(),
+                            "note": _DIR.sub("", _REF.sub("", body)).strip(),
+                            "prezzo": vals.get(s.get("prezzo_field"), {}).get("number"),
+                            "cartella": folder.group("path") if folder else "",
+                            "draft": c.get("id") if n.get("type") == "DRAFT_ISSUE" else "",
+                            "creato": n.get("createdAt") or "",
                             "chi": [{"login": a["login"], "avatar": a["avatarUrl"]}
                                     for a in (c.get("assignees") or {}).get("nodes", [])],
                             "locale": ref.group("id") if ref else "", "url": c.get("url") or s.get("url", "")})
@@ -323,3 +330,108 @@ def follow_soon(local_id: str, stato: str, log=print) -> None:
         except TeamBoardError as e:
             log(f"[team] {e}")
     threading.Thread(target=run, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# Videos to edit: put on the board by whoever has the clips, taken by whoever edits them
+# ---------------------------------------------------------------------------
+
+def _prezzo_field(s: dict) -> str:
+    """The board's «Prezzo» number field, made the first time a video with a price goes on it."""
+    if s.get("prezzo_field"):
+        return s["prezzo_field"]
+    fields = {f["name"]: f for f in _fields(s["project_id"])["fields"]["nodes"] if f}
+    f = fields.get("Prezzo")
+    if not f:
+        f = _q("""mutation($p: ID!) { createProjectV2Field(input: {projectId: $p, dataType: NUMBER, name: "Prezzo"}) {
+                      projectV2Field { ... on ProjectV2FieldCommon { id } } } }""",
+               p=s["project_id"])["createProjectV2Field"]["projectV2Field"]
+    s["prezzo_field"] = f["id"]
+    _save(s)
+    return f["id"]
+
+
+def add_videos(videos: list[dict], cliente: str = "", cartella: str = "") -> dict:
+    """New videos to edit, with nobody on them yet: everyone on the team sees them until one takes it."""
+    s = _need()
+    videos = [v for v in videos if (v.get("titolo") or "").strip()]
+    if not videos:
+        return {"ok": False, "msg": "Nessun video da aggiungere."}
+    prezzo = _prezzo_field(s) if any(v.get("prezzo") not in (None, "") for v in videos) else ""
+    made = 0
+    for v in videos:
+        folder = (v.get("cartella") or cartella or "").replace("-->", "").strip()
+        body = f"<!-- capwizard-cartella:{folder} -->" if folder else ""
+        item = _q("""mutation($p: ID!, $t: String!, $b: String) {
+                         addProjectV2DraftIssue(input: {projectId: $p, title: $t, body: $b}) { projectItem { id } } }""",
+                  p=s["project_id"], t=v["titolo"].strip(), b=body)["addProjectV2DraftIssue"]["projectItem"]
+        if s.get("options", {}).get("da_fare"):
+            _set_field(s, item["id"], s.get("status_field"), {"singleSelectOptionId": s["options"]["da_fare"]})
+        if cliente:
+            _set_field(s, item["id"], s.get("cliente_field"), {"text": cliente})
+        if prezzo and v.get("prezzo") not in (None, ""):
+            _set_field(s, item["id"], prezzo, {"number": float(v["prezzo"])})
+        made += 1
+    _CACHE.update(when=0.0, items=None)
+    return {"ok": True, "n": made}
+
+
+def _item(item_id: str) -> dict:
+    return _q("""query($id: ID!) { node(id: $id) { ... on ProjectV2Item { id content { ... on DraftIssue { id title
+                     assignees(first: 5) { nodes { login } } } } } } }""", id=item_id)["node"] or {}
+
+
+def take(item_id: str) -> dict:
+    """I edit it: it gets me as assignee, so it leaves everyone's list."""
+    s = _need()
+    c = (_item(item_id).get("content") or {})
+    if not c.get("id"):
+        return {"ok": False, "msg": "Questo video non c'è più nella lista del team."}
+    others = [a["login"] for a in c["assignees"]["nodes"] if a["login"] != s["me"]["login"]]
+    if others:
+        _CACHE.update(when=0.0, items=None)
+        return {"ok": False, "msg": f"L'ha già preso {', '.join(others)}."}
+    _q("""mutation($d: ID!, $a: [ID!]) { updateProjectV2DraftIssue(input: {draftIssueId: $d, assigneeIds: $a}) {
+              draftIssue { id } } }""", d=c["id"], a=[s["me"]["id"]])
+    _CACHE.update(when=0.0, items=None)
+    return {"ok": True}
+
+
+def release(item_id: str) -> dict:
+    """Not mine any more: nobody on it, back to «Da fare», everyone sees it again."""
+    s = _need()
+    c = (_item(item_id).get("content") or {})
+    if c.get("id"):
+        _q("""mutation($d: ID!) { updateProjectV2DraftIssue(input: {draftIssueId: $d, assigneeIds: []}) {
+                  draftIssue { id } } }""", d=c["id"])
+        if s.get("options", {}).get("da_fare"):
+            _set_field(s, item_id, s.get("status_field"), {"singleSelectOptionId": s["options"]["da_fare"]})
+    s["links"] = {k: v for k, v in s.get("links", {}).items() if v != item_id}
+    _save(s)
+    _CACHE.update(when=0.0, items=None)
+    return {"ok": True}
+
+
+def edit_video(item_id: str, titolo: str, cliente: str, prezzo: float | None) -> dict:
+    """The ⋯ of a video on the list: its title, client and price."""
+    s = _need()
+    titolo = (titolo or "").strip()
+    if not titolo:
+        return {"ok": False, "msg": "Scrivi il titolo del video."}
+    c = (_item(item_id).get("content") or {})
+    if not c.get("id"):
+        return {"ok": False, "msg": "Questo video non c'è più nella lista del team."}
+    _q("""mutation($d: ID!, $t: String!) { updateProjectV2DraftIssue(input: {draftIssueId: $d, title: $t}) {
+              draftIssue { id } } }""", d=c["id"], t=titolo)
+    clear = """mutation($p: ID!, $i: ID!, $f: ID!) {
+                   clearProjectV2ItemFieldValue(input: {projectId: $p, itemId: $i, fieldId: $f}) { clientMutationId } }"""
+    if cliente.strip():
+        _set_field(s, item_id, s.get("cliente_field"), {"text": cliente.strip()})
+    elif s.get("cliente_field"):
+        _q(clear, p=s["project_id"], i=item_id, f=s["cliente_field"])
+    if prezzo is not None:
+        _set_field(s, item_id, _prezzo_field(s), {"number": float(prezzo)})
+    elif s.get("prezzo_field"):
+        _q(clear, p=s["project_id"], i=item_id, f=s["prezzo_field"])
+    _CACHE.update(when=0.0, items=None)
+    return {"ok": True}

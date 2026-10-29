@@ -134,7 +134,7 @@ def list_clients() -> list[dict]:
         colour = meta.get("capwizard-colore") or next(iter(re.findall(r"#[0-9A-Fa-f]{6}\b", text)), "")
         out.append({
             "id": name,
-            "nome": meta.get("capwizard-cliente") or (heading.group(1).strip() if heading else name),
+            "nome": (meta.get("capwizard-cliente") or (heading.group(1).strip() if heading else name)).upper(),
             **({"agenzia": meta["capwizard-agenzia"]} if meta.get("capwizard-agenzia") else {}),
             "font": meta.get("capwizard-font", ""),
             "template": template,

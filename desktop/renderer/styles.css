@@ -701,3 +701,48 @@ body.dragging.editor-drag::after { display: none; }
 .tt-empty { grid-column: 1 / -1; font-size: 12.5px; color: var(--dim); }
 pre.cmd { background: var(--bg2, #0b0c0f); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12.5px;
   color: var(--text); white-space: pre-wrap; user-select: all; }
+
+#cm-name, #cm-ag-new { text-transform: uppercase; }
+
+/* Team: the videos to edit, one row each, «Edita» on the right */
+.tv-list { display: flex; flex-direction: column; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--panel); overflow: hidden; }
+.tv-list:empty { display: none; }
+.tv-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.4fr) 80px 104px; align-items: center; gap: 12px;
+  min-height: 36px; padding: 3px 8px 3px 12px; border-top: 1px solid var(--line); }
+.tv-row:first-child { border-top: none; }
+.tv-row:not(.tv-th):hover { background: var(--panel2); }
+.tv-th { min-height: 28px; font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; background: var(--bg2); }
+.tv-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-client { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--mute); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-client i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--c); }
+.tv-acts { display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
+.tv-acts .btn-primary-sm { padding: 5px 12px; font-size: 12px; border-radius: 8px; }
+.tv-more { width: 26px; height: 26px; border-radius: 7px; border: none; background: none; color: var(--mute); font-size: 16px; line-height: 1; cursor: pointer; }
+.tv-more:hover { background: var(--panel3); color: var(--text); }
+.tv-form { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) 100px auto; align-items: end; gap: 10px;
+  padding: 8px 12px 10px; background: var(--panel2); border-top: 1px solid var(--line); }
+.tv-form label { display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; color: var(--mute); min-width: 0; }
+.tv-form input { padding: 6px 9px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); color: var(--text); font: inherit; font-size: 12.5px; min-width: 0; }
+.tv-form-acts { display: flex; gap: 6px; }
+.tv-form-acts button { padding: 6px 11px; font-size: 12px; border-radius: 8px; }
+.tv-form .tf-del { color: var(--err, #e5484d); }
+.tv-price { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.tv-add { padding: 14px 16px; margin-bottom: 14px; border-radius: var(--r); background: var(--panel); border: 1px solid var(--line2); }
+.tv-add-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.tv-add-head h3 { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.tv-add-head p { color: var(--mute); font-size: 12.5px; margin-top: 3px; }
+.tv-add-fields { display: flex; gap: 10px; flex-wrap: wrap; }
+.tv-add-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--mute); }
+.tv-add-fields input { width: 170px; }
+.tv-add-fields #tv-price-all { width: 120px; }
+.tv-rows { display: flex; flex-direction: column; gap: 5px; margin: 12px 0; max-height: 320px; overflow-y: auto; }
+.tv-arow { display: grid; grid-template-columns: 28px minmax(0, 1fr) 64px 100px; align-items: center; gap: 10px; }
+.tv-arow .tv-name { min-width: 0; }
+.tv-clips { font-size: 11.5px; color: var(--dim); text-align: right; }
+.tv-x { width: 26px; height: 26px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2); color: var(--mute); cursor: pointer; }
+.tv-x:hover { color: var(--text); border-color: var(--line2); }
+.tv-add-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.tv-add input[type="text"], .tv-add input[type="number"] { padding: 7px 10px; border-radius: 9px; background: var(--panel2);
+  border: 1px solid var(--line); color: var(--text); font: inherit; font-size: 12.5px; }
+@media (max-width: 720px) { .tv-row { grid-template-columns: minmax(0, 1fr) 70px 100px; } .tv-form { grid-template-columns: 1fr 1fr; } .tv-row .tv-client, .tv-th span:nth-child(2) { display: none; } }

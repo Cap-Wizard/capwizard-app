@@ -176,7 +176,7 @@ function showView(name) {
   if (state.email) $("tb-email").textContent = state.email;
   if (name === "home" && state.backendReady) loadProjects();
   if (name === "dash" && state.backendReady) loadBoard();
-  if (name === "team" && state.backendReady) { renderTeamBoard(); loadTeam(true); loadTeamTemplates(); }
+  if (name === "team" && state.backendReady) { renderTeamBoard(); loadTeam(true); }
   if (name === "scarico" && state.backendReady) loadScaricoCodes();
 }
 
@@ -685,6 +685,10 @@ function wireEditor() {
     const firstPath = first && window.api && window.api.pathForFile ? window.api.pathForFile(first) : "";
     if (!$("client-modal").hidden && state.importing) {      // a template (zip, folder or skill) to load
       if (firstPath) readTemplatePath(firstPath);
+      return;
+    }
+    if ($("client-modal").hidden && !$("view-team").hidden) {      // a folder of videos for the team's list
+      if (firstPath) openTeamAdd(firstPath);
       return;
     }
     if ($("client-modal").hidden && !$("view-clients").hidden) {   // dropped on Clienti: same as «Carica template»
@@ -1272,8 +1276,7 @@ function followChange(jobId, p) {
 
 const DASH = { items: [], stati: [], todo: null, loaded: false, dragId: null, mark: null };
 // the team's board (a private GitHub Project, see teamboard.py)
-const TEAM = { stato: {}, items: [], loaded: false, msg: "", owners: null, cartella: {}, lavori: {}, poll: null,
-               templates: [] };
+const TEAM = { stato: {}, items: [], loaded: false, msg: "", owners: null, cartella: {}, add: [] };
 const STATI = [["da_fare", "Da fare"], ["in_lavorazione", "Da finire"], ["da_revisionare", "Da revisionare"], ["fatto", "Fatto"]];
 
 // Clienti and Agenzie: the archive sections of the sidebar (counts there, a page each).
@@ -1325,13 +1328,7 @@ function videosOf(nome) {
 
 function renderClientsView() {
   const q = $("cl-search").value.trim().toLowerCase();
-  const ags = [...new Set(state.clients.map((c) => c.agenzia || "Profili"))];
-  const ag = state.clAg && ags.includes(state.clAg) ? state.clAg : "";
-  $("cl-tabs").innerHTML = ags.length > 1 ? ["", ...ags].map((a) =>
-    `<button class="tab${a === ag ? " on" : ""}" data-ag="${escapeHtml(a)}">${escapeHtml(a || "Tutte")}</button>`).join("") : "";
-  $("cl-tabs").querySelectorAll(".tab").forEach((b) => { b.onclick = () => { state.clAg = b.dataset.ag; renderClientsView(); }; });
-  const list = state.clients.filter((c) => (!ag || (c.agenzia || "Profili") === ag)
-    && (!q || [c.nome, c.agenzia, c.template].some((x) => (x || "").toLowerCase().includes(q))));
+  const list = state.clients.filter((c) => !q || [c.nome, c.agenzia, c.template].some((x) => (x || "").toLowerCase().includes(q)));
   $("cl-sub").textContent = `${state.clients.length} clienti · ${(state.vault.agenzie || []).length} agenzie`;
   $("cl-grid").innerHTML = list.length ? list.map((c) => {
     const n = videosOf(c.nome);
@@ -1382,7 +1379,7 @@ function renderAgenciesView() {
   }).join("") : '<div class="lib-empty">Nessuna agenzia: aggiungi la prima con «＋ Nuova agenzia».</div>';
   $("ag-grid").querySelectorAll(".lib-card").forEach((card) => {
     const a = card.dataset.ag;
-    card.querySelector('[data-a="clients"]').onclick = () => { state.clAg = a; showView("clients"); };
+    card.querySelector('[data-a="clients"]').onclick = () => { $("cl-search").value = a; showView("clients"); };
     card.querySelector('[data-a="new"]').onclick = async () => {
       await openClientModal(null);
       $("cm-ag").value = a;
@@ -1503,7 +1500,7 @@ function boardCard(it, pos = 0) {
   const isTodo = it.tipo === "da_fare";
   const next = { da_fare: "in_lavorazione", in_lavorazione: "da_revisionare", da_revisionare: "fatto" }[it.stato];
   const nextName = (DASH.stati.find((s) => s.id === next) || {}).nome;
-  card.innerHTML = `<button class="bx" title="Togli dalla Home (finito). Il progetto in CapCut resta.">✕</button>
+  card.innerHTML = `<button class="bx" title="${it.team ? "Rimettilo nella lista del team" : "Togli dalla Home (finito). Il progetto in CapCut resta."}">✕</button>
     ${pos > 0 ? '<button class="btop" title="Porta in cima alla colonna">⤒</button>' : ""}
     ${it.cover ? `<img src="${it.cover}" draggable="false">` : ""}
     <div class="bbody">
@@ -1515,12 +1512,12 @@ function boardCard(it, pos = 0) {
         ${isTodo ? '<button class="bbtn primary" data-a="monta">Monta</button>' : '<button class="bbtn" data-a="apri">Apri</button>'}
         ${isTodo || it.todo_id ? '<button class="bbtn" data-a="edit">✎</button>' : ""}
         ${next ? `<button class="bbtn" data-a="next" title="Sposta in ${escapeHtml(nextName || "")}">→ ${escapeHtml(nextName || "")}</button>` : ""}
-        ${TEAM.stato.collegata && !it.team ? '<button class="bbtn" data-a="share" title="Condividi col team">👥</button>' : ""}
       </div>
     </div>`;
   card.querySelector(".bx").onclick = (e) => {
     e.stopPropagation();
-    setBoardStatus(it.id, "tolto");
+    if (it.team) releaseTeamVideo(it);
+    else setBoardStatus(it.id, "tolto");
   };
   const top = card.querySelector(".btop");
   if (top) top.onclick = (e) => { e.stopPropagation(); moveCard(it.id, it.stato, 0); };
@@ -1532,7 +1529,6 @@ function boardCard(it, pos = 0) {
       else if (a === "apri") openFromBoard(it);
       else if (a === "edit") openTodo(it.todo_id ? { ...it, id: it.todo_id, tipo: "da_fare" } : it);
       else if (a === "next") setBoardStatus(it.id, next);
-      else if (a === "share") shareCard(it, b);
     };
   });
   card.onclick = () => (isTodo ? openTodo(it) : openFromBoard(it));    // the whole card opens the project's chat
@@ -1658,7 +1654,7 @@ async function loadTeam(refresh = false) {
     TEAM.cartella = d.cartella || {};
     TEAM.loaded = true;
   } catch (e) { TEAM.msg = "Non riesco a leggere la bacheca del team."; }
-  const open = TEAM.items.filter((i) => i.stato !== "fatto").length;
+  const open = teamOpen().length;
   $("n-team").textContent = open;
   $("n-team").hidden = !open;
   if (!$("view-team").hidden) renderTeamBoard();
@@ -1668,274 +1664,181 @@ async function loadTeam(refresh = false) {
 function renderTeamBoard() {
   const st = TEAM.stato;
   $("team-gh").hidden = !st.collegata;
+  $("tv-new").hidden = !st.collegata;
   if (!TEAM.loaded) {
-    $("team-sub").textContent = "Carico la bacheca del team…";
-    $("team-kpis").innerHTML = ""; $("team-board").innerHTML = "";
+    $("team-sub").textContent = "Carico la lista del team…";
+    $("tv-list").innerHTML = "";
     return;
   }
   if (!st.collegata) {
     $("team-sub").textContent = "La bacheca del team non è ancora collegata.";
-    $("team-kpis").innerHTML = "";
-    $("team-board").innerHTML = `<div class="team-empty"><div class="te-ic">👥</div>
-      <h3>Il punto della situazione di tutto il team</h3>
-      <p>Collega una bacheca GitHub privata: chi è nel team vede gli stessi video, chi ci lavora e a che punto sono,
-        qui e su github.com. Dalla tua Home condividi un video con il pulsante 👥.</p>
+    $("tv-add").hidden = true;
+    $("tv-list").innerHTML = `<div class="team-empty"><div class="te-ic">👥</div>
+      <h3>I video da montare di tutto il team</h3>
+      <p>Collega la bacheca GitHub privata del team: chi ha l'accesso vede la stessa lista di video da montare,
+        sceglie quale editare con «Edita» e lo ritrova nella sua Home.</p>
       <button class="send" id="team-setup">Collega la bacheca del team</button></div>`;
     $("team-setup").onclick = openTeamModal;
     return;
   }
-  const late = renderKpis(TEAM.items, $("team-kpis"), "Fatti");
-  const open = TEAM.items.filter((i) => i.stato !== "fatto").length;
-  $("team-sub").innerHTML = `${escapeHtml(st.titolo || "Bacheca del team")} · ${open} video in giro`
-    + `${late ? ` · ${late} oltre la scadenza` : ""}. Trascina una scheda per cambiarne lo stato.`
+  const list = teamOpen();
+  const tot = list.reduce((n, i) => n + (i.prezzo || 0), 0);
+  $("team-sub").innerHTML = (list.length
+    ? `${list.length} video da prendere${tot ? ` · ${fmtPrice(tot)} in tutto` : ""}. Premi «Edita» su quello che monti tu.`
+    : "Nessun video da prendere. Trascina qui una cartella di video, o «＋ Aggiungi video».")
     + (TEAM.cartella.cartella && !TEAM.cartella.raggiungibile ? ' <span class="warn">Cartella del team non collegata.</span>' : "")
     + (TEAM.msg ? ` <span class="warn">${escapeHtml(TEAM.msg)}</span>` : "");
-  renderColumns($("team-board"), TEAM.items, teamCard, moveTeamCard,
-    (k) => (k === "da_fare" ? "Condividi un video dalla tua Home con 👥" : "Trascina qui una scheda"));
+  const box = $("tv-list");
+  box.innerHTML = list.length ? `<div class="tv-row tv-th"><span>Video</span><span>Cliente</span><span>Prezzo</span><span></span></div>` : "";
+  if (!list.some((i) => i.id === TEAM.editing)) TEAM.editing = null;
+  for (const it of list) {
+    const client = state.clients.find((c) => c.nome.toUpperCase() === (it.cliente || "").toUpperCase());
+    const row = document.createElement("div");
+    row.className = "tv-row";
+    row.style.setProperty("--c", (client && client.colore) || "#6b7180");
+    row.innerHTML = `<span class="tv-title" title="${escapeHtml(it.titolo)}">${escapeHtml(it.titolo)}</span>
+      <span class="tv-client"><i></i>${escapeHtml(it.cliente || "Senza cliente")}</span>
+      <span class="tv-price">${it.prezzo != null ? fmtPrice(it.prezzo) : "—"}</span>
+      <span class="tv-acts"><button class="tv-more" title="Modifica titolo, cliente e prezzo">⋯</button>
+        <button class="btn-primary-sm tv-edit">Edita</button></span>`;
+    row.querySelector(".tv-edit").onclick = (e) => takeTeamVideo(it, e.target);
+    row.querySelector(".tv-more").onclick = () => { TEAM.editing = TEAM.editing === it.id ? null : it.id; renderTeamBoard(); };
+    box.appendChild(row);
+    if (TEAM.editing === it.id) box.appendChild(teamEditRow(it));
+  }
 }
 
-function teamCard(it, pos = 0) {
-  const card = document.createElement("div");
-  const here = it.qui || it.locale;      // the project on this Mac: shared from here, or taken from the team folder
-  const mine = state.projects.find((p) => p.id === here) || DASH.items.find((i) => i.id === here);
-  const job = TEAM.lavori[it.id];
-  const busy = job && job.attivo;
-  const client = state.clients.find((c) => c.nome === it.cliente);
-  card.className = "bcard tcard";
-  card.style.setProperty("--c", (client && client.colore) || "#6b7180");
-  draggableCard(card, it.id);
-  const next = { da_fare: "in_lavorazione", in_lavorazione: "da_revisionare", da_revisionare: "fatto" }[it.stato];
-  const nextName = (STATI.find(([k]) => k === next) || [])[1];
-  const who = it.chi.length
-    ? it.chi.map((c) => `<span class="who"><img src="${escapeHtml(c.avatar)}" alt="">${escapeHtml(c.login)}</span>`).join("")
-    : '<span class="who none">nessuno</span>';
-  card.innerHTML = `<button class="bx" title="Togli dalla bacheca del team">✕</button>
-    ${pos > 0 ? '<button class="btop" title="Porta in cima alla colonna">⤒</button>' : ""}
-    ${mine && mine.cover ? `<img src="${mine.cover}" draggable="false">` : ""}
-    <div class="bbody">
-      <div class="bclient"><i></i>${escapeHtml(it.cliente || "Senza cliente")}</div>
-      <div class="btitle">${escapeHtml(it.titolo)}</div>
-      ${it.note ? `<div class="bnote">${escapeHtml(it.note)}</div>` : ""}
-      <div class="bmeta">${who}${dueInfo(it.scadenza)}${it.pacchetto ? '<span class="due team" title="Progetto e video sono nella cartella del team">📦 sul server</span>' : ""}</div>
-      <div class="bacts">
-        ${mine ? '<button class="bbtn" data-a="apri">Apri</button>' : ""}
-        ${next ? `<button class="bbtn" data-a="next" title="Sposta in ${escapeHtml(nextName || "")}">→ ${escapeHtml(nextName || "")}</button>` : ""}
-        ${busy ? `<button class="bbtn" disabled>${job.fase === "passo" ? `📦 ${job.pct}%` : "⬇︎ copio…"}</button>`
-          : mine ? `<button class="bbtn" data-a="passa" title="Metti progetto e video nella cartella del team, per chi deve continuarlo">📦 ${it.pacchetto ? "Aggiorna" : "Passa"}</button>`
-          : it.pacchetto ? `<button class="bbtn primary" data-a="prendi" title="Mettilo nel tuo CapCut (passato da ${escapeHtml(it.pacchetto)})">⬇︎ Prendi</button>` : ""}
-      </div>
-    </div>`;
-  card.querySelector(".bx").onclick = async (e) => {
-    e.stopPropagation();
-    if (!confirm(`Togliere «${it.titolo}» dalla bacheca del team? Il progetto resta dov'è.`)) return;
-    TEAM.items = TEAM.items.filter((x) => x.id !== it.id);
-    const local = DASH.items.find((i) => i.team === it.id);
-    if (local) local.team = "";
+// the ⋯ of a video: its title, client and price, or off the list
+function teamEditRow(it) {
+  const f = document.createElement("div");
+  f.className = "tv-form";
+  f.innerHTML = `<label>Titolo<input type="text" class="tf-t" value="${escapeHtml(it.titolo)}" /></label>
+    <label>Cliente<input type="text" class="tf-c" list="tv-clients" autocomplete="off" value="${escapeHtml(it.cliente || "")}" /></label>
+    <label>Prezzo<input type="number" class="tf-p" min="0" step="5" placeholder="€" value="${it.prezzo != null ? it.prezzo : ""}" /></label>
+    <span class="tv-form-acts"><button class="btn2 tf-del" title="Toglilo dalla lista del team">Togli</button>
+      <button class="btn2 tf-no">Annulla</button><button class="btn-primary-sm tf-ok">Salva</button></span>`;
+  $("tv-clients").innerHTML = state.clients.map((c) => `<option value="${escapeHtml(c.nome)}">`).join("");
+  const save = async () => {
+    const titolo = f.querySelector(".tf-t").value.trim();
+    if (!titolo) return f.querySelector(".tf-t").focus();
+    const p = f.querySelector(".tf-p").value;
+    const body = { titolo, cliente: f.querySelector(".tf-c").value.trim(), prezzo: p === "" ? null : Number(p) };
+    f.querySelector(".tf-ok").disabled = true; f.querySelector(".tf-ok").textContent = "Salvo…";
+    const r = await (await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(it.id)}/video`, { method: "PUT",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+    if (!r.ok) { f.querySelector(".tf-ok").disabled = false; f.querySelector(".tf-ok").textContent = "Salva"; return notify(r.msg || "Non sono riuscito a salvarlo.", "err"); }
+    Object.assign(it, { titolo, cliente: body.cliente.toUpperCase(), prezzo: body.prezzo });
+    TEAM.editing = null;
     renderTeamBoard();
-    await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(it.id)}`, { method: "DELETE" }).catch(() => {});
   };
-  const top = card.querySelector(".btop");
-  if (top) top.onclick = (e) => { e.stopPropagation(); moveTeamCard(it.id, it.stato, 0); };
-  card.querySelectorAll(".bbtn").forEach((b) => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      if (b.dataset.a === "apri") openFromBoard({ id: here });
-      else if (b.dataset.a === "next") moveTeamCard(it.id, next, 0);
-      else if (b.dataset.a === "passa") passProject(it, here);
-      else if (b.dataset.a === "prendi") takeProject(it);
-    };
-  });
-  if (mine) card.onclick = () => openFromBoard({ id: here });
-  return card;
-}
-
-// a team card dropped at `index` of a column: GitHub keeps the column and the place
-async function moveTeamCard(id, stato, index) {
-  const it = TEAM.items.find((i) => i.id === id);
-  if (!it) return;
-  const col = TEAM.items.filter((i) => i.stato === stato && i.id !== id);
-  const at = Math.max(0, Math.min(index, col.length));
-  const after = at > 0 ? col[at - 1].id : "";
-  it.stato = stato;
-  TEAM.items = TEAM.items.filter((i) => i.id !== id);
-  const pos = after ? TEAM.items.findIndex((i) => i.id === after) + 1
-    : (TEAM.items.findIndex((i) => i.stato === stato) + 1 || TEAM.items.length + 1) - 1;
-  TEAM.items.splice(Math.max(0, pos), 0, it);
-  const local = DASH.items.find((i) => i.id === it.locale);
-  if (local) local.stato = stato;          // one of mine: my Home follows (the backend does the same)
-  renderTeamBoard();
-  try {
-    const r = await (await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(id)}`, { method: "PUT",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stato, after }) })).json();
-    if (!r.ok) { notify(r.msg || "Non sono riuscito a spostarla su GitHub.", "err"); loadTeam(true); }
-  } catch (_) { loadTeam(true); }
-}
-
-// ---- passing the CapCut project itself, through the team folder (a Samba share) ----
-
-async function passProject(it, projectId) {
-  if (!TEAM.cartella.raggiungibile) return needTeamFolder();
-  const r = await (await fetch(`${BACKEND}/api/team-share/send`, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ item_id: it.id, project_id: projectId }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
-  if (!r.ok) return notify(r.msg || "Non riesco a passarlo.", "err");
-  watchTeamJobs();
-}
-
-async function takeProject(it) {
-  if (!TEAM.cartella.raggiungibile) return needTeamFolder();
-  if (!confirm(`Metto «${it.titolo}» nel tuo CapCut, con i suoi video copiati su questo Mac?`)) return;
-  const r = await (await fetch(`${BACKEND}/api/team-share/take`, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ item_id: it.id, nome: it.titolo }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
-  if (!r.ok) return notify(r.msg || "Non riesco a prenderlo.", "err");
-  watchTeamJobs();
-}
-
-function needTeamFolder() {
-  notify(TEAM.cartella.cartella ? "La cartella del team non è raggiungibile: collega il server." : "Imposta prima la cartella del team (il server Samba).", "err");
-  openTeamModal({ soloCartella: !TEAM.stato.collegata });
-}
-
-// ---- client templates (the CapCut project, with sounds, music and pictures) through the team folder ----
-
-async function loadTeamTemplates() {
-  try {
-    const d = await (await fetch(`${BACKEND}/api/team-share/templates`)).json();
-    TEAM.templates = d.templates || [];
-    TEAM.cartella = d.cartella || TEAM.cartella;
-    TEAM.lavori = d.lavori || TEAM.lavori;
-  } catch (_) { TEAM.templates = []; }
-  renderTeamTemplates();
-  if (Object.values(TEAM.lavori).some((j) => j.attivo)) watchTeamJobs();
-}
-
-const tplClients = (nome) => state.clients.filter((c) => c.template === nome).map((c) => c.nome);
-
-function renderTeamTemplates() {
-  const c = TEAM.cartella || {};
-  const list = $("tt-list");
-  $("tt-sub").innerHTML = !c.cartella
-    ? 'Per caricarli serve la cartella del team (il server Samba). <button class="btn-link" id="tt-folder">Imposta la cartella</button>'
-    : !c.raggiungibile ? `<span class="warn">La cartella del team (${escapeHtml(c.cartella)}) non è collegata.</span> <button class="btn-link" id="tt-folder">Collega</button>`
-    : "Il progetto CapCut del template, con suoni, musica e grafica. Chi lo prende lo trova nel suo CapCut con lo stesso nome.";
-  if ($("tt-folder")) $("tt-folder").onclick = () => openTeamModal({ soloCartella: !TEAM.stato.collegata });
-  const busy = (n) => (TEAM.lavori[`tpl:${n}`] || {}).attivo && TEAM.lavori[`tpl:${n}`];
-  const up = Object.entries(TEAM.lavori).filter(([k, j]) => k.startsWith("tpl:") && j.attivo && j.fase === "passo"
-    && !TEAM.templates.some((t) => `tpl:${t.nome}` === k)).map(([k, j]) => ({ nome: k.slice(4), nuovo: true, job: j }));
-  const rows = [...up, ...TEAM.templates];
-  if (!rows.length) {
-    list.innerHTML = c.raggiungibile ? '<div class="tt-empty">Nessun template nella cartella del team: carica il primo.</div>' : "";
-    return;
-  }
-  list.innerHTML = rows.map((t, i) => {
-    const job = t.job || busy(t.nome);
-    const who = tplClients(t.nome);
-    const meta = t.nuovo ? "lo sto caricando…"
-      : [t.da && `da ${escapeHtml(t.da)}`, t.quando && escapeHtml(t.quando), t.byte && `${Math.max(1, Math.round(t.byte / 1e6))} MB`].filter(Boolean).join(" · ");
-    const act = job ? `<button class="bbtn" disabled>${job.fase === "passo" ? `⬆︎ ${job.pct}%` : "⬇︎ copio…"}</button>`
-      : t.qui ? `<button class="bbtn" data-i="${i}" data-a="prendi" title="Sostituisce il tuo con questo; il tuo va nel backup dell'app">⬇︎ Aggiorna il mio</button>`
-        + `<button class="bbtn" data-i="${i}" data-a="carica" title="Rimetti nella cartella del team la tua versione">⬆︎ Ricarica il mio</button>`
-      : `<button class="bbtn primary" data-i="${i}" data-a="prendi" title="Mettilo nel tuo CapCut">⬇︎ Prendi</button>`;
-    return `<div class="tt-card"><div class="tt-ic">🎬</div>
-      <div class="tt-body"><div class="tt-name">${escapeHtml(t.nome)}</div>
-        <div class="tt-meta">${who.length ? `${escapeHtml(who.join(", "))} · ` : ""}${meta}${t.qui && !job ? ' · <span class="ok">ce l\'hai</span>' : ""}</div></div>
-      <div class="tt-acts">${act}</div></div>`;
-  }).join("");
-  list.querySelectorAll("button[data-a]").forEach((b) => {
-    const t = rows[+b.dataset.i];
-    b.onclick = () => (b.dataset.a === "prendi" ? takeTemplate(t) : uploadTemplate(t.nome));
-  });
-}
-
-function toggleTeamTplPicker(open = $("tt-picker").hidden) {
-  $("tt-picker").hidden = !open;
-  if (!open) return;
-  $("tt-search").value = "";
-  renderTeamTplPicker();
-  $("tt-search").focus();
-}
-
-function renderTeamTplPicker() {
-  const q = $("tt-search").value.trim().toLowerCase();
-  const ofClients = new Set(state.clients.map((c) => c.template).filter(Boolean));
-  // the client templates first, then the projects named like a template; the search reaches every project
-  const names = state.templates.filter((n) => (q ? n.toLowerCase().includes(q) || tplClients(n).some((c) => c.toLowerCase().includes(q))
-    : ofClients.has(n) || /template/i.test(n)));
-  names.sort((a, b) => (ofClients.has(b) - ofClients.has(a)) || a.localeCompare(b));
-  $("tt-pick-list").innerHTML = names.length ? names.map((n, i) => {
-    const who = tplClients(n);
-    const there = TEAM.templates.some((t) => t.nome === n);
-    return `<button class="tt-pick" data-i="${i}"><b>${escapeHtml(n)}</b>
-      <span>${who.length ? escapeHtml(who.join(", ")) : "nessun cliente"}${there ? " · già nel team: lo sostituisce" : ""}</span></button>`;
-  }).join("") : `<div class="empty">${state.templates.length ? "Nessun progetto CapCut con questo nome" : "Nessun progetto CapCut trovato"}</div>`;
-  $("tt-pick-list").querySelectorAll(".tt-pick").forEach((b) => {
-    b.onclick = () => { toggleTeamTplPicker(false); uploadTemplate(names[+b.dataset.i]); };
-  });
-}
-
-async function uploadTemplate(nome) {
-  if (!TEAM.cartella.raggiungibile) return needTeamFolder();
-  if (TEAM.templates.some((t) => t.nome === nome)
-      && !confirm(`Nella cartella del team c'è già «${nome}». Lo sostituisco con il tuo?`)) return;
-  const r = await (await fetch(`${BACKEND}/api/team-share/templates/send`, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nome }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
-  if (!r.ok) return notify(r.msg || "Non riesco a caricarlo.", "err");
-  TEAM.lavori[`tpl:${nome}`] = { attivo: true, fase: "passo", pct: 0 };
-  renderTeamTemplates();
-  watchTeamJobs();
-}
-
-async function takeTemplate(t) {
-  if (!TEAM.cartella.raggiungibile) return needTeamFolder();
-  const ask = t.qui
-    ? `Hai già «${t.nome}». Lo sostituisco con quello del team${t.da ? ` (di ${t.da})` : ""}? Il tuo non lo cancello: lo sposto nel backup dell'app.`
-    : `Metto «${t.nome}» nel tuo CapCut, con suoni, musica e grafica copiati su questo Mac?`;
-  if (!confirm(ask)) return;
-  const r = await (await fetch(`${BACKEND}/api/team-share/templates/take`, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nome: t.nome }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
-  if (!r.ok) return notify(r.msg || "Non riesco a prenderlo.", "err");
-  TEAM.lavori[`tpl:${t.nome}`] = { attivo: true, fase: "prendo", pct: 0 };
-  renderTeamTemplates();
-  watchTeamJobs();
-}
-
-// copies run for minutes: follow them on the cards, then say how it went
-function watchTeamJobs() {
-  clearInterval(TEAM.poll);
-  const tick = async () => {
-    let d;
-    try { d = await (await fetch(`${BACKEND}/api/team-share`)).json(); } catch (_) { return; }
-    const before = TEAM.lavori;
-    TEAM.lavori = d.lavori || {};
-    TEAM.cartella = d.cartella || TEAM.cartella;
-    for (const [id, j] of Object.entries(TEAM.lavori)) {
-      if (!j.attivo && before[id] && before[id].attivo) {
-        notify(j.errore ? `Non riuscito: ${j.errore}` : j.msg, j.errore ? "err" : "ok");
-        if (id.startsWith("tpl:")) { loadTeamTemplates(); if (!j.errore && j.fase !== "passo") { loadTemplates(); loadClients(); } continue; }
-        loadTeam(true);
-        if (!j.errore && j.fase !== "passo") loadProjects();
-      }
-    }
-    if (!Object.values(TEAM.lavori).some((j) => j.attivo)) clearInterval(TEAM.poll);
-    if (!$("view-team").hidden) { renderTeamBoard(); renderTeamTemplates(); }
+  f.querySelector(".tf-ok").onclick = save;
+  f.querySelector(".tf-no").onclick = () => { TEAM.editing = null; renderTeamBoard(); };
+  f.querySelector(".tf-del").onclick = async () => {
+    if (!confirm(`Togliere «${it.titolo}» dalla lista del team? Nessuno lo vedrà più.`)) return;
+    const r = await (await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(it.id)}`, { method: "DELETE" }))
+      .json().catch((e) => ({ ok: false, msg: String(e) }));
+    if (r.ok === false) return notify(r.msg || "Non sono riuscito a toglierlo.", "err");
+    TEAM.items = TEAM.items.filter((x) => x.id !== it.id);
+    TEAM.editing = null;
+    renderTeamBoard();
   };
-  TEAM.poll = setInterval(tick, 1000);
-  tick();
+  f.onkeydown = (e) => {
+    if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); save(); }
+    if (e.key === "Escape") { TEAM.editing = null; renderTeamBoard(); }
+  };
+  setTimeout(() => f.querySelector(".tf-t").focus(), 0);
+  return f;
 }
 
-async function shareCard(it, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = "…"; }
-  try {
-    const r = await (await fetch(`${BACKEND}/api/team-board/share`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: it.id, titolo: it.titolo, cliente: it.cliente || "", scadenza: it.scadenza || "",
-        note: it.note || "", stato: it.stato }) })).json();
-    if (!r.ok) throw new Error(r.msg || "non riuscito");
-    it.team = r.id;
-    notify(`«${it.titolo}» è nella bacheca del team.`, "ok");
-    TEAM.loaded = false;
-  } catch (e) {
-    notify(`Non sono riuscito a condividerlo: ${e.message}`, "err");
-  }
-  renderBoard();
+// the videos nobody is editing yet: everyone on the team sees these
+function teamOpen() {
+  // the first ones put on the list stay on top: they come first
+  return TEAM.items.filter((i) => i.stato === "da_fare" && !i.chi.length)
+    .sort((a, b) => (a.creato || "").localeCompare(b.creato || ""));
+}
+
+function fmtPrice(n) {
+  return `${Number(n).toLocaleString("it-IT", { maximumFractionDigits: 2 })} €`;
+}
+
+// «Edita»: it leaves the team's list and lands on my Home
+async function takeTeamVideo(it, btn) {
+  btn.disabled = true; btn.textContent = "…";
+  const r = await (await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(it.id)}/take`, { method: "POST" }))
+    .json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) notify(r.msg || "Non sono riuscito a prenderlo.", "err");
+  else notify(`«${it.titolo}» è nella tua Home.`, "ok");
+  await loadTeam(true);
+  loadBoard();
+}
+
+// the ✕ on a video taken from the team: back on everyone's list
+async function releaseTeamVideo(it) {
+  if (!confirm(`Rimetto «${it.titolo}» nella lista del team? Lo rivedranno tutti.`)) return;
+  const r = await (await fetch(`${BACKEND}/api/team-board/items/${encodeURIComponent(it.team)}/release`, { method: "POST" }))
+    .json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non sono riuscito a rimetterlo nel team.", "err");
+  if (it.tipo !== "da_fare") await setBoardStatus(it.id, "tolto");
+  notify(`«${it.titolo}» è tornato nella lista del team.`, "ok");
+  loadBoard();
+  loadTeam(true);
+}
+
+// ---- adding videos: a folder goes in, its videos come out with a price each ----
+
+async function openTeamAdd(path = null) {
+  if (!TEAM.stato.collegata) return openTeamModal();
+  if (!path) path = window.api && (await window.api.selectFolder());
+  if (!path) return;
+  const d = await (await fetch(`${BACKEND}/api/team-board/folder?path=${encodeURIComponent(path)}`)).json()
+    .catch((e) => ({ ok: false, msg: String(e) }));
+  if (!d.ok) return notify(d.msg || "Non riesco a leggere la cartella.", "err");
+  if (!d.videos.length) return notify(`In «${d.nome}» non ci sono video.`, "err");
+  TEAM.add = d.videos.map((v) => ({ ...v, prezzo: "" }));
+  $("tv-add-title").textContent = d.nome;
+  $("tv-add-sub").textContent = `${d.videos.length} video. Togli con ✕ quelli che non vanno nel team e scrivi il prezzo.`;
+  $("tv-clients").innerHTML = state.clients.map((c) => `<option value="${escapeHtml(c.nome)}">`).join("");
+  $("tv-client").value = d.cliente || "";
+  $("tv-price-all").value = "";
+  $("tv-add").hidden = false;
+  renderTeamAdd();
+  $("tv-price-all").focus();
+}
+
+function renderTeamAdd() {
+  const box = $("tv-rows");
+  box.innerHTML = "";
+  TEAM.add.forEach((v, n) => {
+    const row = document.createElement("div");
+    row.className = "tv-arow";
+    row.innerHTML = `<button class="tv-x" title="Non metterlo nel team">✕</button>
+      <input type="text" class="tv-name" value="${escapeHtml(v.titolo)}" />
+      <span class="tv-clips">${v.clip} clip</span>
+      <input type="number" class="tv-p" min="0" step="5" placeholder="€" value="${escapeHtml(String(v.prezzo))}" />`;
+    row.querySelector(".tv-x").onclick = () => { TEAM.add.splice(n, 1); renderTeamAdd(); };
+    row.querySelector(".tv-name").oninput = (e) => { v.titolo = e.target.value; };
+    row.querySelector(".tv-p").oninput = (e) => { v.prezzo = e.target.value; };
+    box.appendChild(row);
+  });
+  if (!TEAM.add.length) box.innerHTML = '<div class="tt-empty">Nessun video: annulla e scegli un\'altra cartella.</div>';
+  $("tv-send").disabled = !TEAM.add.length;
+}
+
+async function sendTeamAdd() {
+  const videos = TEAM.add.filter((v) => v.titolo.trim())
+    .map((v) => ({ titolo: v.titolo.trim(), cartella: v.cartella, prezzo: v.prezzo === "" ? null : Number(v.prezzo) }));
+  if (!videos.length) return;
+  $("tv-send").disabled = true; $("tv-send").textContent = "Metto nel team…";
+  const r = await (await fetch(`${BACKEND}/api/team-board/videos`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ videos, cliente: $("tv-client").value.trim().toUpperCase() }) })).json()
+    .catch((e) => ({ ok: false, msg: String(e) }));
+  $("tv-send").textContent = "Metti nel team ⏎";
+  $("tv-send").disabled = false;
+  if (!r.ok) return notify(r.msg || "Non sono riuscito a metterli nel team.", "err");
+  notify(`${r.n} video nella lista del team.`, "ok");
+  $("tv-add").hidden = true;
+  TEAM.add = [];
+  loadTeam(true);
 }
 
 async function openTeamModal(opts = {}) {
@@ -2054,7 +1957,6 @@ function wireShareFolder() {
       body: JSON.stringify({ cartella: $("tm-share-path").value, indirizzo: $("tm-share-addr").value }) })).json();
     TEAM.cartella = c;
     showShare(c);
-    loadTeamTemplates();
   };
   $("tm-share-pick").onclick = async () => {
     const f = window.api && await window.api.selectFolder();
@@ -2066,7 +1968,7 @@ function wireShareFolder() {
     const r = await (await fetch(`${BACKEND}/api/team-share/mount`, { method: "POST" })).json();
     if (!r.ok) return notify(r.msg, "err");
     notify("Il Finder collega il server (la prima volta chiede la password). Poi scegli la cartella.", "ok");
-    setTimeout(async () => { await loadTeam(); await loadTeamTemplates(); showShare(TEAM.cartella); }, 6000);
+    setTimeout(async () => { await loadTeam(); showShare(TEAM.cartella); }, 6000);
   };
 }
 
@@ -2087,9 +1989,11 @@ async function openFromBoard(it) {
 function wireBoard() {
   $("v-team").onclick = () => showView("team");
   $("team-settings").onclick = () => openTeamModal();
-  $("tt-add").onclick = () => (TEAM.cartella.raggiungibile ? toggleTeamTplPicker() : needTeamFolder());
-  $("tt-search").oninput = renderTeamTplPicker;
-  $("tt-search").onkeydown = (e) => { if (e.key === "Escape") toggleTeamTplPicker(false); };
+  $("tv-new").onclick = () => openTeamAdd();
+  $("tv-cancel").onclick = () => { $("tv-add").hidden = true; TEAM.add = []; };
+  $("tv-send").onclick = sendTeamAdd;
+  $("tv-price-all").oninput = (e) => { TEAM.add.forEach((v) => { v.prezzo = e.target.value; }); renderTeamAdd(); };
+  $("tv-add").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); sendTeamAdd(); } };
   $("team-gh").onclick = () => window.api && window.api.openExternal(TEAM.stato.url);
   $("btn-team-board").onclick = () => openTeamModal();
   $("team-close").onclick = () => { $("team-modal").hidden = true; };

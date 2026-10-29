@@ -279,7 +279,6 @@
         <button class="btn-primary-sm" id="v-client">＋ Nuovo template</button>
       </div>
     </div>
-    <div class="lib-tabs" id="cl-tabs"></div>
     <div class="lib-grid" id="cl-grid"></div>
   </div>
 
@@ -295,28 +294,31 @@
   <div id="view-team" class="view dash" hidden>
     <div class="dash-head">
       <div>
-        <h2>Il punto della situazione del team</h2>
-        <div class="dash-sub" id="team-sub">Carico la bacheca del team…</div>
+        <h2>Video da montare</h2>
+        <div class="dash-sub" id="team-sub">Carico la lista del team…</div>
       </div>
       <div class="dash-actions">
         <button class="btn2" id="team-gh" hidden>Apri su GitHub ↗</button>
         <button class="btn2" id="team-settings">Bacheca…</button>
+        <button class="btn-primary-sm" id="tv-new" hidden>＋ Aggiungi video</button>
       </div>
     </div>
-    <section class="tpl-team">
-      <div class="tt-head">
-        <div><h3>Template del team</h3>
-          <p id="tt-sub">Il progetto CapCut del template, con suoni, musica e grafica, per chi monta dopo di te.</p></div>
-        <button class="btn-primary-sm" id="tt-add">＋ Carica template</button>
+    <section class="tv-add" id="tv-add" hidden>
+      <div class="tv-add-head">
+        <div><h3 id="tv-add-title">Video da montare</h3><p id="tv-add-sub"></p></div>
+        <div class="tv-add-fields">
+          <label>Cliente<input type="text" id="tv-client" list="tv-clients" placeholder="nessuno" autocomplete="off" /></label>
+          <datalist id="tv-clients"></datalist>
+          <label>Prezzo per tutti<input type="number" id="tv-price-all" min="0" step="5" placeholder="€" /></label>
+        </div>
       </div>
-      <div class="tt-picker" id="tt-picker" hidden>
-        <input type="search" class="hsearch" id="tt-search" placeholder="Cerca tra i tuoi progetti CapCut…" autocomplete="off" />
-        <div class="tt-pick-list" id="tt-pick-list"></div>
+      <div class="tv-rows" id="tv-rows"></div>
+      <div class="tv-add-foot">
+        <button class="btn2" id="tv-cancel">Annulla</button>
+        <button class="btn-primary-sm" id="tv-send">Metti nel team ⏎</button>
       </div>
-      <div class="tt-list" id="tt-list"></div>
     </section>
-    <div class="kpis" id="team-kpis"></div>
-    <div class="board" id="team-board"></div>
+    <div class="tv-list" id="tv-list"></div>
   </div>
 
   <div id="view-dash" class="view dash" hidden>

@@ -282,9 +282,9 @@ def read(path: str) -> dict:
     except (OSError, UnicodeDecodeError, ValueError) as e:
         return {"ok": False, "msg": str(e)}
     meta = fm["metadata"]
-    tpl = tpl or meta.get("capwizard-template", "")
+    tpl = (tpl or meta.get("capwizard-template", "")).upper()     # templates and clients are named in capitals
     cliente = (meta.get("capwizard-cliente") or re.sub(r"^TEMPLATE\b[\s_-]*", "", tpl, flags=re.I).strip()
-               or (skill.rsplit("/", 1)[-1] if skill else src.label))
+               or (skill.rsplit("/", 1)[-1] if skill else src.label)).upper()
     return {"ok": True, "ha_skill": skill is not None, "ha_cartella": proj is not None,
             "skill": (skill.rsplit("/", 1)[-1] if skill else src.label) if skill is not None else "",
             "descrizione": fm.get("description", ""), "cliente": cliente,
@@ -321,7 +321,7 @@ def install(path: str, cliente: str, agenzia: str, colore: str, font: str, log=p
     info = read(path)
     if not info["ok"]:
         return info
-    cliente, agenzia, font = cliente.strip(), agenzia.strip().upper(), font.strip()
+    cliente, agenzia, font = cliente.strip().upper(), agenzia.strip().upper(), font.strip()
     colore = (colore or "").strip().upper()
     if not cliente:
         return {"ok": False, "msg": "Scrivi il nome del cliente."}
