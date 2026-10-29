@@ -135,6 +135,8 @@ def list_clients() -> list[dict]:
         out.append({
             "id": name,
             "nome": meta.get("capwizard-cliente") or (heading.group(1).strip() if heading else name),
+            **({"agenzia": meta["capwizard-agenzia"]} if meta.get("capwizard-agenzia") else {}),
+            "font": meta.get("capwizard-font", ""),
             "template": template,
             "template_ok": template in templates,
             "colore": colour or "#7c6cff",

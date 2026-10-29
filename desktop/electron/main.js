@@ -235,6 +235,23 @@ ipcMain.handle("select-script", async () => {
   return r.canceled ? null : r.filePaths[0];
 });
 
+// a client's template as one zip (its skill and its CapCut folder), or the folder itself
+ipcMain.handle("select-skill", async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile", "openDirectory"],
+    filters: [{ name: "Template", extensions: ["zip", "skill"] }],
+  });
+  return r.canceled ? null : r.filePaths[0];
+});
+
+ipcMain.handle("save-skill", async (_e, name) => {
+  const r = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: path.join(app.getPath("desktop"), `${String(name || "template").replace(/[\\/:]/g, "-")}.zip`),
+    filters: [{ name: "Zip", extensions: ["zip"] }],
+  });
+  return r.canceled ? null : r.filePath;
+});
+
 ipcMain.handle("select-images", async () => {
   const r = await dialog.showOpenDialog(mainWindow, {
     properties: ["openFile", "multiSelections"],

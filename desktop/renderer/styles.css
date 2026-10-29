@@ -621,6 +621,7 @@ body.dragging.editor-drag::after { display: none; }
 /* ---- client cards: the actions share the row edge to edge, same width each ---- */
 .lc-acts { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
 .lc-acts .bbtn { width: 100%; padding: 7px 6px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-acts:has(> :nth-child(4)) { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .bbtn.primary:hover { background: var(--grad); filter: brightness(1.06); }
 
 /* ---- sidebar wizard: half the size ---- */
@@ -656,6 +657,23 @@ body.dragging.editor-drag::after { display: none; }
 .team-empty .te-ic { font-size: 34px; }
 .team-empty h3 { color: var(--text); font-size: 17px; margin: 10px 0 8px; }
 .team-empty p { font-size: 13px; line-height: 1.55; margin: 0 0 16px; }
+/* «Esporta»: what goes in the zip */
+.ex-opts { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.ex-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; border-radius: 12px; text-align: left;
+  background: var(--panel2); border: 1px solid var(--line); color: var(--text); cursor: pointer; }
+.ex-opt:hover:not(:disabled) { border-color: var(--accent); background: var(--panel3); }
+.ex-opt:disabled { opacity: .45; cursor: default; }
+.ex-opt b { font-size: 13.5px; }
+.ex-opt span { font-size: 12px; color: var(--mute); }
+#cm-tdrop { margin-bottom: 8px; }
+#cm-tdrop span { font-size: 12px; color: var(--mute); }
+/* «Carica template»: what the zip holds, above the same form as «Nuovo template» */
+.tf-info { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; margin-bottom: 6px; border-radius: 12px;
+  background: var(--panel2); border: 1px solid var(--line); font-size: 12px; color: var(--mute); }
+.tf-info b { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.tf-info .warn { color: var(--warn); }
+.tf-info .mute { color: var(--dim); }
+.lib-actions .btn2 { height: 38px; border-radius: 11px; }
 /* the team's CapCut templates, on top of the Team page */
 .tpl-team { padding: 14px 16px; border-radius: var(--r); background: var(--panel); border: 1px solid var(--line); }
 .tt-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }

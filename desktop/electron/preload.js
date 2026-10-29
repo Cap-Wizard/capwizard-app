@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("api", {
   selectVideos: () => ipcRenderer.invoke("select-videos"),
   selectScript: () => ipcRenderer.invoke("select-script"),
   selectImages: () => ipcRenderer.invoke("select-images"),
+  selectSkill: () => ipcRenderer.invoke("select-skill"),
+  saveSkill: (name) => ipcRenderer.invoke("save-skill", name),
   openPath: (p) => ipcRenderer.invoke("open-path", p),
   // real path of a file or folder dropped on the window
   pathForFile: (f) => webUtils.getPathForFile(f),

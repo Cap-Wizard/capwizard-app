@@ -622,6 +622,9 @@ function wireEditor() {
   $("v-new").onclick = () => showView("editor");
   $("v-proj").onclick = () => showView("home");
   $("v-client").onclick = () => openClientModal(null);
+  $("v-client-load").onclick = () => openTemplateLoad();
+  $("cm-tdrop").onclick = async () => { const p = window.api && await window.api.selectSkill(); if (p) readTemplatePath(p); };
+  $("ex-close").onclick = closeExportModal;
   $("v-agency").onclick = openAgencyModal;
   $("v-clients").onclick = () => showView("clients");
   $("v-agencies").onclick = () => showView("agencies");
@@ -676,6 +679,16 @@ function wireEditor() {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
         if (p) addScaricoPath(p);
       }
+      return;
+    }
+    const first = e.dataTransfer.files[0];
+    const firstPath = first && window.api && window.api.pathForFile ? window.api.pathForFile(first) : "";
+    if (!$("client-modal").hidden && state.importing) {      // a template (zip, folder or skill) to load
+      if (firstPath) readTemplatePath(firstPath);
+      return;
+    }
+    if ($("client-modal").hidden && !$("view-clients").hidden) {   // dropped on Clienti: same as «Carica template»
+      if (firstPath) openTemplateLoad(firstPath);
       return;
     }
     if (!$("client-modal").hidden) {          // videos / screenshots for a new client to study
@@ -1334,6 +1347,8 @@ function renderClientsView() {
         <button class="bbtn primary" data-a="new">Nuovo video</button>
         <button class="bbtn" data-a="proj">Progetti</button>
         ${c.source === "vault" ? '<button class="bbtn" data-a="edit">Modifica</button>' : ""}
+        <button class="bbtn" data-a="export" ${c.template_ok ? "" : "disabled"}
+          title="${c.template_ok ? "Un file .skill con profilo e template CapCut, da dare a chi monta" : "Il template CapCut non c'è su questo Mac"}">Esporta</button>
       </div></article>`;
   }).join("") : `<div class="lib-empty">${q ? `Nessun cliente con «${escapeHtml(q)}»` : "Nessun cliente: crea il primo con «＋ Nuovo template»."}</div>`;
   $("cl-grid").querySelectorAll(".lib-card").forEach((card) => {
@@ -1343,6 +1358,7 @@ function renderClientsView() {
         if (b.dataset.a === "new") { showView("editor"); chooseClient(c); }
         else if (b.dataset.a === "proj") { showView("home"); $("psearch").value = c.nome; renderProjects(); }
         else if (b.dataset.a === "edit") openClientModal(c);
+        else if (b.dataset.a === "export") exportTemplate(c);
       };
     });
   });
@@ -2460,7 +2476,8 @@ function openExternal(url) {
 // ---------------------------------------------------------------------------
 
 function wireClientModal() {
-  $("cm-close").onclick = $("cm-cancel").onclick = () => { $("client-modal").hidden = true; document.body.classList.remove("modal-open"); };
+  $("cm-close").onclick = $("cm-cancel").onclick = () => {
+    $("client-modal").hidden = true; document.body.classList.remove("modal-open"); state.importing = null; };
   $("cm-ag").onchange = updateStudyUI;
   ["cm-name", "cm-links", "cm-msg", "cm-ag-new"].forEach((i) => { $(i).oninput = updateStudyUI; });
   $("cm-drop").onclick = async () => { for (const p of (window.api && await window.api.selectVideos()) || []) addStudyPath(p); };
@@ -2527,6 +2544,7 @@ function updateStudyUI() {
   if (state.editing) return;
   const nuova = $("cm-ag").value === "__new";
   $("cm-ag-new").hidden = !nuova;
+  if (state.importing) { $("cm-save").textContent = "CARICA"; $("cm-name-opt").hidden = true; return; }
   if (nuova) $("cm-study").open = true;
   $("cm-name-opt").hidden = !nuova;
   const study = nuova || hasStudyMaterial();
@@ -2535,6 +2553,10 @@ function updateStudyUI() {
 
 async function openClientModal(c) {
   state.editing = c;
+  state.importing = null;
+  $("cm-file").hidden = true;
+  $("cm-tdrop").hidden = true;
+  $("cm-tdrop").querySelector("b").textContent = "📦 Trascina qui il template";
   state.study = { video: [], shots: [] };
   ["cm-links", "cm-msg", "cm-note", "cm-ag-new"].forEach((i) => { $(i).value = ""; });
   $("cm-study").hidden = !!c;
@@ -2570,6 +2592,7 @@ async function openClientModal(c) {
 async function saveClientModal() {
   let col = $("cm-col").value.trim();
   if (col && !col.startsWith("#")) col = "#" + col;
+  if (state.importing) return installTemplateFile(col);
   const c = state.editing;
   if (!c && ($("cm-ag").value === "__new" || hasStudyMaterial())) return startStudy(col);
   let r;
@@ -2592,6 +2615,98 @@ async function saveClientModal() {
   const fresh = state.clients.find((x) => x.id === id);
   if (fresh) await chooseClient(fresh);
   addLog("✏️ " + r.msg, "ok");
+}
+
+// ---- a client's template as one zip (its skill and its CapCut folder), see template_file.py ----
+
+function exportTemplate(c) {
+  $("ex-title").textContent = `Esporta il template di ${c.nome}`;
+  $("export-modal").querySelectorAll(".ex-opt").forEach((b) => {
+    const needs = b.dataset.cosa !== "skill";
+    b.disabled = needs && !c.template_ok;
+    b.title = b.disabled ? "Il template CapCut non c'è su questo Mac" : "";
+    b.onclick = async () => {
+      const name = b.dataset.cosa === "skill" ? `Skill ${c.nome}` : b.dataset.cosa === "cartella" ? c.template : `Template ${c.nome}`;
+      const dest = window.api && await window.api.saveSkill(name);
+      if (!dest) return;
+      $("export-modal").querySelectorAll(".ex-opt").forEach((x) => { x.disabled = true; });
+      b.querySelector("b").textContent = "Esporto…";
+      const r = await (await fetch(`${BACKEND}/api/template-file/export`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: c.id, path: dest, cosa: b.dataset.cosa }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+      closeExportModal();
+      notify(r.msg || "Esportazione non riuscita.", r.ok ? "ok" : "err");
+    };
+  });
+  const labels = { completo: "Template completo", skill: "Solo skill", cartella: "Solo cartella CapCut" };
+  $("export-modal").querySelectorAll(".ex-opt b").forEach((x) => { x.textContent = labels[x.parentElement.dataset.cosa]; });
+  document.body.classList.add("modal-open");
+  $("export-modal").hidden = false;
+}
+
+function closeExportModal() {
+  $("export-modal").hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+// «Carica template»: the same form as «Nuovo template», with a box to drop the zip (or the folder) on
+async function openTemplateLoad(path = null) {
+  await openClientModal(null);
+  state.importing = { path: null, info: null };
+  $("cm-title").textContent = "Carica template";
+  $("cm-study").hidden = true;
+  $("cm-tdrop").hidden = false;
+  $("cm-ag").innerHTML = '<option value="">Nessuna agenzia</option>'
+    + (state.vault.agenzie || []).map((a) => `<option>${escapeHtml(a)}</option>`).join("") + '<option value="__new">＋ Nuova agenzia…</option>';
+  updateStudyUI();
+  if (path) await readTemplatePath(path);
+}
+
+async function readTemplatePath(path) {
+  const info = await (await fetch(`${BACKEND}/api/template-file/read`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!info.ok) { $("cm-err").textContent = "⚠️ " + (info.msg || "Non è un template."); return; }
+  $("cm-err").textContent = "";
+  state.importing = { path, info };
+  const ags = state.vault.agenzie || [];
+  if (!info.agenzia) $("cm-ag").value = "";
+  else if (ags.includes(info.agenzia)) $("cm-ag").value = info.agenzia;
+  else { $("cm-ag").value = "__new"; $("cm-ag-new").value = info.agenzia; }
+  $("cm-name").value = info.cliente || "";
+  $("cm-col").value = info.colore || "";
+  if (/^#[0-9a-f]{6}$/i.test(info.colore || "")) $("cm-pick").value = info.colore.toLowerCase();
+  $("cm-font").value = info.font || "";
+  const mb = Math.max(1, Math.round((info.byte || 0) / 1e6));
+  const what = info.ha_skill && info.ha_cartella ? "Skill e cartella CapCut" : info.ha_skill ? "Solo la skill" : "Solo la cartella CapCut";
+  $("cm-tdrop").querySelector("b").textContent = `📦 ${path.split("/").pop()}`;
+  $("cm-file").innerHTML = `<span>${what} · template «${escapeHtml(info.template || "—")}» · ${mb} MB${info.file ? ` · ${info.file} file di suoni e grafica` : ""}</span>
+    ${info.ha_cartella && info.template_qui ? `<span class="warn">Hai già «${escapeHtml(info.template)}» in CapCut: lo sostituisco, il tuo va nel backup dell'app.</span>` : ""}
+    ${!info.ha_cartella && !info.template_qui ? `<span class="warn">Il progetto «${escapeHtml(info.template)}» non c'è su questo Mac: carica anche la cartella CapCut.</span>` : ""}
+    ${!info.ha_skill ? "<span>Senza skill: il profilo del cliente lo creo da questi campi.</span>" : ""}
+    ${info.cliente_esiste ? "<span class=\"warn\">C'è già un cliente con questo nome: il suo profilo va nel backup e questo prende il suo posto.</span>" : ""}
+    ${info.ha_skill ? '<span class="mute">La skill contiene istruzioni per Claude: carica solo template di persone di cui ti fidi.</span>' : ""}`;
+  $("cm-file").hidden = false;
+}
+
+async function installTemplateFile(col) {
+  const { path } = state.importing;
+  if (!path) { $("cm-err").textContent = "⚠️ Trascina prima il template nel riquadro."; return; }
+  const ag = ($("cm-ag").value === "__new" ? $("cm-ag-new").value : $("cm-ag").value).trim().toUpperCase();
+  $("cm-save").disabled = true;
+  $("cm-save").textContent = "Carico…";
+  $("cm-err").textContent = "";
+  const r = await (await fetch(`${BACKEND}/api/template-file/install`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, cliente: $("cm-name").value.trim(), agenzia: ag, colore: col.toUpperCase(),
+                           font: $("cm-font").value.trim() }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  $("cm-save").disabled = false;
+  $("cm-save").textContent = "CARICA";
+  if (!r.ok) { $("cm-err").textContent = "⚠️ " + r.msg; return; }
+  state.importing = null;
+  $("client-modal").hidden = true;
+  document.body.classList.remove("modal-open");
+  await loadTemplates();
+  await loadClients();
+  showView("clients");
+  notify(r.msg, "ok");
 }
 
 function openAgencyModal() {

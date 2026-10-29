@@ -42,7 +42,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent, aiservices, board, brain, scarico, teamboard, teamshare, vault
+from capwizard_app import agent, aiservices, board, brain, scarico, teamboard, teamshare, template_file, vault
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +520,48 @@ def client_params_save(client_id: str, req: ClientParams) -> dict:
     out = vault.salva_cliente(client_id, req.colore, req.font, req.base, req.regola)
     brain.push_soon(f"Aggiorna {client_id[len(vault.PREFIX):]}")
     return out
+
+
+# a client's template as one zip (its skill and its CapCut folder): see template_file.py
+
+class TemplateExport(BaseModel):
+    client_id: str
+    path: str
+    cosa: str = "completo"          # completo | skill | cartella
+
+
+@app.post("/api/template-file/export")
+def template_file_export(req: TemplateExport) -> dict:
+    try:
+        return template_file.export(req.client_id, req.path, req.cosa, log=lambda m: print(m, flush=True))
+    except (OSError, ValueError) as e:
+        return {"ok": False, "msg": f"Esportazione non riuscita: {e}"}
+
+
+class TemplateFile(BaseModel):
+    path: str
+
+
+@app.post("/api/template-file/read")
+def template_file_read(req: TemplateFile) -> dict:
+    return template_file.read(req.path)
+
+
+class TemplateInstall(BaseModel):
+    path: str
+    cliente: str
+    agenzia: str = ""
+    colore: str
+    font: str = ""
+
+
+@app.post("/api/template-file/install")
+def template_file_install(req: TemplateInstall) -> dict:
+    try:
+        return template_file.install(req.path, req.cliente, req.agenzia, req.colore, req.font,
+                                     log=lambda m: print(m, flush=True))
+    except (OSError, ValueError, RuntimeError) as e:
+        return {"ok": False, "msg": f"Caricamento non riuscito: {e}"}
 
 
 @app.get("/api/brain")

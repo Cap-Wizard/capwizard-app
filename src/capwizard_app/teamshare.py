@@ -33,7 +33,11 @@ _PATH = registry.app_data_dir() / "team_share.json"
 PREFIX = "capwizard-media://"
 MEDIA_EXT = (".mov", ".mp4", ".m4v", ".mts", ".avi", ".mkv", ".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif",
              ".wav", ".mp3", ".m4a", ".aac", ".aif", ".aiff", ".flac")
-_SKIP = shutil.ignore_patterns("draft.extra", "crypto_key_store.dat*", ".locked", "*.bak", "__pycache__")
+_SKIP_NAMES = ("draft.extra", "crypto_key_store.dat*", ".locked", "*.bak", "__pycache__")
+_SKIP = shutil.ignore_patterns(*_SKIP_NAMES)
+# a template has no clips: CapCut's analyses and cut-out masks of them (videoAlg, matting: most of a
+# template's size) stay behind, CapCut makes them again for the clips it gets
+_SKIP_TEMPLATE = shutil.ignore_patterns(*_SKIP_NAMES, "videoAlg", "matting")
 _JOBS: dict[str, dict] = {}          # team item id -> what the copy is doing
 
 
@@ -168,12 +172,12 @@ def _run(item_id: str, fase: str, work, log=print) -> dict:
     return {"ok": True}
 
 
-def _pack(src: Path, dest: Path, manifest: dict, job: dict) -> tuple[int, int]:
+def _pack(src: Path, dest: Path, manifest: dict, job: dict, ignore=_SKIP) -> tuple[int, int]:
     """Copy a CapCut project and every media file it uses to dest/ (project/, media/, manifest.json).
     It is written next to dest and renamed at the end, so a half copy never looks finished."""
     part = dest.with_name(dest.name + ".parziale")
     shutil.rmtree(part, ignore_errors=True)
-    shutil.copytree(src, part / "progetto", ignore=_SKIP)
+    shutil.copytree(src, part / "progetto", ignore=ignore)
     docs = _docs(part / "progetto")
     media = sorted(p for p in _paths(docs) if p.lower().endswith(MEDIA_EXT) and os.path.isfile(p))
     total = sum(os.path.getsize(p) for p in media) or 1
@@ -288,7 +292,7 @@ def send_template(nome: str, chi: str = "", log=print) -> dict:
         return {"ok": False, "msg": str(e)}
 
     def work(job: dict) -> str:
-        n, total = _pack(src, root / nome, {"nome": nome, "da": _me(chi)}, job)
+        n, total = _pack(src, root / nome, {"nome": nome, "da": _me(chi)}, job, _SKIP_TEMPLATE)
         return f"Il template «{nome}» è nella cartella del team con {n} file ({total / 1e6:.0f} MB)."
     return _run(f"tpl:{nome}", "passo", work, log)
 
@@ -302,29 +306,39 @@ def take_template(nome: str, log=print) -> dict:
         return {"ok": False, "msg": str(e)}
     if not (pkg / "manifest.json").exists():
         return {"ok": False, "msg": "Il template non è (ancora) nella cartella del team."}
-    target = safe(nome)
+    return _run(f"tpl:{nome}", "prendo", lambda job: install_template(pkg, safe(nome), job, log), log)
 
-    def work(job: dict) -> str:
-        dst = CAPCUT_PROJECTS_DIR / target
-        with tempfile.TemporaryDirectory() as tmp:
-            staging = Path(tmp) / "progetto"
-            _unpack(pkg, staging)
-            job["fase"] = "copio i file"
-            if not dst.exists():
-                return vault.install(str(staging), target, log, cutout=False)
-            vault.libera(dst, log)
-            meta_p = staging / "draft_meta_info.json"
-            meta = json.load(open(meta_p))
-            old_id = json.load(open(dst / "draft_meta_info.json")).get("draft_id")
-            if old_id:
-                meta["draft_id"] = old_id        # same place in CapCut's list
-            meta.update(draft_name=target, draft_fold_path=str(dst), draft_root_path=str(CAPCUT_PROJECTS_DIR))
-            json.dump(meta, open(meta_p, "w"), ensure_ascii=False)
-            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-            backup = BACKUP_DIR / f"{target} {time.strftime('%m%d-%H%M%S')}"
-            shutil.move(str(dst), str(backup))
-            shutil.copytree(staging, dst)
-            media = vault.porta_media(str(dst), target)
-        return " ".join(x for x in (f"✅ Template «{target}» aggiornato (il tuo di prima è in {backup}).", media,
-                                    "CapCut è aperto: chiudilo e riaprilo per vedere quello nuovo." if vault.capcut_running() else "") if x)
-    return _run(f"tpl:{nome}", "prendo", work, log)
+
+def install_template(pkg: Path, target: str, job: dict | None = None, log=print) -> str:
+    """A template package (progetto/, media/) into my CapCut as «target». One I already have is moved to the
+    app's backup folder first (never deleted) and the new one takes its place in CapCut's list."""
+    job = job if job is not None else {}
+    with tempfile.TemporaryDirectory() as tmp:
+        staging = Path(tmp) / "progetto"
+        _unpack(pkg, staging)
+        job["fase"] = "copio i file"
+        return install_staged(staging, target, log)
+
+
+def install_staged(staging: Path, target: str, log=print) -> str:
+    """A CapCut project ready in staging/ (media paths pointing at files that exist) into my CapCut as «target».
+    One I already have is moved to the app's backup folder first, never deleted."""
+    dst = CAPCUT_PROJECTS_DIR / target
+    if not dst.exists():
+        return vault.install(str(staging), target, log, cutout=False)
+    vault.libera(dst, log)
+    meta_p = staging / "draft_meta_info.json"
+    meta = json.load(open(meta_p))
+    old_id = json.load(open(dst / "draft_meta_info.json")).get("draft_id")
+    if old_id:
+        meta["draft_id"] = old_id        # same place in CapCut's list
+    meta.update(draft_name=target, draft_fold_path=str(dst), draft_root_path=str(CAPCUT_PROJECTS_DIR))
+    json.dump(meta, open(meta_p, "w"), ensure_ascii=False)
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup = BACKUP_DIR / f"{target} {time.strftime('%m%d-%H%M%S')}"
+    shutil.move(str(dst), str(backup))
+    shutil.copytree(staging, dst)
+    media = vault.porta_media(str(dst), target)
+    return " ".join(x for x in (f"✅ Template «{target}» aggiornato (il tuo di prima è in {backup}).", media,
+                                "CapCut è aperto: chiudilo e riaprilo per vedere quello nuovo." if vault.capcut_running() else "") if x)
+

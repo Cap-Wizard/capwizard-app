@@ -275,6 +275,7 @@
       <div><h2>Clienti</h2><p class="lib-sub" id="cl-sub"></p></div>
       <div class="lib-actions">
         <input type="search" class="hsearch" id="cl-search" placeholder="Cerca cliente, agenzia o template…" autocomplete="off" />
+        <button class="btn2" id="v-client-load" title="Un template esportato da CapWizard (file .skill): profilo del cliente e progetto CapCut">⬆︎ Carica template</button>
         <button class="btn-primary-sm" id="v-client">＋ Nuovo template</button>
       </div>
     </div>
@@ -412,6 +413,24 @@
     </div>
   </div>
 
+  <!-- ==================== ESPORTA TEMPLATE ==================== -->
+  <div id="export-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="ex-title">Esporta template</h2>
+        <button class="modal-close" id="ex-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="ai-intro">Uno zip da dare a chi monta. Il progetto in CapCut resta dov'è: nello zip va una copia.</p>
+        <div class="ex-opts">
+          <button class="ex-opt" data-cosa="completo"><b>Template completo</b><span>La skill del cliente e la cartella del progetto CapCut, collegate dal nome</span></button>
+          <button class="ex-opt" data-cosa="skill"><b>Solo skill</b><span>Il profilo del cliente per Claude: colore, font, regole e lezioni</span></button>
+          <button class="ex-opt" data-cosa="cartella"><b>Solo cartella CapCut</b><span>Il progetto del template con suoni, musica e grafica</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ==================== CLIENTE: NUOVO / MODIFICA (vault Obsidian) ==================== -->
   <div id="client-modal" class="modal-overlay" hidden>
     <div class="modal">
@@ -420,6 +439,11 @@
         <button class="modal-close" id="cm-close">✕</button>
       </div>
       <div class="modal-body">
+        <div class="drop drop2" id="cm-tdrop" hidden>
+          <b>📦 Trascina qui il template</b>
+          <span>lo zip esportato da CapWizard, la cartella del progetto CapCut o la skill del cliente · o clicca per sceglierlo</span>
+        </div>
+        <div class="tf-info" id="cm-file" hidden></div>
         <div id="cm-new">
           <label>Agenzia</label>
           <select id="cm-ag"></select>
