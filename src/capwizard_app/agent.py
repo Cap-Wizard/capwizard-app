@@ -620,7 +620,8 @@ Procedura:
    - clip senza parlato vero nella cartella delle clip (trascrizione vuota, assurda o "Grazie a tutti"): spesso sono B-ROLL del posto,
      guarda i fotogrammi prima di scartarle; quando si nomina il posto mettine uno (esterno poi interno); b-roll solo pertinenti e leggibili;
    - QUANTITÀ dei suoni: quella dello stile dell'agenzia, che vince (Exodia dal 22/10: pochi e con senso — parole grandi animate
-     all'inizio dell'animazione, swish su transizioni e zoom, pochi ding, niente bong né riser in mezzo);
+     all'inizio dell'animazione con ding variati, Positive Pick, Gliss o My presets1; swish SOLO sulle transizioni vere, circa 6-7 a video,
+     zoom di norma senza swish, Soft Wipe massimo 1-2 a video, pochi ding, niente bong né riser in mezzo);
    - ogni suono ha il colpo all'INIZIO di un sottotitolo (quando compare la parola chiave), riser che finiscono su un sottotitolo o su un taglio;
    - niente transizione subito dopo il titolo;
    - titolo dietro la testa: copia della clip su una traccia video SOPRA i testi del titolo, stesso tempo e stessa sorgente; lo scontorno
