@@ -94,6 +94,7 @@ async function bootBackend() {
         await loadClients();
         await loadProjects();
         if (!$("view-dash").hidden) loadBoard();
+        if (!$("view-ai").hidden) loadAI();       // the AI section was open before the backend was up
         loadAiServices();
         check();
         checkClaude();                      // real request, takes a few seconds
@@ -151,15 +152,15 @@ function dropNotice(id) {
 
 function showView(name) {
   for (const v of ["view-auth", "view-subscribe", "view-dash", "view-team", "view-home", "view-editor", "view-scarico",
-                   "view-clients", "view-agencies"]) {
+                   "view-clients", "view-agencies", "view-ai"]) {
     $(v).hidden = v !== `view-${name}`;
   }
-  const inApp = ["home", "editor", "dash", "team", "scarico", "clients", "agencies"].includes(name);
+  const inApp = ["home", "editor", "dash", "team", "scarico", "clients", "agencies", "ai"].includes(name);
   $("views").hidden = !inApp;
   $("v-clients").classList.toggle("on", name === "clients");
   $("v-agencies").classList.toggle("on", name === "agencies");
   $("mb-title").textContent = { dash: "Home", team: "Team", editor: "Nuovo video", home: "I miei progetti", scarico: "Smistamento clip",
-                                clients: "Clienti", agencies: "Agenzie" }[name] || "";
+                                clients: "Clienti", agencies: "Agenzie", ai: "AI" }[name] || "";
   if (name === "clients") renderClientsView();
   if (name === "agencies") renderAgenciesView();
   $("v-dash").classList.toggle("on", name === "dash");
@@ -167,6 +168,7 @@ function showView(name) {
   $("v-new").classList.toggle("on", name === "editor");
   $("v-proj").classList.toggle("on", name === "home");
   $("v-scarico").classList.toggle("on", name === "scarico");
+  $("v-ai").classList.toggle("on", name === "ai");
   document.body.classList.toggle("projs-view", name === "home");
   // account controls only when past the gate (and not in local/private mode)
   const authed = inApp && !LOCAL_MODE;
@@ -178,6 +180,7 @@ function showView(name) {
   if (name === "dash" && state.backendReady) loadBoard();
   if (name === "team" && state.backendReady) { renderTeamBoard(); loadTeam(true); }
   if (name === "scarico" && state.backendReady) loadScaricoCodes();
+  if (name === "ai" && state.backendReady) loadAI();
 }
 
 function setPill(id, cls, label) {
@@ -619,6 +622,7 @@ function isOn(id) { return $(id).classList.contains("on"); }
 function wireEditor() {
   $("v-dash").onclick = () => showView("dash");
   wireBoard();
+  wireAI();
   $("v-new").onclick = () => showView("editor");
   $("v-proj").onclick = () => showView("home");
   $("v-client").onclick = () => openClientModal(null);
@@ -674,6 +678,13 @@ function wireEditor() {
     e.preventDefault();
     endDrag();
     if (!isFileDrag(e)) return;
+    if (!$("view-ai").hidden) {               // frames for a transition: on a box, or the empty ones in order
+      const paths = [...e.dataTransfer.files].map((f) => (window.api && window.api.pathForFile ? window.api.pathForFile(f) : "")).filter(Boolean);
+      if (GEN.tab === "amb") dropAmb(paths, dropZone);
+      else if (GEN.tab === "img") dropImg(paths, dropZone);
+      else dropAIFrames(paths, dropZone && dropZone.startsWith("ai-f-") ? +dropZone.slice(5) : null);
+      return;
+    }
     if (!$("view-scarico").hidden) {          // clips of a shooting to sort
       for (const f of e.dataTransfer.files) {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
@@ -702,7 +713,7 @@ function wireEditor() {
       }
       return;
     }
-    if (!$("view-home").hidden) {          // screenshots for a change request
+    if (!$("view-home").hidden) {          // screenshots or videos for a change request
       for (const f of e.dataTransfer.files) {
         const p = window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
         if (p) attach({ path: p });
@@ -1140,12 +1151,12 @@ async function openProject(p) {
         ${p.exists ? "" : '<button class="btn2 danger" id="pd-remove">Rimuovi dall\'elenco</button>'}
       </div>
     </div>
-    <div class="thread" id="thread">${thread || '<div class="empty">Nessuna modifica ancora. Se il video non va, scrivi qui sotto cosa cambiare e allega gli screenshot della chat del cliente: Claude corregge questo progetto e salva la lezione nel profilo del cliente.</div>'}</div>
+    <div class="thread" id="thread">${thread || '<div class="empty">Nessuna modifica ancora. Se il video non va, scrivi qui sotto cosa cambiare e allega gli screenshot della chat del cliente o un video: Claude corregge questo progetto e salva la lezione nel profilo del cliente.</div>'}</div>
     <div id="mlog" ${running ? "" : "hidden"}></div>
     <div class="composer">
       <textarea id="mtext" placeholder="Cosa cambiare? es. «togli il dong», «sottotitoli più in alto», «il cliente vuole il prezzo più grande»… (incolla gli screenshot con ⌘V)"></textarea>
       <div class="att" id="att"></div>
-      <div class="cbar"><button class="btn2" id="btn-attach">📎 Allega screenshot</button>
+      <div class="cbar"><button class="btn2" id="btn-attach">📎 Allega screenshot o video</button>
         <span class="hint">oppure trascinali qui o ⌘V</span>
         <button class="send" id="send">APPLICA MODIFICHE</button></div>
     </div>`;
@@ -1156,7 +1167,7 @@ async function openProject(p) {
   if (!p.exists) $("pd-remove").onclick = () => removeProjects([p]);
   renderProjectStatus(p);
   $("btn-attach").onclick = async () => {
-    for (const path of (window.api && await window.api.selectImages()) || []) attach({ path });
+    for (const path of (window.api && await window.api.selectMedia()) || []) attach({ path });
   };
   $("mtext").addEventListener("paste", (e) => {
     for (const it of e.clipboardData.items) {
@@ -1188,7 +1199,7 @@ function renderAtt() {
   box.innerHTML = "";
   state.att.forEach((a, i) => {
     const d = document.createElement("div");
-    d.innerHTML = `<img src="${a.thumb}"><span>✕</span>`;
+    d.innerHTML = `<img src="${a.thumb}">${a.video ? `<b class="att-vid" title="${escapeHtml(a.nome || "video")}">▶</b>` : ""}<span>✕</span>`;
     d.querySelector("span").onclick = () => { state.att.splice(i, 1); renderAtt(); };
     box.appendChild(d);
   });
@@ -2861,4 +2872,989 @@ function safeColor(c) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+
+// ---------------------------------------------------------------------------
+// AI: generations with ComfyUI's partner nodes, paid with Comfy credits
+// ---------------------------------------------------------------------------
+
+const GEN = { tab: "trans", stato: {}, templates: [], modelli: [], provider: [], frames: [null, null], thumbs: {}, notes: [""], durs: [5],
+              prov: "comfy", modello: "", stime: {}, job: null, poll: null, items: [], blobs: {} };
+
+async function loadAI() {
+  try {
+    const d = await (await fetch(`${BACKEND}/api/ai/status`)).json();
+    GEN.stato = d;
+    GEN.templates = (d.templates && d.templates.transizioni) || [];
+    GEN.modelli = (d.modelli && d.modelli.modelli) || [];
+    GEN.provider = (d.modelli && d.modelli.provider) || [];
+  } catch (_) { GEN.stato = {}; }
+  const sel = $("ai-tpl");
+  const cur = sel.value;
+  sel.innerHTML = GEN.templates.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.nome)}</option>`).join("");
+  if (cur) sel.value = cur;
+  if (!GEN.modello) applyAITemplate(); else renderAITemplate();
+  const st = GEN.stato;
+  $("ai-warn").hidden = !!(st.chiave && st.installato);
+  $("ai-warn").innerHTML = !st.installato ? "ComfyUI non è installato su questo Mac: installalo con Comfy Desktop."
+    : !st.chiave ? "Manca la API key di Comfy nel Portachiavi (account <b>capwizard</b>, servizio <b>comfy-org-api-key</b>)." : "";
+  $("ai-sub").textContent = st.comfy ? "ComfyUI è acceso. Scegli il modello: il prezzo si aggiorna da solo."
+    : "ComfyUI è spento: lo accendo io quando premi Genera. Scegli il modello: il prezzo si aggiorna da solo.";
+  const fmts = (GEN.stato.modelli && GEN.stato.modelli.formati) || [];
+  document.querySelectorAll(".ai-fmtsel").forEach((sel) => {
+    const cur = sel.value || "9:16";
+    sel.innerHTML = fmts.map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.nome)}</option>`).join("");
+    sel.value = fmts.some((f) => f.id === cur) ? cur : "9:16";        // vertical unless chosen otherwise
+    sel.addEventListener("change", applyAIBoxes);
+  });
+  applyAIBoxes();
+  renderAIProviders();
+  renderAIFrames();
+  updateAICost();
+  renderAmb();
+  renderImg();
+  loadAIResults();
+}
+
+// lengths a leg can have: from 1 s (below the model's shortest it is made at that and sped up) to the model's own
+const aiLens = (m) => [...new Set([...Array.from({ length: Math.max(0, Math.min(...m.durate) - 1) }, (_, i) => i + 1), ...m.durate])];
+const aiFit = (m, durs) => durs.map((d) => (aiLens(m).includes(d) ? d : m.durate.reduce((b, x) => (Math.abs(x - d) < Math.abs(b - d) ? x : b), m.durate[0])));
+
+// the boxes take the shape of the chosen format: tall for 9:16, wide for 16:9, square for 1:1…
+function aiBox(fmtId) {
+  const f = (((GEN.stato.modelli || {}).formati) || []).find((x) => x.id === fmtId) || { w: 9, h: 16 };
+  const r = f.w / f.h;
+  return r >= 1 ? [Math.round(260), Math.round(260 / r)] : [Math.round(230 * r), 230];
+}
+function applyAIBoxes() {
+  for (const [pane, sel] of [["ai-trans", "ai-fmt"], ["ai-amb", "am-fmt"], ["ai-img", "im-fmt"]]) {
+    const [w, h] = aiBox($(sel).value || "9:16");
+    $(pane).style.setProperty("--fw", `${w}px`);
+    $(pane).style.setProperty("--fh", `${h}px`);
+  }
+}
+
+const aiModel = () => GEN.modelli.find((m) => m.id === GEN.modello) || GEN.modelli[0] || { durate: [5], risoluzioni: ["1080p"] };
+const aiTemplate = () => GEN.templates.find((x) => x.id === $("ai-tpl").value) || GEN.templates[0];
+
+// a template brings its model, resolution and length of a leg
+function applyAITemplate() {
+  const t = aiTemplate();
+  if (!t) return;
+  $("ai-tpl").value = t.id;
+  GEN.modello = t.modello || (GEN.modelli[0] || {}).id || "";
+  GEN.durs = GEN.durs.map(() => t.durata || 5);
+  setAIModel(GEN.modello, t.risoluzione);
+  renderAITemplate();
+}
+
+function renderAITemplate() {
+  const t = aiTemplate();
+  $("ai-tpl-desc").textContent = t ? t.descrizione || "" : "";
+  const box = $("ai-anim");
+  box.innerHTML = "";                         // a previous animation stops when its canvas leaves the page
+  const start = AI_ANIM[(t && t.anim) || ""];
+  if (start) {
+    const cv = document.createElement("canvas");
+    cv.className = "ai-cv";
+    box.appendChild(cv);
+    start(cv);
+  }
+}
+
+// the model decides which lengths and resolutions can be chosen: the legs move to the nearest one
+function setAIModel(id, res) {
+  GEN.modello = id;
+  const m = aiModel();
+  const allowed = aiLens(m);
+  GEN.durs = GEN.durs.map((d) => (allowed.includes(d) ? d : allowed.reduce((b, x) => (Math.abs(x - d) < Math.abs(b - d) ? x : b), allowed[0])));
+  const want = res || $("ai-res").value || "1080p";
+  $("ai-res").innerHTML = m.risoluzioni.map((r) => `<option>${r}</option>`).join("");
+  $("ai-res").value = m.risoluzioni.includes(want) ? want : m.risoluzioni.includes("1080p") ? "1080p" : m.risoluzioni[0];
+}
+
+// which service generates: shown top right; one that isn't connected has to be connected first
+const aiConnected = (p) => (p.id === "comfy" ? !!GEN.stato.chiave : !!p.collegato);
+
+function renderAIProviders() {
+  const cur = GEN.provider.find((p) => p.id === GEN.prov) || { id: "comfy", nome: "Comfy" };
+  const ok = aiConnected(cur);
+  $("ai-prov-btn").innerHTML = `<i class="ai-dot ${ok ? "on" : ""}"></i>${escapeHtml(cur.nome)} · ${ok ? "collegato" : "da collegare"} ▾`;
+}
+
+function openAIProviderMenu(focus = null) {
+  const menu = $("ai-prov-menu");
+  const rows = GEN.provider.map((p) => `<button data-p="${escapeHtml(p.id)}" class="${p.id === GEN.prov ? "on" : ""}">
+      <span><i class="ai-dot ${aiConnected(p) ? "on" : ""}"></i>${escapeHtml(p.nome)}</span><small>${aiConnected(p) ? "collegato" : "da collegare"}</small></button>`).join("");
+  const p = GEN.provider.find((x) => x.id === focus);
+  let panel = "";
+  if (p && p.id === "comfy") {
+    panel = `<div class="ai-conn"><b>Collega Comfy</b><p>Incolla la API key del tuo account Comfy (platform.comfy.org, alla voce API Keys).
+      Resta nel Portachiavi del Mac.</p><input type="password" id="ai-key" placeholder="API key di Comfy" autocomplete="off" />
+      <button class="btn-primary-sm" id="ai-key-save">Collega</button></div>`;
+  } else if (p) {
+    panel = `<div class="ai-conn"><b>Collega ${escapeHtml(p.nome)}</b><p>Per generare con ${escapeHtml(p.nome)} va collegato con la sua API key.
+      In CapWizard il collegamento a ${escapeHtml(p.nome)} non c'è ancora: per ora resti su Comfy.</p></div>`;
+  }
+  menu.innerHTML = rows + panel;
+  menu.hidden = false;
+  menu.querySelectorAll("button[data-p]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const q = GEN.provider.find((x) => x.id === b.dataset.p);
+      if (!aiConnected(q)) return openAIProviderMenu(q.id);       // not connected: connect it first
+      GEN.prov = q.id; menu.hidden = true; renderAIProviders(); updateAICost();
+    };
+  });
+  const save = $("ai-key-save");
+  if (save) {
+    $("ai-key").focus();
+    $("ai-key").onkeydown = (e) => { if (e.key === "Enter") save.click(); };
+    save.onclick = async (e) => {
+      e.stopPropagation();
+      const r = await (await fetch(`${BACKEND}/api/ai/comfy-key`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: $("ai-key").value }) })).json().catch((err) => ({ ok: false, msg: String(err) }));
+      if (!r.ok) return notify(r.msg || "Non sono riuscito a collegarlo.", "err");
+      notify("Comfy è collegato.", "ok");
+      menu.hidden = true;
+      GEN.prov = "comfy";
+      loadAI();
+    };
+  }
+}
+
+function renderAIFrames() {
+  const box = $("ai-frames");
+  const n = GEN.frames.length;
+  const m = aiModel();
+  while (GEN.durs.length < n - 1) GEN.durs.push(m.durate.includes(5) ? 5 : m.durate[0]);
+  GEN.durs.length = n - 1;
+  box.innerHTML = "";
+  GEN.frames.forEach((p, i) => {
+    const label = i === 0 ? "A · inizio" : i === n - 1 ? `${String.fromCharCode(65 + Math.min(i, 25))} · fine` : `${String.fromCharCode(65 + Math.min(i, 25))} · tappa`;
+    const col = document.createElement("div");
+    col.className = "ai-col";
+    const tappa = i >= 2;                          // the frames added after B can go; A and B always stay
+    col.innerHTML = `<div class="ai-frame drop${p ? " has" : ""}" id="ai-f-${i}"><span class="ai-fl">${label}</span>
+        ${p || tappa ? `<button class="ai-fx" title="${p ? "Togli l'immagine" : "Togli questa tappa"}">✕</button>` : ""}
+        ${p ? `<img alt="" src="${GEN.thumbs[p] || ""}"><span class="ai-fn">${escapeHtml(p.split("/").pop())}</span>`
+            : `<b>＋</b><span>Trascina o clicca</span>`}</div>
+      <div class="ai-tl dot${i === 0 ? " first" : ""}${i === n - 1 ? " last" : ""}"><i></i></div>`;
+    const card = col.querySelector(".ai-frame");
+    card.onclick = async (e) => {
+      if (e.target.closest(".ai-fx")) return;
+      const files = window.api ? await window.api.selectImages() : [];
+      if (files && files.length) dropAIFrames(files, i);
+    };
+    const x = col.querySelector(".ai-fx");
+    if (x) x.onclick = (e) => {
+      e.stopPropagation();
+      if (p) GEN.frames[i] = null;                         // the picture goes, the box stays
+      else { const leg = Math.min(i, GEN.frames.length - 2); GEN.frames.splice(i, 1); GEN.notes.splice(leg, 1); GEN.durs.splice(leg, 1); }
+      renderAIFrames(); updateAICost();
+    };
+    box.appendChild(col);
+    if (i < n - 1) {
+      const leg = document.createElement("div");
+      leg.className = "ai-col ai-legcol";
+      leg.innerHTML = `<div class="ai-leg"><span>${String.fromCharCode(65 + i)} → ${String.fromCharCode(65 + i + 1)}</span>
+          <textarea rows="3" placeholder="Cosa succede (facoltativo)">${escapeHtml(GEN.notes[i] || "")}</textarea></div>
+        <div class="ai-tl seg"><select title="Quanto dura la transizione">${aiLens(m).map((d) =>
+          `<option value="${d}" ${d === GEN.durs[i] ? "selected" : ""}>${d} s</option>`).join("")}</select></div>`;
+      leg.querySelector("textarea").oninput = (e) => { GEN.notes[i] = e.target.value; };
+      leg.querySelector("select").onchange = (e) => { GEN.durs[i] = +e.target.value; updateAICost(); };
+      box.appendChild(leg);
+    }
+  });
+  const add = document.createElement("div");
+  add.className = "ai-col";
+  add.innerHTML = `<button class="ai-add" title="Aggiungi tappa: un fotogramma in più, una tratta in più generata a parte"><b>＋</b><span>Aggiungi tappa</span></button>
+    <div class="ai-tl"></div>`;
+  add.querySelector("button").onclick = () => {
+    GEN.frames.push(null); GEN.notes.push(""); GEN.durs.push(GEN.durs[GEN.durs.length - 1] || 5);
+    renderAIFrames(); updateAICost();
+  };
+  box.appendChild(add);
+  syncAIGenerate();
+}
+
+function syncAIGenerate() {
+  const prov = GEN.provider.find((p) => p.id === GEN.prov) || {};
+  const ok = aiConnected(prov);
+  $("ai-generate").disabled = GEN.frames.some((f) => !f) || !!GEN.job || !ok;
+  $("ai-generate").title = !ok ? `${prov.nome || "Questo provider"} non è collegato: collegalo in alto a destra` : "";
+}
+
+// images dropped or chosen: on box `at`, or (at = null) into the empty boxes in order
+async function dropAIFrames(paths, at) {
+  const imgs = paths.filter((p) => /\.(png|jpe?g|heic|webp)$/i.test(p));
+  if (!imgs.length) return notify("Servono immagini: PNG, JPG, HEIC o WebP.", "err");
+  let slots = at != null ? [at] : GEN.frames.map((f, i) => (f ? -1 : i)).filter((i) => i >= 0);
+  if (at == null && !slots.length) slots = [GEN.frames.length - 1];
+  imgs.slice(0, slots.length).forEach((p, k) => { GEN.frames[slots[k]] = p; });
+  renderAIFrames();
+  for (const p of imgs) {
+    if (GEN.thumbs[p]) continue;
+    try {
+      const d = await (await fetch(`${BACKEND}/api/ai/thumb?path=${encodeURIComponent(p)}&h=360`)).json();
+      if (d.ok) GEN.thumbs[p] = d.src;
+    } catch (_) {}
+  }
+  renderAIFrames();
+}
+
+async function aiEstimate(durate) {
+  return (await fetch(`${BACKEND}/api/ai/estimate`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ durate, modello: GEN.modello, risoluzione: $("ai-res").value }) })).json();
+}
+
+const eur = (n) => `${n.toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+
+function fmtCost(c, est = true) {
+  const e = c.eur != null ? `≈ ${eur(c.eur)}` : "euro non disponibili";
+  const usd = c.usd != null ? ` · ${c.usd.toLocaleString("it-IT", { minimumFractionDigits: 2 })} $` : "";
+  return `${c.crediti.toLocaleString("it-IT")} crediti${usd} · ${e}${est ? " (stima)" : ""}`;
+}
+
+async function updateAICost() {
+  let r;
+  try { r = await aiEstimate(GEN.durs); } catch (_) { return; }
+  if (!r.ok) { $("ai-cost").textContent = r.msg || ""; return; }
+  GEN.stime = r.stime || {};
+  renderAIModels();
+  const c = (GEN.stime[GEN.modello] || {})[GEN.prov];
+  const prov = GEN.provider.find((p) => p.id === GEN.prov) || {};
+  if (!c || !c.ok) {
+    $("ai-cost").innerHTML = `<b>${escapeHtml((c && c.msg) || "Prezzo non disponibile.")}</b>`;
+  } else {
+    const fx = c.cambio ? ` · cambio BCE ${c.cambio.data}: 1 € = ${c.cambio.usd_per_eur} $` : "";
+    const how = c.unita === "$/s" ? `${c.tariffa} $/s × ${c.secondi} s · ${c.crediti_per_usd} crediti = 1 $` : `${c.tariffa} crediti/s × ${c.secondi} s`;
+    const want = aiFit(aiModel(), GEN.durs), wsum = want.reduce((a, b) => a + b, 0);
+    const sped = wsum !== c.secondi ? ` (generati ${c.secondi} s, poi accelerati)` : "";
+    $("ai-cost").innerHTML = `<b>${c.tratte} ${c.tratte === 1 ? "tratta" : "tratte"} · ${wsum} s${sped} · ${fmtCost(c)}</b>
+      <span>${how}${fx}${aiConnected(prov) ? "" : ` · ${escapeHtml(prov.nome || "")} non è collegato`}</span>`;
+  }
+  syncAIGenerate();
+}
+
+// the 4 models with their price on the chosen provider: the recommended one and the cheapest marked
+function renderAIModels() {
+  const t = aiTemplate() || {};
+  const priced = GEN.modelli.map((m) => ({ m, c: (GEN.stime[m.id] || {})[GEN.prov] })).filter((x) => x.c && x.c.ok && x.c.eur != null);
+  const cheap = priced.length ? priced.reduce((a, b) => (b.c.eur < a.c.eur ? b : a)).m.id : "";
+  $("ai-models").innerHTML = GEN.modelli.map((m) => {
+    const c = (GEN.stime[m.id] || {})[GEN.prov];
+    const price = c && c.ok ? `<b class="ai-mp">${c.eur != null ? eur(c.eur) : `${c.crediti} crediti`}</b><span>${c.crediti.toLocaleString("it-IT")} crediti${
+      c.durate.join(",") !== aiFit(m, GEN.durs).join(",") ? ` · tratte da ${[...new Set(c.durate)].join("/")} s` : ""}</span>`
+      : '<b class="ai-mp na">non disponibile</b><span>su questo provider</span>';
+    const tags = (m.id === t.modello ? '<em class="rec">Consigliato</em>' : "") + (m.id === cheap ? '<em class="cheap">Più economico</em>' : "");
+    return `<button class="ai-model${m.id === GEN.modello ? " on" : ""}" data-m="${escapeHtml(m.id)}">
+      <div class="ai-mh"><b>${escapeHtml(m.nome)}</b>${tags}</div><p>${escapeHtml(m.per)}</p><div class="ai-mpr">${price}</div></button>`;
+  }).join("");
+  $("ai-models").querySelectorAll(".ai-model").forEach((b) => {
+    b.onclick = () => { setAIModel(b.dataset.m); renderAIFrames(); updateAICost(); };
+  });
+}
+
+async function generateAI() {
+  if (GEN.frames.some((f) => !f)) return notify("Metti un'immagine in ogni riquadro.", "err");
+  if (!GEN.stato.chiave) return notify("Manca la API key di Comfy nel Portachiavi.", "err");
+  const c = (GEN.stime[GEN.modello] || {})[GEN.prov];
+  if (!c || !c.ok) return notify("Non riesco a stimare il costo.", "err");
+  const m = aiModel();
+  const want = aiFit(m, GEN.durs);
+  const fast = want.some((d, i) => d < c.durate[i]) ? `\nLe tratte più corte di ${Math.min(...m.durate)} s vengono generate da ${Math.min(...m.durate)} s e accelerate: si pagano ${Math.min(...m.durate)} s.` : "";
+  if (!confirm(`Genero ${c.tratte} ${c.tratte === 1 ? "tratta" : "tratte"} con ${m.nome} (${$("ai-res").value}, ${want.join(" + ")} s).${fast}\n\n`
+    + `Costo stimato: ${fmtCost(c, false)}.\nSono crediti veri del tuo account Comfy. Procedo?`)) return;
+  const body = { frames: GEN.frames, template: $("ai-tpl").value, nome: $("ai-name").value.trim(), durate: want,
+    modello: GEN.modello, risoluzione: $("ai-res").value, provider: GEN.prov, formato: $("ai-fmt").value, note: GEN.notes.slice(0, c.tratte) };
+  const r = await (await fetch(`${BACKEND}/api/ai/transition`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");
+  watchAIJob(r.job_id, c.tratte);
+}
+
+// a generation runs for minutes: its log under the button, then the result on top of the list
+function watchAIJob(jobId, tratte) {
+  GEN.job = jobId;
+  syncAIGenerate(); syncAmb(); syncImg();
+  $("ai-run").hidden = false;
+  $("ai-log").textContent = "Parto…";
+  const t0 = Date.now();
+  const per = 3 * 60 * 1000;                 // a leg took between 1.5 and 6 minutes in the trials
+  clearInterval(GEN.poll);
+  GEN.poll = setInterval(async () => {
+    let j;
+    try { j = await (await fetch(`${BACKEND}/api/jobs/${jobId}`)).json(); } catch (_) { return; }
+    $("ai-log").textContent = (j.logs || []).slice(-6).join("\n");
+    const pct = Math.min(95, ((Date.now() - t0) / (per * Math.max(1, tratte))) * 100);
+    $("ai-run").querySelector("i").style.width = `${j.status === "done" ? 100 : pct}%`;
+    if (j.status === "done" || j.status === "error") {
+      clearInterval(GEN.poll);
+      GEN.job = null;
+      syncAIGenerate(); syncAmb(); syncImg();
+      if (j.status === "error") notify(j.error || "La generazione non è riuscita.", "err");
+      else { notify("Video pronto.", "ok"); setTimeout(() => { $("ai-run").hidden = true; }, 1500); }
+      loadAIResults();
+    }
+  }, 3000);
+}
+
+async function loadAIResults() {
+  try { GEN.items = (await (await fetch(`${BACKEND}/api/ai/history`)).json()).items || []; } catch (_) { GEN.items = []; }
+  const box = $("ai-results");
+  const tipo = { trans: "transizione", amb: "ambientazione", img: "immagine" }[GEN.tab];
+  const items = GEN.items.filter((it) => (it.tipo || "transizione") === tipo);
+  if (!items.length) { box.innerHTML = `<div class="tt-empty">Ancora niente: ${tipo === "immagine" ? "le immagini generate" : "i video generati"} compaiono qui.</div>`; return; }
+  box.innerHTML = "";
+  for (const it of items) {
+    const card = document.createElement("article");
+    card.className = "ai-card";
+    const video = it.video ? `${it.cartella}/${it.video}` : it.immagine ? `${it.cartella}/${it.immagine}` : "";
+    const isImg = !!it.immagine;
+    const tratte = it.tratte || [];
+    const done = tratte.filter((t) => t.stato === "fatta").length;
+    const lens = it.tipo === "ambientazione" ? `${it.durata} s${it.inizio ? ` · effetto da ${String(it.inizio).replace(".", ",")} s` : ""}`
+      : isImg ? it.formato : `${tratte.map((t) => t.durata || it.durata).join(" + ")} s`;
+    card.innerHTML = `<div class="ai-tops"><button class="ai-trash" title="Metti nel Cestino del Mac"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button><button class="ai-del" title="Togli dalla lista (il file resta)">✕</button></div><div class="ai-pwrap"><div class="ai-player">${isImg ? "" : video ? '<button class="ai-play" title="Guarda">▶</button>' : '<span class="ai-none">nessun video</span>'}</div>
+      ${video ? '<button class="ai-big" title="Guarda in grande">⤢</button>' : ""}</div>
+      <div class="ai-body">
+        <div class="ai-title">${escapeHtml(it.nome)}</div>
+        <div class="ai-meta">${it.template_nome ? `${escapeHtml(it.template_nome)} · ` : it.modo ? `${it.modo === "video" ? "Da video" : "Da foto"} · ` : ""}${escapeHtml(it.modello_nome || "Kling 3.0")}${it.risoluzione ? ` · ${it.risoluzione}` : ""} · ${lens} · ${escapeHtml(it.creato.replace("T", " ").slice(0, 16))}</div>
+        <div class="ai-meta">${it.costo.usd ? `Speso: ${fmtCost(it.costo)}` : it.stima && it.stima.crediti != null ? `Stima: ${fmtCost(it.stima)}` : ""}${tratte.length && done < tratte.length ? ` · ${done} di ${tratte.length} tratte fatte` : ""}</div>
+        ${it.testo ? `<div class="ai-meta ai-prompt" title="${escapeHtml(it.testo)}">«${escapeHtml(it.testo)}»</div>` : ""}
+        ${tratte.length ? `<div class="ai-legs">${tratte.map((t, i) => `<span class="ai-chip ${t.stato === "fatta" ? "ok" : t.stato === "errore" ? "err" : ""}">
+          ${String.fromCharCode(65 + i)} → ${String.fromCharCode(66 + i)}<button data-i="${i}" title="Rigenera solo questa tratta">↻</button></span>`).join("")}</div>` : ""}
+        ${(it.modifiche || []).length ? `<div class="ai-vers">${it.modifiche.map((m, k) => `<button class="ai-ver" data-k="${k}" title="${escapeHtml(m.testo)}">✎ ${k + 1} ▶</button>`).join("")}</div>` : ""}
+        <div class="ai-acts">${video && !isImg ? '<button class="btn2 ai-edit">✎ Modifica</button>' : ""}<button class="btn2 ai-reveal">Rivela nel Finder</button></div>
+      </div>`;
+    card.querySelector(".ai-reveal").onclick = () => window.api && window.api.revealPath(video || it.cartella);
+    card.querySelector(".ai-trash").onclick = () => trashAIResult(it, video);
+    card.querySelector(".ai-del").onclick = () => hideAIResult(it);
+    const ed = card.querySelector(".ai-edit");
+    if (ed) ed.onclick = () => openAIEdit(it);
+    card.querySelectorAll(".ai-ver").forEach((b) => {
+      const m = it.modifiche[+b.dataset.k];
+      b.onclick = () => openAIViewer(`${it.cartella}/${m.file}`, `${it.nome} · modifica ${+b.dataset.k + 1}`);
+    });
+    const play = card.querySelector(".ai-play");
+    if (play) play.onclick = () => playAI(card.querySelector(".ai-player"), video);
+    const big = card.querySelector(".ai-big");
+    if (big) big.onclick = () => {
+      const v = card.querySelector(".ai-player video");
+      if (v) v.pause();
+      if (isImg) return openAIViewer(video, it.nome);
+      openAIViewer(video, it.nome, v ? v.currentTime : 0);
+    };
+    card.querySelectorAll(".ai-legs button").forEach((b) => { b.onclick = () => redoAILeg(it, +b.dataset.i); });
+    if (isImg) showAIImage(card.querySelector(".ai-player"), video);
+    else if (video && GEN.blobs[video]) playAI(card.querySelector(".ai-player"), video, false);
+    box.appendChild(card);
+  }
+}
+
+// the ✕ of a result: off the list only, the files stay where they are
+async function hideAIResult(it) {
+  const r = await (await fetch(`${BACKEND}/api/ai/hide`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: it.id }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non sono riuscito a toglierlo.", "err");
+  notify(`«${it.nome}» non è più nella lista; il file resta nella sua cartella.`, "ok");
+  loadAIResults();
+}
+
+// the bin of a result: asked twice, then its folder goes to the Trash (recoverable from there)
+async function trashAIResult(it, video) {
+  if (!confirm(`Mettere «${it.nome}» nel Cestino del Mac?`)) return;
+  if (!confirm(`Sicuro? Tutta la cartella «${it.id}» (video, tratte, immagini) va nel Cestino. Puoi recuperarla da lì finché non lo svuoti.`)) return;
+  const r = window.api ? await window.api.trashAIResult(it.cartella) : { ok: false };
+  if (!r || !r.ok) return notify((r && r.msg) || "Non sono riuscito a toglierlo.", "err");
+  if (GEN.blobs[video]) { URL.revokeObjectURL(GEN.blobs[video]); delete GEN.blobs[video]; }
+  notify(`«${it.nome}» è nel Cestino.`, "ok");
+  loadAIResults();
+}
+
+async function playAI(box, path, autoplay = true) {
+  try {
+    if (!GEN.blobs[path]) {
+      box.innerHTML = '<span class="ai-none">carico…</span>';
+      const r = await fetch(`${BACKEND}/api/ai/file?path=${encodeURIComponent(path)}`);
+      if (!r.ok) throw new Error("file non trovato");
+      GEN.blobs[path] = URL.createObjectURL(await r.blob());
+    }
+    box.innerHTML = `<video src="${GEN.blobs[path]}" controls loop playsinline ${autoplay ? "autoplay" : ""}></video>`;
+  } catch (e) { box.innerHTML = `<span class="ai-none">${escapeHtml(e.message)}</span>`; }
+}
+
+// a result as big as the CapWizard window, with a button for the whole screen; Esc or ✕ closes it
+async function openAIViewer(path, title, at = 0) {
+  try {
+    if (!GEN.blobs[path]) {
+      const r = await fetch(`${BACKEND}/api/ai/file?path=${encodeURIComponent(path)}`);
+      if (!r.ok) throw new Error("file non trovato");
+      GEN.blobs[path] = URL.createObjectURL(await r.blob());
+    }
+  } catch (e) { return notify(`Non riesco ad aprire il video: ${e.message}`, "err"); }
+  const box = document.createElement("div");
+  box.className = "ai-view";
+  box.innerHTML = `<div class="ai-vbar"><b>${escapeHtml(title)}</b>
+      <button class="btn2 ai-vfull" title="Schermo intero">⛶ Schermo intero</button>
+      <button class="btn2 ai-vfind">Rivela nel Finder</button>
+      <button class="ai-vx" title="Chiudi (Esc)">✕</button></div>
+    ${/\.(png|jpe?g|webp)$/i.test(path) ? `<img class="ai-vimg" src="${GEN.blobs[path]}" alt="">` : `<video src="${GEN.blobs[path]}" controls autoplay loop playsinline></video>`}`;
+  const v = box.querySelector("video") || box.querySelector("img");
+  if (v.tagName === "VIDEO") v.currentTime = at || 0;
+  const close = () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    document.removeEventListener("keydown", onKey);
+    box.remove();
+  };
+  const onKey = (e) => { if (e.key === "Escape" && !document.fullscreenElement) close(); };
+  document.addEventListener("keydown", onKey);
+  box.querySelector(".ai-vx").onclick = close;
+  box.querySelector(".ai-vfind").onclick = () => window.api && window.api.revealPath(path);
+  box.querySelector(".ai-vfull").onclick = () => (v.tagName === "VIDEO" ? v : box).requestFullscreen().catch((e) => notify(`Schermo intero non disponibile: ${e.message}`, "err"));
+  box.onclick = (e) => { if (e.target === box) close(); };
+  document.body.appendChild(box);
+}
+
+// «Modifica»: a prompt for what to change, the model that does it and what it costs on this video
+async function openAIEdit(it) {
+  const sources = [{ file: it.video, nome: "Video originale" }, ...(it.modifiche || []).map((m, k) => ({ file: m.file, nome: `Modifica ${k + 1}` }))];
+  const box = document.createElement("div");
+  box.className = "ai-view ai-editbox";
+  box.innerHTML = `<div class="ai-edlg">
+      <div class="ai-vbar"><b>Modifica «${escapeHtml(it.nome)}»</b><button class="ai-vx" title="Chiudi (Esc)">✕</button></div>
+      <label class="ai-l">Parti da<select class="ed-src">${sources.map((x) => `<option value="${escapeHtml(x.file)}">${escapeHtml(x.nome)}</option>`).join("")}</select></label>
+      <label class="ai-l">Cosa cambiare<textarea class="ed-txt" rows="4" placeholder="es. fai che sia il tramonto, togli le persone, rendi il cielo più azzurro"></textarea></label>
+      <div class="ai-l">Modello</div><div class="ai-models ed-models"></div>
+      <label class="ai-l">Risoluzione<select class="ed-res"><option>720p</option><option selected>1080p</option></select></label>
+      <div class="ai-go"><div class="ai-cost ed-cost"></div><div class="ed-btns"><button class="btn2 ed-no">Annulla</button><button class="send ed-ok">Applica modifica</button></div></div>
+    </div>`;
+  document.body.appendChild(box);
+  const q = (c) => box.querySelector(c);
+  const ED = { modello: "kling-omni-edit", stime: {} };
+  const mods = ((GEN.stato.modelli || {}).modifica) || [];
+  const close = () => { document.removeEventListener("keydown", onKey); box.remove(); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  q(".ai-vx").onclick = close; q(".ed-no").onclick = close;
+  box.onclick = (e) => { if (e.target === box) close(); };
+  const render = () => {
+    const priced = mods.map((m) => ED.stime[m.id]).filter((c) => c && !c.troppo_lungo && c.eur != null);
+    const cheap = priced.length ? priced.reduce((a, b) => (b.eur < a.eur ? b : a)).modello : "";
+    q(".ed-models").innerHTML = mods.map((m) => {
+      const c = ED.stime[m.id];
+      const price = !c ? '<b class="ai-mp na">…</b>' : c.troppo_lungo ? `<b class="ai-mp na">video troppo lungo</b><span>fino a ${m.max} s</span>`
+        : `<b class="ai-mp">${c.eur != null ? eur(c.eur) : `${c.usd} $`}</b><span>${c.crediti.toLocaleString("it-IT")} crediti · ${c.risoluzione}${c.pagati !== c.secondi ? ` · ${c.pagati} s pagati` : ""}</span>`;
+      const tags = (m.id === "kling-omni-edit" ? '<em class="rec">Consigliato</em>' : "") + (m.id === cheap ? '<em class="cheap">Più economico</em>' : "");
+      return `<button class="ai-model${m.id === ED.modello ? " on" : ""}" data-m="${escapeHtml(m.id)}"><div class="ai-mh"><b>${escapeHtml(m.nome)}</b>${tags}</div>
+        <p>${escapeHtml(m.per)}</p><div class="ai-mpr">${price}</div></button>`;
+    }).join("");
+    q(".ed-models").querySelectorAll(".ai-model").forEach((b) => { b.onclick = () => { ED.modello = b.dataset.m; render(); }; });
+    const c = ED.stime[ED.modello];
+    q(".ed-cost").innerHTML = c ? (c.troppo_lungo ? `<b>Questo modello modifica video fino a ${c.max} secondi.</b>`
+      : `<b>${c.secondi} s · ${fmtCost(c)}</b><span>${c.tariffa} $/s × ${c.pagati} s · 211 crediti = 1 $${c.cambio ? ` · cambio BCE ${c.cambio.data}` : ""}</span>`) : "";
+    q(".ed-ok").disabled = !c || c.troppo_lungo || !!GEN.job;
+  };
+  const estimate = async () => {
+    const r = await (await fetch(`${BACKEND}/api/ai/edit/estimate`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: it.id, source: q(".ed-src").value, risoluzione: q(".ed-res").value }) })).json().catch(() => ({}));
+    ED.stime = r.stime || {};
+    render();
+  };
+  q(".ed-src").onchange = estimate; q(".ed-res").onchange = estimate;
+  q(".ed-ok").onclick = async () => {
+    const testo = q(".ed-txt").value.trim();
+    if (!testo) { q(".ed-txt").focus(); return notify("Scrivi cosa cambiare.", "err"); }
+    const c = ED.stime[ED.modello];
+    const m = mods.find((x) => x.id === ED.modello) || {};
+    if (!confirm(`Modifico «${it.nome}» con ${m.nome} (${c.risoluzione}).\n\nCosto stimato: ${fmtCost(c, false)}.\nSono crediti veri del tuo account Comfy. Procedo?`)) return;
+    const r = await (await fetch(`${BACKEND}/api/ai/edit`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: it.id, source: q(".ed-src").value, testo, modello: ED.modello, risoluzione: q(".ed-res").value }) })).json()
+      .catch((e) => ({ ok: false, msg: String(e) }));
+    if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");
+    close();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    watchAIJob(r.job_id, 1);
+  };
+  render();
+  estimate();
+  q(".ed-txt").focus();
+}
+
+async function redoAILeg(it, i) {
+  if (GEN.job) return notify("Aspetta che finisca la generazione in corso.", "err");
+  const t = it.tratte[i];
+  const r0 = await (await fetch(`${BACKEND}/api/ai/estimate`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ durate: [t.durata || it.durata || 5], modello: it.modello || "kling-v3", risoluzione: it.risoluzione }) })).json()
+    .catch(() => ({}));
+  const c = ((r0.stime || {})[it.modello || "kling-v3"] || {}).comfy;
+  if (!c || !c.ok) return notify("Non riesco a stimare il costo.", "err");
+  if (!confirm(`Rigenero la tratta ${String.fromCharCode(65 + i)} → ${String.fromCharCode(66 + i)} di «${it.nome}»; le altre restano come sono.\n\nCosto stimato: ${fmtCost(c, false)}. Procedo?`)) return;
+  const r = await (await fetch(`${BACKEND}/api/ai/transition/redo`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: it.id, tratta: i }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");
+  const video = it.video ? `${it.cartella}/${it.video}` : "";
+  if (GEN.blobs[video]) { URL.revokeObjectURL(GEN.blobs[video]); delete GEN.blobs[video]; }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  watchAIJob(r.job_id, 1);
+}
+
+// what a template does, drawn as motion graphics (no real picture): one per template's "anim"
+const AI_ANIM = {
+  // Drone FPV: seen from the drone, flying low and fast down a street that bends, grazing poles and banners.
+  // Two greys only, drawn on a canvas with its own perspective.
+  fpv: (canvas) => fpvAnim(canvas, { a: "#dcdcdc", b: "#4d4d4d", speed: 75, h: 3.5, sway: 7, swayRate: 1.7, roll: 1.4 }),
+  ...Object.fromEntries(["auto", "pan-right", "pan-left", "pan-up", "pan-down", "zoom-in", "zoom-out"].map((k) => [k, (canvas) => camAnim(canvas, k)])),
+};
+
+// a camera move over a city in two greys: slides, zooms, or from A to B; a tag says which
+function camAnim(canvas, kind) {
+  const A = "#dcdcdc", B = "#4d4d4d", ctx = canvas.getContext("2d"), dpr = window.devicePixelRatio || 1;
+  const T = 3, HOLD = 0.6, t0 = performance.now();
+  let W = 0, H = 0, city = null;
+  const rnd = (i) => { const x = Math.sin(i * 91.7 + 17.3) * 43758.5453; return x - Math.floor(x); };
+  const build = () => {                       // a city three screens wide and two and a half tall
+    const SW = W * 3, SH = H * 2.5, list = [];
+    let x = -W * 0.1, i = 0;
+    while (x < SW + W * 0.1) {
+      const w = W * (0.16 + rnd(i) * 0.2), h = H * (0.55 + rnd(i + 50) * 1.6);
+      list.push({ x, w, h, i });
+      x += w + W * (0.02 + rnd(i + 99) * 0.05); i++;
+    }
+    return { SW, SH, list };
+  };
+  const ease = (p) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
+  const view = (p) => {                       // where the camera looks: centre x, centre y, zoom
+    const { SW, SH } = city, mid = SH - H * 0.55, e = ease(p);
+    const L = (a, b) => a + (b - a) * e;
+    switch (kind) {
+      case "pan-right": return [L(SW * 0.3, SW * 0.7), mid, 1];
+      case "pan-left": return [L(SW * 0.7, SW * 0.3), mid, 1];
+      case "pan-up": return [SW * 0.5, L(SH - H * 0.5, H * 0.75), 1];
+      case "pan-down": return [SW * 0.5, L(H * 0.75, SH - H * 0.5), 1];
+      case "zoom-in": return [SW * 0.5, SH - H * 0.8, L(1, 2.8)];
+      case "zoom-out": return [SW * 0.5, SH - H * 0.8, L(2.8, 1)];
+      default: return [L(SW * 0.38, SW * 0.58), L(mid, SH - H * 0.9), L(1, 1.8)];   // auto: from A to B
+    }
+  };
+  const frame = (now) => {
+    if (!canvas.isConnected) return;
+    requestAnimationFrame(frame);
+    if (!canvas.offsetParent) return;                                         // section hidden: draw nothing
+    if (canvas.clientWidth !== W || canvas.clientHeight !== H) {
+      W = canvas.clientWidth; H = canvas.clientHeight; canvas.width = W * dpr; canvas.height = H * dpr; city = build();
+    }
+    const t = ((now - t0) / 1000) % (T + HOLD);
+    const [cx, cy, z] = view(Math.min(1, t / T));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = A; ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.translate(W / 2, H / 2); ctx.scale(z, z); ctx.translate(-cx, -cy);
+    const { SH, list } = city;
+    for (const b of list) {
+      const top = SH - b.h;
+      ctx.fillStyle = B; ctx.fillRect(b.x, top, b.w, b.h);
+      ctx.fillStyle = A;
+      const ww = W * 0.03, wh = H * 0.045, gx = W * 0.05, gy = H * 0.085;
+      for (let y = top + gy * 0.6; y < SH - gy; y += gy)
+        for (let x = b.x + gx * 0.45; x < b.x + b.w - ww; x += gx) ctx.fillRect(x, y, ww, wh);
+    }
+    ctx.fillStyle = B; ctx.fillRect(-W, SH - H * 0.04, city.SW + 2 * W, H * 0.5);
+    ctx.restore();
+    // what the move is, bottom left
+    const tag = { "pan-right": "→", "pan-left": "←", "pan-up": "↑", "pan-down": "↓", "zoom-in": "+", "zoom-out": "−" }[kind] || "A → B";
+    ctx.font = "600 12px 'Space Grotesk', sans-serif";
+    const tw = ctx.measureText(tag).width + 14;
+    ctx.fillStyle = B; ctx.beginPath(); ctx.roundRect(8, H - 28, tw, 20, 6); ctx.fill();
+    ctx.strokeStyle = A; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = A; ctx.fillText(tag, 15, H - 14);
+  };
+  requestAnimationFrame(frame);
+}
+
+
+function fpvAnim(canvas, opt) {
+  const A = opt.a, B = opt.b, ctx = canvas.getContext("2d"), dpr = window.devicePixelRatio || 1;
+  const NEAR = 1.2, FAR = 420, HW = 11, SEG = 34, t0 = performance.now();
+  const pathX = (z) => 22 * Math.sin(z / 95) + 9 * Math.sin(z / 41);           // the street bends
+  const rnd = (i) => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  let W = 0, H = 0;
+  const toCam = (p, c) => { const dx = p[0] - c.x, dy = p[1] - c.y, dz = p[2] - c.z; return [dx * c.cy - dz * c.sy, dy, dx * c.sy + dz * c.cy]; };
+  const clip = (poly) => {                                                    // the part in front of the camera
+    const o = [];
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i], q = poly[(i + 1) % poly.length], a = p[2] >= NEAR, b = q[2] >= NEAR;
+      if (a) o.push(p);
+      if (a !== b) { const k = (NEAR - p[2]) / (q[2] - p[2]); o.push([p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k, NEAR]); }
+    }
+    return o;
+  };
+  const draw = (poly, c, fill, line) => {
+    const F = W * 0.62, cp = clip(poly.map((p) => toCam(p, c)));
+    if (cp.length < 3) return;
+    ctx.beginPath();
+    cp.forEach((p, i) => { const x = W / 2 + F * p[0] / p[2], y = H * 0.48 - F * p[1] / p[2]; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (line) { ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.stroke(); }
+  };
+  const frame = (now) => {
+    if (!canvas.isConnected) return;                                          // template changed: stop
+    requestAnimationFrame(frame);
+    if (!canvas.offsetParent) return;                                         // section hidden: draw nothing
+    if (canvas.clientWidth !== W || canvas.clientHeight !== H) {
+      W = canvas.clientWidth; H = canvas.clientHeight;
+      canvas.width = W * dpr; canvas.height = H * dpr;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const t = (now - t0) / 1000, z = t * opt.speed, ah = 26;
+    const cx = pathX(z) + opt.sway * Math.sin(t * opt.swayRate);              // the drone swerves to graze the poles
+    const tx = pathX(z + ah) + opt.sway * Math.sin((t + ah / opt.speed) * opt.swayRate);
+    const yaw = Math.atan2(tx - cx, ah), c = { x: cx, y: opt.h, z, sy: Math.sin(yaw), cy: Math.cos(yaw) };
+    ctx.fillStyle = A; ctx.fillRect(0, 0, W, H);
+    ctx.translate(W / 2, H * 0.48); ctx.rotate(-yaw * opt.roll); ctx.translate(-W / 2, -H * 0.48);   // it banks into the bend
+    const z0 = Math.floor(z / 8) * 8;
+    for (let q = z0 + FAR; q >= z0; q -= 8) {
+      const xa = pathX(q), xc = pathX(q + 8.6);
+      draw([[xa - 200, 0, q], [xc - 200, 0, q + 8.6], [xc + 200, 0, q + 8.6], [xa + 200, 0, q]], c, B);
+    }
+    for (let q = Math.floor(z / 16) * 16 + FAR; q >= z - 16; q -= 16) {         // centre dashes and kerbs
+      const xa = pathX(q), xb = pathX(q + 7), xe = pathX(q + 16);
+      draw([[xa - 0.35, 0, q], [xb - 0.35, 0, q + 7], [xb + 0.35, 0, q + 7], [xa + 0.35, 0, q]], c, A);
+      for (const sd of [-1, 1]) {
+        const k = sd * (HW - 1.2);
+        draw([[xa + k - 0.2, 0, q], [xe + k - 0.2, 0, q + 16], [xe + k + 0.2, 0, q + 16], [xa + k + 0.2, 0, q]], c, A);
+      }
+    }
+    const items = [], i0 = Math.floor(z / SEG) - 1, i1 = Math.floor((z + FAR) / SEG);
+    for (let i = i1; i >= i0; i--) {
+      for (const s of [-1, 1]) {                                              // buildings, with gaps
+        const r = rnd(i * 2 + (s > 0 ? 1 : 0));
+        if (r < 0.1) continue;
+        const za = i * SEG + 2, zb = (i + 1) * SEG - 2, h = 22 + r * 46, d = 40, xa = pathX(za) + s * HW, xb = pathX(zb) + s * HW;
+        items.push({ z: za, f: () => {
+          draw([[xa, 0, za], [xa + s * d, 0, za], [xa + s * d, h, za], [xa, h, za]], c, B, A);
+          draw([[xa, 0, za], [xb, 0, zb], [xb, h, zb], [xa, h, za]], c, B, A);
+          if (za - z < 260) {
+            for (let wz = za + 3; wz < zb - 3; wz += 6) {
+              const k0 = (wz - za) / (zb - za), k1 = (wz + 2.6 - za) / (zb - za), x0 = xa + (xb - xa) * k0, x1 = xa + (xb - xa) * k1;
+              for (let wy = 4; wy < h - 3; wy += 6) draw([[x0, wy, wz], [x1, wy, wz + 2.6], [x1, wy + 3, wz + 2.6], [x0, wy + 3, wz]], c, A);
+            }
+          }
+        } });
+      }
+      const pz = i * SEG + 17, ps = i % 2 ? 1 : -1, px = pathX(pz) + ps * (HW - 2.2);   // street lamps
+      items.push({ z: pz, f: () => {
+        draw([[px - 0.25, 0, pz], [px + 0.25, 0, pz], [px + 0.25, 13, pz], [px - 0.25, 13, pz]], c, B, A);
+        draw([[px, 12.6, pz], [px - ps * 4.5, 12.6, pz], [px - ps * 4.5, 13.3, pz], [px, 13.3, pz]], c, B, A);
+      } });
+      if (i % 4 === 0) {                                                      // banners just above the drone
+        const bz = i * SEG + 6, bx = pathX(bz);
+        items.push({ z: bz, f: () => draw([[bx - HW, opt.h + 3, bz], [bx + HW, opt.h + 3, bz], [bx + HW, opt.h + 5.5, bz], [bx - HW, opt.h + 5.5, bz]], c, B, A) });
+      }
+    }
+    items.sort((p, q) => q.z - p.z).forEach((x) => x.f());
+  };
+  requestAnimationFrame(frame);
+}
+
+// a short line under the tabs that says what the open section does
+const AI_DESC = {
+  img: "Crea un'immagine: parti da una tua immagine (o anche da nessuna), scrivi cosa vuoi e aggiungi tutte le reference che ti servono. Il risultato è un'immagine.",
+  amb: "Metti in un altro posto una persona che parla in un video: è lì dal primo fotogramma, oppure ci arriva poco alla volta ed è lì alla fine della clip. Voce e labiale restano quelli originali.",
+  trans: "Un video che va da un fotogramma all'altro: A, B e tutte le tappe che vuoi in mezzo, ognuna con la sua durata. Serve anche per far entrare qualcuno in un posto durante il video.",
+};
+function showAIDesc() { $("ai-desc").textContent = AI_DESC[GEN.tab] || ""; }
+
+function wireAI() {
+  $("v-ai").onclick = () => showView("ai");
+  $("ai-tpl").onchange = () => { applyAITemplate(); renderAIFrames(); updateAICost(); };
+  $("ai-res").onchange = updateAICost;
+  $("ai-generate").onclick = generateAI;
+  wireAmb();
+  wireImg();
+  showAIDesc();
+  $("ai-prov-btn").onclick = (e) => {
+    e.stopPropagation();
+    if ($("ai-prov-menu").hidden) openAIProviderMenu(); else $("ai-prov-menu").hidden = true;
+  };
+  $("ai-prov-menu").onclick = (e) => e.stopPropagation();
+  document.addEventListener("click", () => { $("ai-prov-menu").hidden = true; });
+  $("ai-tabs").querySelectorAll(".ai-tab").forEach((b) => {
+    b.onclick = () => {
+      $("ai-tabs").querySelectorAll(".ai-tab").forEach((x) => x.classList.toggle("on", x === b));
+      for (const [k, id] of [["trans", "ai-trans"], ["amb", "ai-amb"], ["img", "ai-img"]]) $(id).hidden = b.dataset.tab !== k;
+      GEN.tab = b.dataset.tab;
+      loadAIResults();
+      showAIDesc();
+    };
+  });
+}
+
+
+// ---- AI · Ambientazione personaggio: someone talking, put in another place (from the start, or arriving by the end) ----
+
+const AMB = { src: null, info: null, refs: [], thumbs: {}, rif: "esatto", arrivo: "inizio", modello: "", stime: {}, playing: false };
+const isVideoPath = (p) => /\.(mp4|mov|m4v|mkv|webm)$/i.test(p || "");
+const thumbOf = async (p) => {
+  try { const d = await (await fetch(`${BACKEND}/api/ai/thumb?path=${encodeURIComponent(p)}&h=480`)).json(); return d.ok ? d.src : ""; }
+  catch (_) { return ""; }
+};
+const ambModels = () => ((GEN.stato.modelli || {}).ambientazione_video) || [];
+// Bria puts your image exactly behind; Beeble when the place is only a cue
+const ambRec = () => (AMB.rif === "esatto" ? "bria-bg" : "beeble-switchx");
+
+function renderAmb() {
+  if (!$("am-src")) return;
+  $("am-refmode").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.r === AMB.rif));
+  $("am-arrivo").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.a === AMB.arrivo));
+  $("am-src").innerHTML = AMB.src
+    ? `<video id="am-vid" playsinline></video><button class="am-play" id="am-play" title="Play">▶</button><button class="ai-fx" title="Togli">✕</button>
+       <span class="ai-fn">${escapeHtml(AMB.src.split("/").pop())}${AMB.info && AMB.info.durata ? ` · ${String(AMB.info.durata).replace(".", ",")} s` : ""}</span>`
+    : '<b>＋</b><span>Trascina il video della persona</span>';
+  $("am-src").classList.toggle("has", !!AMB.src);
+  const vid = $("am-vid");
+  if (vid) loadAmbVideo(vid);
+  const sx = $("am-src").querySelector(".ai-fx");
+  if (sx) sx.onclick = (e) => { e.stopPropagation(); setAmbSrc(null); };
+  const play = $("am-play");
+  if (play) play.onclick = (e) => { e.stopPropagation(); toggleAmbPlay(); };
+  // the place: one image used as it is, or as many as you like as a cue
+  const many = AMB.rif === "spunto";
+  $("am-ref").hidden = many;
+  $("am-refs").hidden = !many;
+  $("am-nref").textContent = many && AMB.refs.length ? `(${AMB.refs.length})` : "";
+  const first = AMB.refs[0];
+  $("am-ref").innerHTML = first
+    ? `<img alt="" src="${AMB.thumbs[first] || ""}"><button class="ai-fx" title="Togli">✕</button><span class="ai-fn">${escapeHtml(first.split("/").pop())}</span>`
+    : "<b>＋</b><span>L'immagine del posto</span>";
+  $("am-ref").classList.toggle("has", !!first);
+  const rx = $("am-ref").querySelector(".ai-fx");
+  if (rx) rx.onclick = (e) => { e.stopPropagation(); AMB.refs.shift(); renderAmb(); };
+  $("am-refs").innerHTML = AMB.refs.map((p, i) => `<div class="im-ref"><img alt="" src="${AMB.thumbs[p] || ""}"><button class="ai-fx" data-i="${i}" title="Togli">✕</button></div>`).join("")
+    + '<div class="drop im-ref im-add" id="am-ref-add"><b>＋</b><span>Immagine</span></div>';
+  $("am-refs").querySelectorAll(".ai-fx").forEach((b) => { b.onclick = () => { AMB.refs.splice(+b.dataset.i, 1); renderAmb(); }; });
+  $("am-ref-add").onclick = async () => { const f = window.api ? await window.api.selectImages() : []; if (f && f.length) dropAmb(f, "am-ref-add"); };
+  if (!ambModels().some((x) => x.id === AMB.modello)) AMB.modello = ambRec();
+  updateAmbCost();
+}
+
+async function loadAmbVideo(vid) {
+  try {
+    const key = `local:${AMB.src}`;
+    if (!GEN.blobs[key]) {
+      const r = await fetch(`${BACKEND}/api/ai/local?path=${encodeURIComponent(AMB.src)}`);
+      if (!r.ok) throw new Error();
+      GEN.blobs[key] = URL.createObjectURL(await r.blob());
+    }
+    vid.src = GEN.blobs[key];
+    vid.onended = () => stopAmbPlay();
+  } catch (_) { notify("Non riesco a mostrare il video.", "err"); }
+}
+
+async function setAmbSrc(p) {
+  stopAmbPlay();
+  AMB.src = p; AMB.info = null;
+  if (p) { try { AMB.info = await (await fetch(`${BACKEND}/api/ai/media-info?path=${encodeURIComponent(p)}`)).json(); } catch (_) {} }
+  renderAmb();
+}
+
+// files dropped in the section: the video on the left, the images on the right
+async function dropAmb(paths, zone) {
+  const video = paths.find((p) => isVideoPath(p));
+  const imgs = paths.filter((p) => /\.(png|jpe?g|heic|webp)$/i.test(p));
+  if (!video && !imgs.length) return notify("Servono un video e immagini del posto.", "err");
+  if (video && zone !== "am-ref" && zone !== "am-ref-add") await setAmbSrc(video);
+  if (imgs.length) {
+    if (AMB.rif === "esatto") AMB.refs = [imgs[0]];
+    else imgs.forEach((p) => { if (!AMB.refs.includes(p)) AMB.refs.push(p); });
+    for (const p of AMB.rif === "esatto" ? [imgs[0]] : imgs) if (!AMB.thumbs[p]) AMB.thumbs[p] = await thumbOf(p);
+  }
+  renderAmb();
+}
+
+// ▶ on the video at the left: watch it before using it
+function toggleAmbPlay() {
+  const vid = $("am-vid");
+  if (!vid) return;
+  if (AMB.playing) stopAmbPlay();
+  else { AMB.playing = true; vid.play().catch(() => {}); $("am-play").textContent = "❚❚"; }
+}
+function stopAmbPlay() {
+  AMB.playing = false;
+  const vid = $("am-vid");
+  if (vid) vid.pause();
+  if ($("am-play")) $("am-play").textContent = "▶";
+}
+
+async function updateAmbCost() {
+  const len = (AMB.info && AMB.info.durata) || 0;
+  const body = { durata: len || 5, risoluzione: $("am-res").value, fps: (AMB.info && AMB.info.fps) || 24, riferimento: AMB.rif };
+  let r = {};
+  try { r = await (await fetch(`${BACKEND}/api/ai/scene/estimate`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body) })).json(); } catch (_) {}
+  AMB.stime = r.stime || {};
+  const ms = ambModels();
+  const priced = ms.map((m) => ({ m, c: AMB.stime[m.id] })).filter((x) => x.c && x.c.ok && x.c.eur != null);
+  const cheap = priced.length ? priced.reduce((a, b) => (b.c.eur < a.c.eur ? b : a)).m.id : "";
+  $("am-models").innerHTML = ms.map((m) => {
+    const c = AMB.stime[m.id];
+    const price = !c ? '<b class="ai-mp na">…</b>' : !c.ok ? `<b class="ai-mp na">non adatto</b><span>${escapeHtml(c.msg || "")}</span>`
+      : `<b class="ai-mp">${c.eur != null ? eur(c.eur) : `${c.usd} $`}</b><span>${c.crediti.toLocaleString("it-IT")} crediti${len ? "" : " · su 5 s"}</span>`;
+    const tags = (m.id === ambRec() ? '<em class="rec">Consigliato</em>' : "") + (m.id === cheap ? '<em class="cheap">Più economico</em>' : "")
+      + (m.labiale ? '<em class="lip">Labiale intatto</em>' : '<em class="warn">Labiale a rischio</em>');
+    return `<button class="ai-model${m.id === AMB.modello ? " on" : ""}" data-m="${escapeHtml(m.id)}"><div class="ai-mh"><b>${escapeHtml(m.nome)}</b>${tags}</div>
+      <p>${escapeHtml(m.per)}</p><div class="ai-mpr">${price}</div></button>`;
+  }).join("");
+  $("am-models").querySelectorAll(".ai-model").forEach((b) => { b.onclick = () => { AMB.modello = b.dataset.m; renderAmb(); }; });
+  const c = AMB.stime[AMB.modello];
+  const when = AMB.arrivo === "fine" ? "Parte nel suo posto e alla fine della clip è nel posto nuovo" : "Nel posto nuovo dal primo fotogramma";
+  $("am-cost").innerHTML = !c ? "" : !c.ok ? `<b>${escapeHtml(c.msg || "")}</b>`
+    : `<b>${len ? `Video di ${String(len).replace(".", ",")} s` : "Metti il video"} · ${fmtCost(c)}</b><span>${when}, voce originale · ${(c.parti || []).join(" + ")} · 211 crediti = 1 $${c.cambio ? ` · cambio BCE ${c.cambio.data}` : ""}</span>`;
+  syncAmb();
+}
+
+function syncAmb() {
+  if (!$("am-generate")) return;
+  const c = AMB.stime[AMB.modello];
+  $("am-generate").disabled = !AMB.src || !AMB.refs.length || !c || !c.ok || !!GEN.job || !GEN.stato.chiave;
+}
+
+async function generateAmb() {
+  const c = AMB.stime[AMB.modello];
+  const m = ambModels().find((x) => x.id === AMB.modello) || {};
+  if (!c || !c.ok) return;
+  const how = AMB.rif === "esatto" ? "con la tua immagine come sfondo esatto" : `con un posto ispirato a ${AMB.refs.length} ${AMB.refs.length === 1 ? "immagine" : "immagini"}`;
+  const when = AMB.arrivo === "fine" ? "ci arriva alla fine della clip" : "è nel posto dall'inizio";
+  if (!confirm(`Ambientazione con ${m.nome}, ${how}; la persona ${when}.\n\nCosto stimato: ${fmtCost(c, false)}.\nSono crediti veri del tuo account Comfy. Procedo?`)) return;
+  const body = { soggetto: AMB.src, contesti: AMB.refs, testo: $("am-text").value.trim(), modello: AMB.modello, risoluzione: $("am-res").value,
+                 riferimento: AMB.rif, arrivo: AMB.arrivo, formato: $("am-fmt").value, nome: $("am-name").value.trim(),
+                 durata: (AMB.info && AMB.info.durata) || 0, fps: (AMB.info && AMB.info.fps) || 24 };
+  const r = await (await fetch(`${BACKEND}/api/ai/scene`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");
+  watchAIJob(r.job_id, AMB.rif === "spunto" ? 2 : 1);
+}
+
+function wireAmb() {
+  $("am-refmode").querySelectorAll("button").forEach((b) => {
+    b.onclick = () => {
+      AMB.rif = b.dataset.r;
+      if (AMB.rif === "esatto") AMB.refs = AMB.refs.slice(0, 1);       // the exact background is one image
+      AMB.modello = ambRec();
+      renderAmb();
+    };
+  });
+  $("am-arrivo").querySelectorAll("button").forEach((b) => { b.onclick = () => { AMB.arrivo = b.dataset.a; renderAmb(); }; });
+  $("am-src").onclick = async (e) => {
+    if (e.target.closest("button, video")) return;
+    const f = window.api ? await window.api.selectVideo() : "";
+    const p = Array.isArray(f) ? f[0] : f;
+    if (p) dropAmb([p], "am-src");
+  };
+  $("am-ref").onclick = async (e) => {
+    if (e.target.closest("button")) return;
+    const f = window.api ? await window.api.selectImages() : [];
+    if (f && f.length) dropAmb(f, "am-ref");
+  };
+  $("am-res").onchange = updateAmbCost;
+  $("am-fmt").onchange = updateAmbCost;
+  $("am-generate").onclick = generateAmb;
+}
+
+// ---- AI · Immagini da prompt: a picture, the prompt, as many references as you like ----
+
+const IMG = { main: null, mainThumb: "", refs: [], thumbs: {}, modello: "nano-banana-pro", stime: {} };
+
+function renderImg() {
+  if (!$("im-src")) return;
+  $("im-src").innerHTML = IMG.main
+    ? `<img alt="" src="${IMG.mainThumb}"><button class="ai-fx" title="Togli">✕</button><span class="ai-fn">${escapeHtml(IMG.main.split("/").pop())}</span>`
+    : '<b>＋</b><span>Trascina la foto di partenza (facoltativa)</span>';
+  $("im-src").classList.toggle("has", !!IMG.main);
+  const x = $("im-src").querySelector(".ai-fx");
+  if (x) x.onclick = (e) => { e.stopPropagation(); IMG.main = null; renderImg(); };
+  $("im-nref").textContent = IMG.refs.length ? `(${IMG.refs.length})` : "";
+  $("im-refs").innerHTML = IMG.refs.map((p, i) => `<div class="im-ref"><img alt="" src="${IMG.thumbs[p] || ""}"><button class="ai-fx" data-i="${i}" title="Togli">✕</button></div>`).join("")
+    + '<div class="drop im-ref im-add" id="im-ref-add"><b>＋</b><span>Reference</span></div>';
+  $("im-refs").querySelectorAll(".ai-fx").forEach((b) => { b.onclick = () => { IMG.refs.splice(+b.dataset.i, 1); renderImg(); }; });
+  $("im-ref-add").onclick = async () => { const f = window.api ? await window.api.selectImages() : []; if (f && f.length) dropImg(f, "im-ref-add"); };
+  updateImgCost();
+}
+
+async function dropImg(paths, zone) {
+  const imgs = paths.filter((p) => /\.(png|jpe?g|heic|webp)$/i.test(p));
+  if (!imgs.length) return notify("Servono immagini: PNG, JPG, HEIC o WebP.", "err");
+  let rest = imgs;
+  if (zone === "im-src" || (!IMG.main && zone !== "im-ref-add")) {
+    IMG.main = imgs[0]; IMG.mainThumb = await thumbOf(imgs[0]); rest = imgs.slice(1);
+  }
+  for (const p of rest) { if (!IMG.refs.includes(p)) { IMG.refs.push(p); IMG.thumbs[p] = await thumbOf(p); } }
+  renderImg();
+}
+
+async function updateImgCost() {
+  let r = {};
+  try { r = await (await fetch(`${BACKEND}/api/ai/image/estimate`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ formato: $("im-fmt").value || "9:16" }) })).json(); } catch (_) {}
+  IMG.stime = r.stime || {};
+  const ms = (GEN.stato.modelli || {}).immagini || [];
+  const priced = ms.map((m) => IMG.stime[m.id]).filter((c) => c && c.ok && c.eur != null);
+  const cheap = priced.length ? priced.reduce((a, b) => (b.eur < a.eur ? b : a)).modello : "";
+  $("im-models").innerHTML = ms.map((m) => {
+    const c = IMG.stime[m.id];
+    const price = !c ? '<b class="ai-mp na">…</b>' : !c.ok ? `<b class="ai-mp na">formato non disponibile</b><span>${escapeHtml(c.msg)}</span>`
+      : `<b class="ai-mp">${c.eur != null ? eur(c.eur) : `${c.usd} $`}</b><span>${c.crediti.toLocaleString("it-IT")} crediti a immagine</span>`;
+    const tags = (m.id === "nano-banana-pro" ? '<em class="rec">Consigliato</em>' : "") + (m.id === cheap ? '<em class="cheap">Più economico</em>' : "");
+    return `<button class="ai-model${m.id === IMG.modello ? " on" : ""}" data-m="${escapeHtml(m.id)}"><div class="ai-mh"><b>${escapeHtml(m.nome)}</b>${tags}</div>
+      <p>${escapeHtml(m.per)}</p><div class="ai-mpr">${price}</div></button>`;
+  }).join("");
+  $("im-models").querySelectorAll(".ai-model").forEach((b) => { b.onclick = () => { IMG.modello = b.dataset.m; updateImgCost(); }; });
+  const c = IMG.stime[IMG.modello];
+  $("im-cost").innerHTML = !c ? "" : !c.ok ? `<b>${escapeHtml(c.msg)}</b>`
+    : `<b>1 immagine · ${$("im-fmt").value} · ${fmtCost(c)}</b><span>${IMG.refs.length + (IMG.main ? 1 : 0)} immagini date al modello · 211 crediti = 1 $${c.cambio ? ` · cambio BCE ${c.cambio.data}` : ""}</span>`;
+  syncImg();
+}
+
+function syncImg() {
+  if (!$("im-generate")) return;
+  const c = IMG.stime[IMG.modello];
+  $("im-generate").disabled = !$("im-text").value.trim() || !c || !c.ok || !!GEN.job || !GEN.stato.chiave;
+}
+
+async function generateImg() {
+  const c = IMG.stime[IMG.modello];
+  const m = ((GEN.stato.modelli || {}).immagini || []).find((x) => x.id === IMG.modello) || {};
+  if (!c || !c.ok) return;
+  if (!confirm(`Genero un'immagine ${$("im-fmt").value} con ${m.nome}.\n\nCosto stimato: ${fmtCost(c, false)}.\nSono crediti veri del tuo account Comfy. Procedo?`)) return;
+  const r = await (await fetch(`${BACKEND}/api/ai/image`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ main: IMG.main || "", refs: IMG.refs, testo: $("im-text").value.trim(), modello: IMG.modello,
+                           formato: $("im-fmt").value, nome: $("im-name").value.trim() }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");
+  watchAIJob(r.job_id, 1);
+}
+
+function wireImg() {
+  $("im-src").onclick = async (e) => {
+    if (e.target.closest("button")) return;
+    const f = window.api ? await window.api.selectImages() : [];
+    if (f && f.length) dropImg(f, "im-src");
+  };
+  $("im-text").oninput = syncImg;
+  $("im-fmt").onchange = updateImgCost;
+  $("im-generate").onclick = generateImg;
+}
+
+// a picture result in its card
+async function showAIImage(box, path) {
+  try {
+    if (!GEN.blobs[path]) {
+      const r = await fetch(`${BACKEND}/api/ai/file?path=${encodeURIComponent(path)}`);
+      if (!r.ok) throw new Error("file non trovato");
+      GEN.blobs[path] = URL.createObjectURL(await r.blob());
+    }
+    box.innerHTML = `<img class="ai-pimg" src="${GEN.blobs[path]}" alt="">`;
+  } catch (e) { box.innerHTML = `<span class="ai-none">${escapeHtml(e.message)}</span>`; }
 }

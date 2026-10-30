@@ -426,6 +426,7 @@ MODS_DIR = registry.app_data_dir() / "modifiche"
 BACKUP_DIR = registry.app_data_dir() / "backup"
 ATTACH_DIR = registry.app_data_dir() / "allegati"
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif")
+VIDEO_EXT = (".mp4", ".mov", ".m4v", ".mkv", ".webm")
 
 MOD_PROMPT = """Devi applicare delle MODIFICHE a un reel che hai già montato, direttamente sul progetto CapCut
 esistente (in place: niente copie v2). Lavori in automatico dall'app CapWizard: NON fare domande.
@@ -479,8 +480,39 @@ def image_thumb(src: Path, size: int = 240) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(out.read_bytes()).decode()
 
 
+def attachment_thumb(src: Path, size: int = 240) -> str:
+    """The thumbnail of an attachment: the image itself, or a frame of a video."""
+    if src.suffix.lower() not in VIDEO_EXT:
+        return image_thumb(src, size)
+    ATTACH_DIR.mkdir(parents=True, exist_ok=True)
+    import hashlib
+    frame = ATTACH_DIR / f"{src.stem}.{hashlib.sha1(str(src).encode()).hexdigest()[:8]}.frame.jpg"
+    if not frame.exists():
+        subprocess.run([vault.ffmpeg() or "ffmpeg", "-v", "error", "-y", "-ss", "0.5", "-i", str(src), "-frames:v", "1", str(frame)],
+                       capture_output=True, timeout=60)
+    return image_thumb(frame, size) if frame.exists() else ""
+
+
+def attachments_text(paths: list[str]) -> str:
+    """What Claude must do with the screenshots and videos attached to a change request."""
+    imgs = [p for p in paths if not p.lower().endswith(VIDEO_EXT)]
+    vids = [p for p in paths if p.lower().endswith(VIDEO_EXT)]
+    out = []
+    if imgs:
+        out.append("Screenshot allegati (di solito la chat del cliente): guardali TUTTI con Read, contengono le modifiche:\n"
+                   + "\n".join(f"- {p}" for p in imgs))
+    if vids:
+        ff = vault.ffmpeg() or "ffmpeg"
+        out.append("Video allegati (una registrazione del cliente, un vocale filmato, un esempio da imitare): guardali TUTTI. "
+                   f"Fotogrammi ogni 0,5 s in un mosaico (`{ff} -i <video> -vf fps=2,scale=270:-1,tile=8x4 <cartella di lavoro>/allegato_<n>_%d.jpg`) "
+                   "da leggere con Read; se si parla, trascrivi l'audio con Whisper. Usa quello che vedi e senti come richiesta di modifica:\n"
+                   + "\n".join(f"- {p}" for p in vids))
+    return "\n\n".join(out)
+
+
 def add_attachment(path: str | None = None, data_url: str | None = None) -> dict | None:
-    """Keep a copy of a screenshot (a file, or one pasted as a data URL) for a change request."""
+    """Keep a copy of a screenshot (a file, or one pasted as a data URL) for a change request. A video stays where it
+    is (it can be big): Claude reads it from its own folder."""
     ATTACH_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%m%d-%H%M%S")
     if data_url:
@@ -491,6 +523,8 @@ def add_attachment(path: str | None = None, data_url: str | None = None) -> dict
     elif path and Path(path).is_file() and path.lower().endswith(IMAGE_EXT):
         dst = ATTACH_DIR / f"{stamp}_{Path(path).name}"
         shutil.copy2(path, dst)
+    elif path and Path(path).is_file() and path.lower().endswith(VIDEO_EXT):
+        return {"path": str(Path(path).resolve()), "thumb": attachment_thumb(Path(path)), "video": True, "nome": Path(path).name}
     else:
         return None
     return {"path": str(dst), "thumb": image_thumb(dst)}
@@ -554,14 +588,14 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
         template=settings.get("template") or "—", clips=settings.get("input_path") or "—",
         work=f"`{old_work}`" if old_work else "non disponibile", summary=summary, history=history,
         text=text or "(vedi gli screenshot)",
-        images=("Screenshot allegati (di solito la chat del cliente): guardali TUTTI con Read, contengono le modifiche:\n"
-                + "\n".join(f"- {p}" for p in images)) if images else "",
+        images=attachments_text(images),
         skill=EDITOR_SKILL, skill_md=skill_md,
         lesson=LESSON.format(profile=profile, day=time.strftime("%d/%m/%Y")) if profile
         else "Non c'è un profilo cliente: scrivi la lezione solo nel risultato.",
         result=result,
     )
     dirs = {str(folder), str(CAPCUT_PROJECTS_DIR), str(skill_md.parent), str(work), str(backup), str(ATTACH_DIR)}
+    dirs |= {str(Path(p).parent) for p in images if p.lower().endswith(VIDEO_EXT)}     # attached videos stay in their folder
     for d in (old_work, profile.parent if profile else None, settings.get("input_path")):
         if d:
             dirs.add(str(d))
@@ -791,9 +825,9 @@ def run_vault_modify(job, project: dict, client: dict, text: str, images: list[s
         name=project["name"], folder=folder, backup=backup, cliente=f"{client['nome']} ({client['agenzia']})", vault=vault.VAULT,
         note=client["path"], summary=summary, staging=settings.get("staging") or "non disponibile", history=history,
         text=text or "(vedi gli screenshot)", day=time.strftime("%d/%m"), result=result,
-        images=("Screenshot allegati (di solito la chat del cliente): guardali TUTTI con Read, contengono le modifiche:\n"
-                + "\n".join(f"- {p}" for p in images)) if images else "")
+        images=attachments_text(images))
     dirs = {str(folder), str(CAPCUT_PROJECTS_DIR), str(work), str(backup), str(ATTACH_DIR), str(vault.VAULT)}
+    dirs |= {str(Path(p).parent) for p in images if p.lower().endswith(VIDEO_EXT)}
     if settings.get("staging"):
         dirs.add(str(Path(settings["staging"]).parent))
     for d in (settings.get("input_path"), settings.get("broll_path")):
@@ -819,7 +853,7 @@ def run_vault_modify(job, project: dict, client: dict, text: str, images: list[s
     try:
         vault.video_note(project["name"], client["id"], client.get("stile", ""), line=
                          f"- **{time.strftime('%d/%m')} · modifica:** {text or '(da screenshot)'}"
-                         + (f" _({len(images)} screenshot)_" if images else "") + f"\n  → {res.get('riassunto', '').strip()}\n")
+                         + (f" _({len(images)} allegati)_" if images else "") + f"\n  → {res.get('riassunto', '').strip()}\n")
         job.log("📒 Obsidian aggiornato (storico del video + lezioni del cliente).")
     except Exception as e:  # noqa: BLE001
         job.log(f"⚠ storico Obsidian non aggiornato: {e}")

@@ -1,0 +1,92 @@
+{
+  "transizioni": [
+    {
+      "id": "automatico",
+      "nome": "Automatico",
+      "descrizione": "L'AI sceglie il movimento più naturale per andare da un fotogramma all'altro.",
+      "prompt": "Smooth natural transition from the first frame to the last frame, with the camera movement that fits best. One single continuous shot, no cuts, no morphing, realistic, stable, no text, no captions.",
+      "durata": 5,
+      "risoluzione": "1080p",
+      "audio": false,
+      "modello": "kling-v3",
+      "anim": "auto"
+    },
+    {
+      "id": "scorrimento-destra",
+      "nome": "Scorrimento destra",
+      "descrizione": "La camera scorre di lato verso destra.",
+      "prompt": "The camera slides smoothly sideways to the right (truck right) from the first frame to the last frame, constant speed. One single continuous shot, no cuts, no morphing, realistic, stable, no text, no captions.",
+      "durata": 5,
+      "risoluzione": "1080p",
+      "audio": false,
+      "modello": "kling-v3",
+      "anim": "pan-right"
+    },
+    {
+      "id": "scorrimento-sinistra",
+      "nome": "Scorrimento sinistra",
+      "descrizione": "La camera scorre di lato verso sinistra.",
+      "prompt": "The camera slides smoothly sideways to the left (truck left) from the first frame to the last frame, constant speed. One single continuous shot, no cuts, no morphing, realistic, stable, no text, no captions.",
+      "durata": 5,
+      "risoluzione": "1080p",
+      "audio": false,
+      "modello": "kling-v3",
+      "anim": "pan-left"
+    },
+    {
+      "id": "scorrimento-alto",
+      "nome": "Scorrimento alto",
+      "descrizione": "La camera sale, come una gru verso l'alto.",
+      "prompt": "The camera rises smoothly upwards (crane up) from the first frame to the last frame, constant speed. One single continuous shot, no cuts, no morphing, realistic, stable, no text, no captions.",
+      "durata": 5,
+      "risoluzione": "1080p",
+      "audio": false,
+      "modello": "kling-v3",
+      "anim": "pan-up"
+    },
+    {
+      "id": "scorrimento-basso",
+      "nome": "Scorrimento basso",
+      "descrizione": "La camera scende, come una gru verso il basso.",
+      "prompt": "The camera descends smoothly downwards (crane down) from the first frame to the last frame, constant speed. One single continuous shot, no cuts, no morphing, realistic, stable, no text, no captions.",
+      "durata": 5,
+      "risoluzione": "1080p",
+      "audio": false,
+      "modello": "kling-v3",
+      "anim": "pan-down"
+    },
+    {
+      "id": "zoom-in",
+      "nome": "Zoom In",
+      "descrizione": "La camera avanza verso il soggetto.",
+      "prompt": "The camera pushes in smoothly towards the subject (dolly in) from the first frame to the last frame. One single continuous shot, no cuts, no morphing, realistic, stable, no text, no captions.",
+      "durata": 5,
+      "risoluzione": "1080p",
+      "audio": false,
+      "modello": "kling-v3",
+      "anim": "zoom-in"
+    },
+    {
+      "id": "zoom-out",
+      "nome": "Zoom Out",
+      "descrizione": "La camera si allontana e allarga l'inquadratura.",
+      "prompt": "The camera pulls back smoothly (dolly out), revealing more of the scene, from the first frame to the last frame. One single continuous shot, no cuts, no morphing, realistic, stable, no text, no captions.",
+      "durata": 5,
+      "risoluzione": "1080p",
+      "audio": false,
+      "modello": "kling-v3",
+      "anim": "zoom-out"
+    },
+    {
+      "id": "drone-fpv",
+      "nome": "Drone FPV",
+      "descrizione": "Volo continuo da drone FPV da un fotogramma all'altro, anche da fuori a dentro casa.",
+      "prompt": "Continuous FPV drone flight, smooth forward dolly, one single uninterrupted shot, the camera flies from the first frame to the last frame, gliding through the open window into the interior when needed, stable horizon, realistic architecture, no cuts, no morphing, no people, no text, no captions.",
+      "durata": 5,
+      "risoluzione": "1080p",
+      "audio": false,
+      "modello": "kling-v3",
+      "anim": "fpv"
+    }
+  ]
+}

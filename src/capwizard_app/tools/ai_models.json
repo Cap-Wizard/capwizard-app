@@ -1,0 +1,331 @@
+{
+  "_fonti": {
+    "comfy": "tariffe in dollari al secondo lette dai price_badge dei nodi partner di ComfyUI 0.41.3 (30/10/2026); 211 crediti = 1 $ (support.comfy.org)",
+    "magnific": "magnific.com/ai/kling, crediti al secondo a listino (30/10/2026); piano Premium 16 €/mese per 240.000 crediti l'anno, IVA esclusa (magnific.com/pricing)",
+    "higgsfield": "circa 7 crediti per 5 s a 720p e 8 a 1080p (guide di terzi, la pagina ufficiale non lo dice); piano Starter 15 $/mese per 200 crediti (higgsfield.ai/blog, 24/10/2026)",
+    "modifica": "tariffe in dollari al secondo dai price_badge dei nodi di modifica video di ComfyUI 0.41.3 (30/10/2026); Wan conta i secondi di ingresso più quelli di uscita",
+    "immagini": "prezzi per immagine dai price_badge (Nano Banana Pro 1K/2K 0,1608 $, Nano Banana 2 a 2K 0,1217 $, Seedream 4.5 0,04 $, Kling Omni Image 2K 0,028 $), ComfyUI 0.41.3, 30/10/2026",
+    "ambientazione_video": "Bria 0,05 $/s; Beeble 0,429 $ ogni 30 fotogrammi a 1080p e 0,143 $ a 720p; Kling Omni Edit 0,126/0,168 $/s (price_badge, 30/10/2026)"
+  },
+  "provider": [
+    {
+      "id": "comfy",
+      "nome": "Comfy",
+      "collegato": true,
+      "nota": "Crediti del tuo account Comfy, pagati solo quando generi."
+    },
+    {
+      "id": "magnific",
+      "nome": "Magnific",
+      "collegato": false,
+      "nota": "Da collegare: serve la API key di Magnific.",
+      "eur_per_credito": 0.0008
+    },
+    {
+      "id": "higgsfield",
+      "nome": "Higgsfield",
+      "collegato": false,
+      "nota": "Da collegare: serve la API key di Higgsfield.",
+      "usd_per_credito": 0.075
+    }
+  ],
+  "modelli": [
+    {
+      "id": "kling-v3",
+      "nome": "Kling 3.0",
+      "nodo": "KlingFirstLastFrameNode",
+      "per": "Architettura e voli continui: tiene dritte linee e facciate. Il migliore per il drone FPV.",
+      "durate": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        12,
+        15
+      ],
+      "risoluzioni": [
+        "720p",
+        "1080p",
+        "4k"
+      ],
+      "comfy": {
+        "720p": 0.084,
+        "1080p": 0.112,
+        "4k": 0.42
+      },
+      "magnific": {
+        "720p": 70,
+        "1080p": 90,
+        "4k": 400
+      },
+      "higgsfield": {
+        "720p": 1.4,
+        "1080p": 1.6
+      }
+    },
+    {
+      "id": "veo-3.1-fast",
+      "nome": "Veo 3.1 Fast",
+      "nodo": "Veo3FirstLastFrameNode",
+      "veo": "veo-3.1-fast-generate",
+      "per": "Movimenti di camera morbidi e luce realistica; durate solo 4, 6 o 8 secondi.",
+      "durate": [
+        4,
+        6,
+        8
+      ],
+      "risoluzioni": [
+        "720p",
+        "1080p",
+        "4k"
+      ],
+      "comfy": {
+        "720p": 0.08,
+        "1080p": 0.1,
+        "4k": 0.25
+      }
+    },
+    {
+      "id": "veo-3.1-lite",
+      "nome": "Veo 3.1 Lite",
+      "nodo": "Veo3FirstLastFrameNode",
+      "veo": "veo-3.1-lite",
+      "per": "Il più economico: per provare percorsi e tempi prima della versione buona.",
+      "durate": [
+        4,
+        6,
+        8
+      ],
+      "risoluzioni": [
+        "720p",
+        "1080p"
+      ],
+      "comfy": {
+        "720p": 0.03,
+        "1080p": 0.05
+      }
+    },
+    {
+      "id": "kling-v2-5-turbo",
+      "nome": "Kling 2.5 Turbo",
+      "nodo": "KlingStartEndFrameNode",
+      "per": "Veloce ed economico a 1080p, solo tratte da 5 o 10 secondi.",
+      "durate": [
+        5,
+        10
+      ],
+      "risoluzioni": [
+        "1080p"
+      ],
+      "comfy": {
+        "1080p": 0.07
+      }
+    }
+  ],
+  "modifica": [
+    {
+      "id": "kling-omni-edit",
+      "nome": "Kling 3.0 Omni",
+      "nodo": "KlingOmniProEditVideoNode",
+      "per": "Cambia quello che chiedi e tiene architettura e movimento del video. Il migliore per i voli in casa.",
+      "risoluzioni": [
+        "720p",
+        "1080p"
+      ],
+      "max": 10,
+      "comfy": {
+        "720p": 0.126,
+        "1080p": 0.168
+      }
+    },
+    {
+      "id": "wan-2.7-edit",
+      "nome": "Wan 2.7 Edit",
+      "nodo": "Wan2VideoEditApi",
+      "per": "Stile, luce e oggetti; si paga sui secondi del video di partenza più quelli del risultato.",
+      "risoluzioni": [
+        "720p",
+        "1080p"
+      ],
+      "max": 10,
+      "doppio": true,
+      "comfy": {
+        "720p": 0.1,
+        "1080p": 0.15
+      }
+    },
+    {
+      "id": "runway-aleph-2",
+      "nome": "Runway Aleph 2",
+      "nodo": "RunwayAleph2VideoToVideoNode",
+      "per": "Modifiche forti: cambia ambiente, stagione, ora del giorno. Il più caro.",
+      "risoluzioni": [
+        "1080p"
+      ],
+      "max": 30,
+      "comfy": {
+        "1080p": 0.4004
+      }
+    },
+    {
+      "id": "flux-video-edit",
+      "nome": "Flux Video Edit",
+      "nodo": "FluxVideoEditNode",
+      "per": "Il più economico: piccoli ritocchi, tutto il resto resta com'era. Esce più piccolo (circa 0,9 megapixel).",
+      "risoluzioni": [
+        "720p"
+      ],
+      "max": 15,
+      "comfy": {
+        "720p": 0.0429
+      }
+    }
+  ],
+  "formati": [
+    {
+      "id": "9:16",
+      "nome": "9:16 verticale",
+      "w": 1080,
+      "h": 1920
+    },
+    {
+      "id": "16:9",
+      "nome": "16:9 orizzontale",
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "id": "1:1",
+      "nome": "1:1 quadrato",
+      "w": 1440,
+      "h": 1440
+    },
+    {
+      "id": "4:5",
+      "nome": "4:5 post",
+      "w": 1080,
+      "h": 1350
+    },
+    {
+      "id": "3:4",
+      "nome": "3:4",
+      "w": 1080,
+      "h": 1440
+    },
+    {
+      "id": "4:3",
+      "nome": "4:3",
+      "w": 1440,
+      "h": 1080
+    }
+  ],
+  "immagini": [
+    {
+      "id": "nano-banana-pro",
+      "nome": "Nano Banana Pro",
+      "nodo": "GeminiImage2Node",
+      "modello": "gemini-3-pro-image-preview",
+      "risoluzione": "2K",
+      "per": "Il più fedele a persone e reference: tiene volti e dettagli. Il migliore per mettere qualcuno in un ambiente.",
+      "formati": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5",
+        "3:4",
+        "4:3"
+      ],
+      "comfy": 0.1608
+    },
+    {
+      "id": "nano-banana-2",
+      "nome": "Nano Banana 2",
+      "nodo": "GeminiNanoBanana2",
+      "modello": "Nano Banana 2 (Gemini 3.1 Flash Image)",
+      "risoluzione": "2K",
+      "per": "Veloce e bravo con più reference, costa meno del Pro.",
+      "formati": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5",
+        "3:4",
+        "4:3"
+      ],
+      "comfy": 0.1217
+    },
+    {
+      "id": "seedream-4.5",
+      "nome": "Seedream 4.5",
+      "nodo": "ByteDanceSeedreamNode",
+      "modello": "seedream-4-5-251128",
+      "per": "Immagini grandi (fino a 2560 px) e molto realistiche.",
+      "formati": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5",
+        "3:4",
+        "4:3"
+      ],
+      "comfy": 0.04
+    },
+    {
+      "id": "kling-omni-image",
+      "nome": "Kling 3.0 Omni Image",
+      "nodo": "KlingOmniProImageNode",
+      "modello": "kling-v3-omni",
+      "risoluzione": "2K",
+      "per": "Il più economico: per provare idee e composizioni.",
+      "formati": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "3:4",
+        "4:3"
+      ],
+      "comfy": 0.028
+    }
+  ],
+  "ambientazione_video": [
+    {
+      "id": "bria-bg",
+      "nome": "Bria Replace Background",
+      "nodo": "BriaVideoReplaceBackground",
+      "per": "Mette esattamente la tua immagine come sfondo; la persona resta identica, labiale compreso, ma la sua luce non cambia.",
+      "labiale": true,
+      "comfy": 0.05,
+      "unita": "s"
+    },
+    {
+      "id": "beeble-switchx",
+      "nome": "Beeble SwitchX",
+      "nodo": "BeebleSwitchXVideoEdit",
+      "per": "Ricrea lo sfondo dalla tua immagine e adatta la luce intorno alla persona, che resta identica: più ambientato, labiale intatto. Massimo 240 fotogrammi.",
+      "labiale": true,
+      "comfy": {
+        "720p": 0.143,
+        "1080p": 0.429
+      },
+      "unita": "30 fotogrammi",
+      "max_frames": 240
+    },
+    {
+      "id": "kling-omni-edit",
+      "nome": "Kling 3.0 Omni",
+      "nodo": "KlingOmniProEditVideoNode",
+      "per": "Ridisegna la scena con la reference: il più integrato, ma il labiale può cambiare.",
+      "labiale": false,
+      "comfy": {
+        "720p": 0.126,
+        "1080p": 0.168
+      },
+      "unita": "s",
+      "max": 10
+    }
+  ]
+}

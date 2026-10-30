@@ -227,6 +227,15 @@ ipcMain.handle("select-videos", async () => {
   return r.canceled ? [] : r.filePaths;
 });
 
+// screenshots or videos for a change request
+ipcMain.handle("select-media", async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile", "multiSelections"],
+    filters: [{ name: "Immagini e video", extensions: ["png", "jpg", "jpeg", "heic", "webp", "gif", "mp4", "mov", "m4v", "mkv", "webm"] }],
+  });
+  return r.canceled ? [] : r.filePaths;
+});
+
 ipcMain.handle("select-script", async () => {
   const r = await dialog.showOpenDialog(mainWindow, {
     properties: ["openFile"],
@@ -268,6 +277,26 @@ ipcMain.handle("open-path", async (_e, p) => {
   if (typeof p !== "string" || !p) return;
   if (RUNNABLE.test(p.replace(/\/+$/, ""))) shell.showItemInFolder(p);
   else await shell.openPath(p);
+});
+
+// «Rivela nel Finder»: the file selected in its folder, nothing opened or run
+ipcMain.handle("reveal-path", async (_e, p) => {
+  if (typeof p === "string" && p) shell.showItemInFolder(p);
+});
+
+// The ✕ of an AI result: its folder goes to the Trash (it can be put back), and only a folder of
+// ~/Movies/CapWizard/AI/<section> can go
+ipcMain.handle("trash-ai-result", async (_e, p) => {
+  if (typeof p !== "string" || !p) return { ok: false };
+  const ai = path.join(os.homedir(), "Movies", "CapWizard", "AI");
+  let real;
+  try { real = require("fs").realpathSync(p); } catch (_) { return { ok: false, msg: "Cartella non trovata." }; }
+  const roots = ["Transizioni", "Ambientazioni", "Immagini"].map((c) => {
+    try { return require("fs").realpathSync(path.join(ai, c)); } catch (_) { return ""; }
+  });
+  if (!roots.includes(path.dirname(real))) return { ok: false, msg: "Si può togliere solo un risultato della sezione AI." };
+  await shell.trashItem(real);
+  return { ok: true };
 });
 
 ipcMain.handle("open-external", async (_e, url) => {

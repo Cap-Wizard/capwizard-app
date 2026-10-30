@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; connect-src http://127.0.0.1:8765 ws://127.0.0.1:8765 http://127.0.0.1:8799 https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com;" />
+        content="default-src 'self'; connect-src http://127.0.0.1:8765 ws://127.0.0.1:8765 http://127.0.0.1:8799 https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com; media-src 'self' blob:;" />
   <title>CapWizard</title>
   <link rel="icon" href="logo.png" />
   <link rel="stylesheet" href="styles.css" />
@@ -18,6 +18,7 @@
       <button class="vbtn on" id="v-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M12 8v8M8 12h8"/></svg><span>Nuovo video</span></button>
       <button class="vbtn" id="v-proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>I miei progetti</span><b id="n-proj">0</b></button>
       <button class="vbtn" id="v-scarico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.5"/><rect x="3" y="11" width="18" height="5" rx="1.5"/><path d="M7 20h10"/></svg><span>Smistamento clip</span></button>
+      <button class="vbtn" id="v-ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M18.5 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg><span>AI</span></button>
     </nav>
     <div class="sb-label">Archivio</div>
     <nav class="views views2" id="creates" hidden>
@@ -319,6 +320,92 @@
       </div>
     </section>
     <div class="tv-list" id="tv-list"></div>
+  </div>
+
+  <div id="view-ai" class="view dash" hidden>
+    <div class="dash-head">
+      <div>
+        <h2>AI</h2>
+        <div class="dash-sub" id="ai-sub">Video e immagini generati con ComfyUI, pagati con i crediti Comfy.</div>
+      </div>
+      <div class="dash-actions ai-provbox">
+        <button class="btn2 ai-prov-btn" id="ai-prov-btn" title="Con quale servizio generi"></button>
+        <div class="menu ai-prov-menu" id="ai-prov-menu" hidden></div>
+      </div>
+    </div>
+    <div class="ai-tabs" id="ai-tabs">
+      <button class="ai-tab" data-tab="img"><b>Immagini da prompt</b><span>Crea un'immagine</span></button>
+      <button class="ai-tab on" data-tab="trans"><b>Transizioni A, B to Z</b><span>Da un fotogramma all'altro, con le tappe</span></button>
+      <button class="ai-tab" data-tab="amb"><b>Ambientazione personaggio</b><span>Chi parla in un video, in un altro posto</span></button>
+    </div>
+    <p class="ai-desc" id="ai-desc"></p>
+    <div class="ai-warn" id="ai-warn" hidden></div>
+
+    <section class="ai-pane" id="ai-trans">
+      <div class="ai-strip" id="ai-frames"></div>
+      <div class="ai-tplrow">
+        <div class="ai-tplbox">
+          <label class="ai-l">Template<select id="ai-tpl"></select></label>
+          <p class="ai-tpl-desc" id="ai-tpl-desc"></p>
+        </div>
+        <div class="ai-anim" id="ai-anim"></div>
+      </div>
+      <div class="ai-l">Modello</div>
+      <div class="ai-models" id="ai-models"></div>
+      <div class="ai-opts">
+        <label class="ai-l">Formato<select id="ai-fmt" class="ai-fmtsel"></select></label>
+        <label class="ai-l">Risoluzione<select id="ai-res"></select></label>
+        <label class="ai-l ai-nm">Nome<input type="text" id="ai-name" placeholder="es. Chirone tower" autocomplete="off" /></label>
+      </div>
+      <div class="ai-go">
+        <div class="ai-cost" id="ai-cost"></div>
+        <button class="send" id="ai-generate" disabled>Genera</button>
+      </div>
+    </section>
+    <section class="ai-pane" id="ai-amb" hidden>
+      <div class="am-row">
+        <div class="am-col"><div class="ai-l">Video della persona</div><div class="drop am-box" id="am-src"></div></div>
+        <div class="am-col am-mid"><label class="ai-l">Prompt<textarea id="am-text" rows="7" placeholder="Facoltativo: la luce, l'atmosfera, dettagli del posto"></textarea></label></div>
+        <div class="am-col"><div class="ai-l">Il posto <span id="am-nref"></span></div><div class="drop am-box" id="am-ref"></div>
+          <div class="im-refs am-refs" id="am-refs" hidden></div>
+          <div class="am-refmode" id="am-refmode">
+            <button class="on" data-r="esatto" title="L'immagine diventa proprio lo sfondo; la luce sulla persona si adatta">Sfondo esatto</button>
+            <button data-r="spunto" title="Il posto viene ricreato ispirandosi all'immagine">Solo spunto</button>
+          </div></div>
+      </div>
+      <div class="ai-opts">
+        <div class="ai-l">Quando è nel posto
+          <div class="am-refmode am-arrivo" id="am-arrivo">
+            <button class="on" data-a="inizio" title="La persona è nel posto dal primo fotogramma">Dall'inizio</button>
+            <button data-a="fine" title="Parte nel suo posto e, poco alla volta, alla fine della clip si trova nel posto nuovo">Alla fine della clip</button>
+          </div></div>
+        <label class="ai-l">Formato<select id="am-fmt" class="ai-fmtsel"></select></label>
+        <label class="ai-l">Risoluzione<select id="am-res"><option>720p</option><option selected>1080p</option></select></label>
+        <label class="ai-l ai-nm">Nome<input type="text" id="am-name" placeholder="es. Lisa in negozio" autocomplete="off" /></label>
+      </div>
+      <div class="ai-l">Modello</div>
+      <div class="ai-models" id="am-models"></div>
+      <div class="ai-go"><div class="ai-cost" id="am-cost"></div><button class="send" id="am-generate" disabled>Genera</button></div>
+    </section>
+
+    <section class="ai-pane" id="ai-img" hidden>
+      <div class="am-row">
+        <div class="am-col"><div class="ai-l">Immagine</div><div class="drop am-box" id="im-src"></div></div>
+        <div class="am-col am-mid"><label class="ai-l">Prompt<textarea id="im-text" rows="7" placeholder="es. mettila su un tavolo di marmo in una cucina luminosa, luce del mattino"></textarea></label></div>
+        <div class="am-col am-refs"><div class="ai-l">Reference <span id="im-nref"></span></div><div class="im-refs" id="im-refs"></div></div>
+      </div>
+      <div class="ai-opts">
+        <label class="ai-l">Formato<select id="im-fmt" class="ai-fmtsel"></select></label>
+        <label class="ai-l ai-nm">Nome<input type="text" id="im-name" placeholder="es. Panettone in cucina" autocomplete="off" /></label>
+      </div>
+      <div class="ai-l">Modello</div>
+      <div class="ai-models" id="im-models"></div>
+      <div class="ai-go"><div class="ai-cost" id="im-cost"></div><button class="send" id="im-generate" disabled>Genera</button></div>
+    </section>
+
+    <div class="ai-run" id="ai-run" hidden><div class="ai-bar"><i></i></div><pre id="ai-log"></pre></div>
+    <h3 class="ai-h3">Risultati</h3>
+    <div class="ai-results" id="ai-results"></div>
   </div>
 
   <div id="view-dash" class="view dash" hidden>

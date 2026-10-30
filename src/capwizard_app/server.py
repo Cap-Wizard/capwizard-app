@@ -36,13 +36,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent, aiservices, board, brain, scarico, teamboard, teamshare, template_file, vault
+from capwizard_app import agent, aiservices, board, brain, comfy_ai, scarico, teamboard, teamshare, template_file, vault
 
 
 # ---------------------------------------------------------------------------
@@ -1122,6 +1122,276 @@ def team_board_unshare(item_id: str) -> dict:
     return _team(teamboard.unshare, item_id)
 
 
+# ---------------------------------------------------------------------------
+# AI: videos and images made with ComfyUI's partner nodes, paid with Comfy credits (see comfy_ai.py)
+# ---------------------------------------------------------------------------
+
+def _ai(fn, *args, **kw) -> dict:
+    try:
+        return fn(*args, **kw)
+    except comfy_ai.AIError as e:
+        return {"ok": False, "msg": str(e)}
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        return {"ok": False, "msg": f"ComfyUI non risponde: {e}"}
+
+
+@app.get("/api/ai/status")
+def ai_status() -> dict:
+    return {**comfy_ai.status(), "templates": comfy_ai.templates(), "modelli": comfy_ai.models()}
+
+
+class AIEstimate(BaseModel):
+    durate: list[int] = [5]
+    modello: str = "kling-v3"
+    risoluzione: str = "1080p"
+
+
+@app.post("/api/ai/estimate")
+def ai_estimate(req: AIEstimate) -> dict:
+    """The cost of the legs with each model on each provider: the app shows them side by side."""
+    def run() -> dict:
+        res = {}
+        for m in comfy_ai.models()["modelli"]:
+            res[m["id"]] = {p["id"]: comfy_ai.estimate(req.durate, m["id"], req.risoluzione, p["id"])
+                            for p in comfy_ai.models()["provider"]}
+        return {"ok": True, "stime": res}
+    return _ai(run)
+
+
+class AITransition(BaseModel):
+    frames: list[str]
+    template: str
+    nome: str = ""
+    durate: list[int] = []
+    modello: str = "kling-v3"
+    risoluzione: str = "1080p"
+    provider: str = "comfy"
+    formato: str = "9:16"
+    note: list[str] = []
+
+
+def _run_ai(job: Job, folder, only: int | None) -> None:
+    job.status = "running"
+    try:
+        res = comfy_ai.generate(folder, only, log=job.log)
+        job.result_path = res.get("cartella")
+        job.results = [res]
+        job.status = "done"
+    except Exception as e:  # noqa: BLE001 — surface everything to the UI
+        job.error = str(e)
+        job.status = "error"
+        job.log(f"ERRORE: {e}")
+
+
+@app.post("/api/ai/transition")
+def ai_transition(req: AITransition) -> dict:
+    res = _ai(lambda: {"ok": True, "folder": comfy_ai.new_transition(req.frames, req.template, req.nome.strip(), req.durate,
+                                                                       req.modello, req.risoluzione, req.note, req.provider,
+                                                                       req.formato)})
+    if not res.get("ok"):
+        return res
+    job = manager.create()
+    threading.Thread(target=_run_ai, args=(job, res["folder"], None), daemon=True).start()
+    return {"ok": True, "job_id": job.id, "id": res["folder"].name}
+
+
+class AIRedo(BaseModel):
+    id: str
+    tratta: int
+
+
+@app.post("/api/ai/transition/redo")
+def ai_transition_redo(req: AIRedo) -> dict:
+    """«Rigenera» one leg, the others stay as they are."""
+    try:
+        folder = comfy_ai.folder_of(req.id)
+    except comfy_ai.AIError as e:
+        return {"ok": False, "msg": str(e)}
+    job = manager.create()
+    threading.Thread(target=_run_ai, args=(job, folder, req.tratta), daemon=True).start()
+    return {"ok": True, "job_id": job.id}
+
+
+def _run_ai_fn(job: Job, fn, folder) -> None:
+    job.status = "running"
+    try:
+        res = fn(folder, log=job.log)
+        job.result_path = res.get("cartella")
+        job.results = [res]
+        job.status = "done"
+    except Exception as e:  # noqa: BLE001 — surface everything to the UI
+        job.error = str(e)
+        job.status = "error"
+        job.log(f"ERRORE: {e}")
+
+
+@app.get("/api/ai/local")
+def ai_local(path: str):
+    """A picture or video chosen on this Mac, to preview it in the AI section (nothing else is served)."""
+    p = Path(path)
+    if not p.is_file() or p.suffix.lower() not in VIDEO_EXT + (".png", ".jpg", ".jpeg", ".webp", ".heic", ".gif"):
+        return JSONResponse({"detail": "file non disponibile"}, status_code=404)
+    return FileResponse(p)
+
+
+@app.get("/api/ai/media-info")
+def ai_media_info(path: str) -> dict:
+    """Length and speed of the video put on the left of «Ambientazione personaggio» (the timeline is drawn on it)."""
+    p = Path(path)
+    if not p.is_file():
+        return {"ok": False}
+    video = p.suffix.lower() in VIDEO_EXT
+    return {"ok": True, "video": video, "durata": round(comfy_ai._seconds(p), 2) if video else 0,
+            "fps": comfy_ai._fps(p) if video else 0}
+
+
+class AIImageEstimate(BaseModel):
+    modello: str = "nano-banana-pro"
+    formato: str = "9:16"
+
+
+@app.post("/api/ai/image/estimate")
+def ai_image_estimate(req: AIImageEstimate) -> dict:
+    """What each image model costs for one picture in this format."""
+    return _ai(lambda: {"ok": True, "stime": {m["id"]: comfy_ai.image_estimate(m["id"], req.formato)
+                                               for m in comfy_ai.models().get("immagini", [])}})
+
+
+class AIImage(AIImageEstimate):
+    main: str = ""
+    refs: list[str] = []
+    testo: str
+    nome: str = ""
+
+
+@app.post("/api/ai/image")
+def ai_image(req: AIImage) -> dict:
+    res = _ai(lambda: {"ok": True, "folder": comfy_ai.new_image(req.main, req.refs, req.testo, req.modello, req.formato, req.nome.strip())})
+    if not res.get("ok"):
+        return res
+    job = manager.create()
+    threading.Thread(target=_run_ai_fn, args=(job, comfy_ai.generate_image, res["folder"]), daemon=True).start()
+    return {"ok": True, "job_id": job.id}
+
+
+class AISceneEstimate(BaseModel):
+    durata: float = 5
+    risoluzione: str = "1080p"
+    fps: float = 24
+    riferimento: str = "esatto"
+
+
+@app.post("/api/ai/scene/estimate")
+def ai_scene_estimate(req: AISceneEstimate) -> dict:
+    """The cost with each model that changes the place behind someone talking."""
+    return _ai(lambda: {"ok": True, "stime": {m["id"]: comfy_ai.scene_estimate(req.durata, m["id"], req.risoluzione, req.fps, req.riferimento)
+                                               for m in comfy_ai.models().get("ambientazione_video", [])}})
+
+
+class AIScene(AISceneEstimate):
+    soggetto: str
+    contesti: list[str] = []
+    testo: str = ""
+    modello: str = "bria-bg"
+    arrivo: str = "inizio"
+    formato: str = "9:16"
+    nome: str = ""
+
+
+@app.post("/api/ai/scene")
+def ai_scene(req: AIScene) -> dict:
+    res = _ai(lambda: {"ok": True, "folder": comfy_ai.new_scene(req.soggetto, req.contesti, req.testo, req.modello, req.risoluzione,
+                                                                  req.riferimento, req.arrivo, req.formato, req.nome.strip())})
+    if not res.get("ok"):
+        return res
+    job = manager.create()
+    threading.Thread(target=_run_ai_fn, args=(job, comfy_ai.generate_scene, res["folder"]), daemon=True).start()
+    return {"ok": True, "job_id": job.id}
+
+
+class AIKey(BaseModel):
+    key: str
+
+
+@app.post("/api/ai/comfy-key")
+def ai_comfy_key(req: AIKey) -> dict:
+    """Connect Comfy: the account's API key goes in the Keychain."""
+    return comfy_ai.save_key(req.key)
+
+
+class AIEditEstimate(BaseModel):
+    id: str
+    source: str
+    risoluzione: str = "1080p"
+
+
+@app.post("/api/ai/edit/estimate")
+def ai_edit_estimate(req: AIEditEstimate) -> dict:
+    return _ai(lambda: comfy_ai.edit_estimates(comfy_ai.folder_of(req.id), req.source, req.risoluzione))
+
+
+class AIEdit(AIEditEstimate):
+    testo: str
+    modello: str = "kling-omni-edit"
+
+
+def _run_ai_edit(job: Job, req: AIEdit) -> None:
+    job.status = "running"
+    try:
+        res = comfy_ai.edit(comfy_ai.folder_of(req.id), req.source, req.testo, req.modello, req.risoluzione, log=job.log)
+        job.result_path = res.get("cartella")
+        job.results = [res]
+        job.status = "done"
+    except Exception as e:  # noqa: BLE001 — surface everything to the UI
+        job.error = str(e)
+        job.status = "error"
+        job.log(f"ERRORE: {e}")
+
+
+@app.post("/api/ai/edit")
+def ai_edit(req: AIEdit) -> dict:
+    """«Modifica» on a result: a new version of its video from a prompt."""
+    if not req.testo.strip():
+        return {"ok": False, "msg": "Scrivi cosa cambiare."}
+    try:
+        comfy_ai.folder_of(req.id)
+    except comfy_ai.AIError as e:
+        return {"ok": False, "msg": str(e)}
+    job = manager.create()
+    threading.Thread(target=_run_ai_edit, args=(job, req), daemon=True).start()
+    return {"ok": True, "job_id": job.id}
+
+
+class AIHide(BaseModel):
+    id: str
+
+
+@app.post("/api/ai/hide")
+def ai_hide(req: AIHide) -> dict:
+    return _ai(comfy_ai.hide, req.id)
+
+
+@app.get("/api/ai/history")
+def ai_history() -> dict:
+    return {"items": comfy_ai.history()}
+
+
+@app.get("/api/ai/file")
+def ai_file(path: str):
+    try:
+        return FileResponse(comfy_ai.inside(path))
+    except comfy_ai.AIError as e:
+        return JSONResponse({"detail": str(e)}, status_code=404)
+
+
+@app.get("/api/ai/thumb")
+def ai_thumb(path: str, h: int = 360) -> dict:
+    p = Path(path)
+    if not p.is_file():
+        return {"ok": False}
+    return {"ok": True, "src": _thumb(p, max(80, min(h, 900))), "nome": p.name}
+
+
 # videos to edit: a folder of clips goes on the team's list with a price, one person takes each
 
 @app.get("/api/team-board/folder")
@@ -1305,16 +1575,16 @@ class AttachmentRequest(BaseModel):
 
 @app.post("/api/attachments")
 def attachment(req: AttachmentRequest) -> dict:
-    """A screenshot for a change request: kept in the app's folder, with a thumbnail."""
+    """A screenshot or a video for a change request, with a thumbnail."""
     a = agent.add_attachment(req.path, req.data_url)
-    return a or {"error": "Non è un'immagine."}
+    return a or {"error": "Non è un'immagine né un video."}
 
 
 @app.get("/api/projects/{project_id:path}/mods")
 def project_mods(project_id: str) -> dict:
     mods = [] if project_id.startswith("capcut:") else agent.list_mods(project_id)
     for m in mods:
-        m["thumbs"] = [agent.image_thumb(Path(p)) for p in m.get("immagini", []) if Path(p).exists()]
+        m["thumbs"] = [agent.attachment_thumb(Path(p)) for p in m.get("immagini", []) if Path(p).exists()]
     return {"mods": mods}
 
 
