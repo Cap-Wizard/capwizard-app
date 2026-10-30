@@ -42,7 +42,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent, aiservices, board, brain, comfy_ai, scarico, teamboard, teamshare, template_file, vault
+from capwizard_app import agent, ai_prompt, aiservices, board, brain, comfy_ai, scarico, teamboard, teamshare, template_file, vault
 
 
 # ---------------------------------------------------------------------------
@@ -1168,6 +1168,16 @@ class AITransition(BaseModel):
     provider: str = "comfy"
     formato: str = "9:16"
     note: list[str] = []
+    claude: dict = {}
+
+
+def _with_claude(folder, claude: dict):
+    """Keep the prompts Claude wrote (and the user approved) in the result, for the generation and the lessons."""
+    if claude:
+        meta = comfy_ai._meta(folder)
+        meta["claude"] = {k: v for k, v in claude.items() if k in ("prompt", "posto", "tratte")}
+        comfy_ai._save(folder, meta)
+    return folder
 
 
 def _run_ai(job: Job, folder, only: int | None) -> None:
@@ -1185,9 +1195,9 @@ def _run_ai(job: Job, folder, only: int | None) -> None:
 
 @app.post("/api/ai/transition")
 def ai_transition(req: AITransition) -> dict:
-    res = _ai(lambda: {"ok": True, "folder": comfy_ai.new_transition(req.frames, req.template, req.nome.strip(), req.durate,
-                                                                       req.modello, req.risoluzione, req.note, req.provider,
-                                                                       req.formato)})
+    res = _ai(lambda: {"ok": True, "folder": _with_claude(comfy_ai.new_transition(req.frames, req.template, req.nome.strip(), req.durate,
+                                                                                    req.modello, req.risoluzione, req.note, req.provider,
+                                                                                    req.formato), req.claude)})
     if not res.get("ok"):
         return res
     job = manager.create()
@@ -1260,13 +1270,15 @@ def ai_image_estimate(req: AIImageEstimate) -> dict:
 class AIImage(AIImageEstimate):
     main: str = ""
     refs: list[str] = []
-    testo: str
+    testo: str = ""
     nome: str = ""
+    claude: dict = {}
 
 
 @app.post("/api/ai/image")
 def ai_image(req: AIImage) -> dict:
-    res = _ai(lambda: {"ok": True, "folder": comfy_ai.new_image(req.main, req.refs, req.testo, req.modello, req.formato, req.nome.strip())})
+    res = _ai(lambda: {"ok": True, "folder": _with_claude(comfy_ai.new_image(req.main, req.refs, req.testo or req.claude.get("prompt", ""),
+                                                                            req.modello, req.formato, req.nome.strip()), req.claude)})
     if not res.get("ok"):
         return res
     job = manager.create()
@@ -1296,12 +1308,13 @@ class AIScene(AISceneEstimate):
     arrivo: str = "inizio"
     formato: str = "9:16"
     nome: str = ""
+    claude: dict = {}
 
 
 @app.post("/api/ai/scene")
 def ai_scene(req: AIScene) -> dict:
-    res = _ai(lambda: {"ok": True, "folder": comfy_ai.new_scene(req.soggetto, req.contesti, req.testo, req.modello, req.risoluzione,
-                                                                  req.riferimento, req.arrivo, req.formato, req.nome.strip())})
+    res = _ai(lambda: {"ok": True, "folder": _with_claude(comfy_ai.new_scene(req.soggetto, req.contesti, req.testo, req.modello, req.risoluzione,
+                                                                               req.riferimento, req.arrivo, req.formato, req.nome.strip()), req.claude)})
     if not res.get("ok"):
         return res
     job = manager.create()
@@ -1333,12 +1346,13 @@ def ai_edit_estimate(req: AIEditEstimate) -> dict:
 class AIEdit(AIEditEstimate):
     testo: str
     modello: str = "kling-omni-edit"
+    prompt: str = ""                  # what Claude wrote from `testo`, when it did
 
 
 def _run_ai_edit(job: Job, req: AIEdit) -> None:
     job.status = "running"
     try:
-        res = comfy_ai.edit(comfy_ai.folder_of(req.id), req.source, req.testo, req.modello, req.risoluzione, log=job.log)
+        res = comfy_ai.edit(comfy_ai.folder_of(req.id), req.source, req.prompt.strip() or req.testo, req.modello, req.risoluzione, log=job.log)
         job.result_path = res.get("cartella")
         job.results = [res]
         job.status = "done"
@@ -1359,7 +1373,41 @@ def ai_edit(req: AIEdit) -> dict:
         return {"ok": False, "msg": str(e)}
     job = manager.create()
     threading.Thread(target=_run_ai_edit, args=(job, req), daemon=True).start()
+    ai_prompt.learn(req.id, "modifica", req.testo, log=lambda m: print(m, flush=True))   # what was wrong is a lesson
     return {"ok": True, "job_id": job.id}
+
+
+class AIPrompt(BaseModel):
+    tipo: str                         # trans, img, amb, modifica
+    dati: dict
+
+
+@app.post("/api/ai/prompt")
+def ai_prompt_write(req: AIPrompt) -> dict:
+    """Claude's prompt for a job, before paying: from the shared skill and what it sees."""
+    try:
+        return {"ok": True, **ai_prompt.write(req.tipo, req.dati)}
+    except (ai_prompt.PromptError, comfy_ai.AIError, KeyError, IndexError) as e:
+        return {"ok": False, "msg": str(e) or "Dati mancanti."}
+
+
+class AIVote(BaseModel):
+    id: str
+    voto: str                         # su, giu
+    nota: str = ""
+
+
+@app.post("/api/ai/feedback")
+def ai_feedback(req: AIVote) -> dict:
+    """A thumb on a result: Claude learns from it in the background and shares the lesson."""
+    if req.voto not in ("su", "giu"):
+        return {"ok": False, "msg": "Voto non valido."}
+    return _ai(lambda: (ai_prompt.learn(req.id, req.voto, req.nota, log=lambda m: print(m, flush=True)), {"ok": True})[1])
+
+
+@app.get("/api/ai/prompt-skill")
+def ai_prompt_skill() -> dict:
+    return _ai(lambda: {"ok": True, **ai_prompt.status()})
 
 
 class AIHide(BaseModel):

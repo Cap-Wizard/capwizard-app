@@ -402,7 +402,8 @@ def generate(folder: Path, only: int | None = None, log=print) -> dict:
     for i in legs:
         t = meta["tratte"][i]
         label = f"Tratta {i + 1} di {len(meta['tratte'])}"
-        text = meta["prompt"] + (f" {t['nota']}" if t["nota"] else "")
+        written = (meta.get("claude") or {}).get("tratte") or []      # Claude's prompt for this leg, when it wrote one
+        text = written[i] if i < len(written) and written[i] else meta["prompt"] + (f" {t['nota']}" if t["nota"] else "")
         try:
             want = t.get("durata", meta.get("durata", 5))
             made = _gen_len(meta.get("modello", "kling-v3"), want)
@@ -665,10 +666,8 @@ def _new_folder(cat: str, nome: str) -> Path:
 
 
 def new_image(main: str, refs: list[str], testo: str, modello: str, formato: str, nome: str) -> Path:
-    if not (testo or "").strip():
-        raise AIError("Scrivi il prompt.")
-    if not main and not refs:
-        pass                                                    # a picture from the prompt alone is fine too
+    if not (testo or "").strip() and not main and not refs:
+        raise AIError("Scrivi il prompt o metti almeno un'immagine.")
     est = image_estimate(modello, formato)
     if not est["ok"]:
         raise AIError(est["msg"])
@@ -688,8 +687,8 @@ def generate_image(folder: Path, log=print) -> dict:
     start(log)
     meta = _meta(folder)
     inputs = [folder / "input" / f for f in meta["input"]]
-    text = meta["testo"]
-    if len(inputs) > 1:
+    text = (meta.get("claude") or {}).get("prompt") or meta["testo"]
+    if len(inputs) > 1 and not (meta.get("claude") or {}).get("prompt"):
         text = ("The first image is the one to work on; the other images are references to follow. " if meta.get("con_immagine")
                 else "Use the images as references. ") + text
     info = _image(inputs, text, meta["modello"], meta["formato"], folder / "risultato.png", log, "Immagine")
@@ -773,7 +772,8 @@ def generate_scene(folder: Path, log=print) -> dict:
     start(log)
     meta = _meta(folder)
     inp = folder / "input"
-    user = meta["testo"]
+    written = meta.get("claude") or {}
+    user = written.get("prompt") or meta["testo"]
     exact = meta.get("riferimento", "esatto") != "spunto"
     est = meta["stima"]
     src = inp / "soggetto.mp4"
@@ -783,7 +783,7 @@ def generate_scene(folder: Path, log=print) -> dict:
     if exact:
         place_png = inp / meta["contesti"][0]
     else:
-        text = ("Create one empty place, with no people, inspired by these images: the kind of place, style, materials, colours and light. "
+        text = written.get("posto") or ("Create one empty place, with no people, inspired by these images: the kind of place, style, materials, colours and light. "
                 "A realistic photo, eye level, as a background for a person talking to camera. ") + user
         _image([inp / c for c in meta["contesti"]], text, PLACE_MODEL, meta["formato"], folder / "posto.png", log, "Posto dalle immagini")
         place_png = _frame(folder / "posto.png", inp / "posto.png", meta["formato"])

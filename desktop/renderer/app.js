@@ -3165,10 +3165,12 @@ async function generateAI() {
   const m = aiModel();
   const want = aiFit(m, GEN.durs);
   const fast = want.some((d, i) => d < c.durate[i]) ? `\nLe tratte più corte di ${Math.min(...m.durate)} s vengono generate da ${Math.min(...m.durate)} s e accelerate: si pagano ${Math.min(...m.durate)} s.` : "";
-  if (!confirm(`Genero ${c.tratte} ${c.tratte === 1 ? "tratta" : "tratte"} con ${m.nome} (${$("ai-res").value}, ${want.join(" + ")} s).${fast}\n\n`
-    + `Costo stimato: ${fmtCost(c, false)}.\nSono crediti veri del tuo account Comfy. Procedo?`)) return;
   const body = { frames: GEN.frames, template: $("ai-tpl").value, nome: $("ai-name").value.trim(), durate: want,
     modello: GEN.modello, risoluzione: $("ai-res").value, provider: GEN.prov, formato: $("ai-fmt").value, note: GEN.notes.slice(0, c.tratte) };
+  const claude = await aiClaudePrompt("trans", body, `${c.tratte} ${c.tratte === 1 ? "tratta" : "tratte"} con ${m.nome}`,
+    `${$("ai-res").value}, ${want.join(" + ")} s · costo stimato ${fmtCost(c, false)}${fast}`);
+  if (claude === undefined) return;
+  body.claude = claude;
   const r = await (await fetch(`${BACKEND}/api/ai/transition`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body) })).json().catch((e) => ({ ok: false, msg: String(e) }));
   if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");
@@ -3227,13 +3229,16 @@ async function loadAIResults() {
         ${tratte.length ? `<div class="ai-legs">${tratte.map((t, i) => `<span class="ai-chip ${t.stato === "fatta" ? "ok" : t.stato === "errore" ? "err" : ""}">
           ${String.fromCharCode(65 + i)} → ${String.fromCharCode(66 + i)}<button data-i="${i}" title="Rigenera solo questa tratta">↻</button></span>`).join("")}</div>` : ""}
         ${(it.modifiche || []).length ? `<div class="ai-vers">${it.modifiche.map((m, k) => `<button class="ai-ver" data-k="${k}" title="${escapeHtml(m.testo)}">✎ ${k + 1} ▶</button>`).join("")}</div>` : ""}
-        <div class="ai-acts">${video && !isImg ? '<button class="btn2 ai-edit">✎ Modifica</button>' : ""}<button class="btn2 ai-reveal">Rivela nel Finder</button></div>
+        <div class="ai-acts">${video && !isImg ? '<button class="btn2 ai-edit">✎ Modifica</button>' : ""}<button class="btn2 ai-reveal">Rivela nel Finder</button>
+          ${video ? `<span class="ai-vote">${(() => { const v = ((it.voti || []).filter((x) => x.voto !== "modifica").slice(-1)[0] || {}).voto;
+            return `<button class="ai-up${v === "su" ? " on" : ""}" title="Mi piace: Claude impara cosa ha funzionato">👍</button><button class="ai-down${v === "giu" ? " on" : ""}" title="Non mi piace: dici a Claude cosa non va">👎</button>`; })()}</span>` : ""}</div>
       </div>`;
     card.querySelector(".ai-reveal").onclick = () => window.api && window.api.revealPath(video || it.cartella);
     card.querySelector(".ai-trash").onclick = () => trashAIResult(it, video);
     card.querySelector(".ai-del").onclick = () => hideAIResult(it);
     const ed = card.querySelector(".ai-edit");
     if (ed) ed.onclick = () => openAIEdit(it);
+    card.querySelectorAll(".ai-vote button").forEach((b) => { b.onclick = () => voteAIResult(it, b.classList.contains("ai-up") ? "su" : "giu"); });
     card.querySelectorAll(".ai-ver").forEach((b) => {
       const m = it.modifiche[+b.dataset.k];
       b.onclick = () => openAIViewer(`${it.cartella}/${m.file}`, `${it.nome} · modifica ${+b.dataset.k + 1}`);
@@ -3369,9 +3374,11 @@ async function openAIEdit(it) {
     if (!testo) { q(".ed-txt").focus(); return notify("Scrivi cosa cambiare.", "err"); }
     const c = ED.stime[ED.modello];
     const m = mods.find((x) => x.id === ED.modello) || {};
-    if (!confirm(`Modifico «${it.nome}» con ${m.nome} (${c.risoluzione}).\n\nCosto stimato: ${fmtCost(c, false)}.\nSono crediti veri del tuo account Comfy. Procedo?`)) return;
+    const claude = await aiClaudePrompt("modifica", { id: it.id, source: q(".ed-src").value, testo, modello: ED.modello },
+      `Modifica «${it.nome}» con ${m.nome}`, `${c.risoluzione} · costo stimato ${fmtCost(c, false)}`);
+    if (claude === undefined) return;
     const r = await (await fetch(`${BACKEND}/api/ai/edit`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: it.id, source: q(".ed-src").value, testo, modello: ED.modello, risoluzione: q(".ed-res").value }) })).json()
+      body: JSON.stringify({ id: it.id, source: q(".ed-src").value, testo, prompt: claude.prompt || "", modello: ED.modello, risoluzione: q(".ed-res").value }) })).json()
       .catch((e) => ({ ok: false, msg: String(e) }));
     if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");
     close();
@@ -3381,6 +3388,78 @@ async function openAIEdit(it) {
   render();
   estimate();
   q(".ed-txt").focus();
+}
+
+// Claude writes the prompt from the shared ai-prompt skill and what it sees; you read it, change it if
+// you like, then pay. Resolves to the prompts ({} = the basic prompt) or undefined when cancelled.
+function aiClaudePrompt(tipo, dati, titolo, costo) {
+  return new Promise((resolve) => {
+    const box = document.createElement("div");
+    box.className = "ai-view ai-editbox";
+    box.innerHTML = `<div class="ai-edlg cp-dlg">
+      <div class="ai-vbar"><b>${escapeHtml(titolo)}</b><button class="ai-vx" title="Chiudi (Esc)">✕</button></div>
+      <div class="cp-body"><p class="cp-wait"><span class="cp-dot"></span>Claude guarda le immagini e scrive il prompt con le lezioni del team…</p></div>
+      <div class="ai-go"><div class="ai-cost"><b>${escapeHtml(costo).replace(/\n/g, "<br>")}</b><span>Sono crediti veri del tuo account Comfy.</span></div>
+        <div class="ed-btns"><button class="btn2 cp-no">Annulla</button><button class="send cp-ok" disabled>Genera</button></div></div>
+    </div>`;
+    document.body.appendChild(box);
+    const q = (c) => box.querySelector(c);
+    let out = null, done = false;
+    const close = (val) => { if (done) return; done = true; document.removeEventListener("keydown", onKey); box.remove(); resolve(val); };
+    const onKey = (e) => { if (e.key === "Escape") close(undefined); };
+    document.addEventListener("keydown", onKey);
+    q(".ai-vx").onclick = () => close(undefined); q(".cp-no").onclick = () => close(undefined);
+    q(".cp-ok").onclick = () => {
+      if (!out) return close({});
+      const val = {};
+      box.querySelectorAll("textarea[data-k]").forEach((t) => {
+        const k = t.dataset.k, v = t.value.trim();
+        if (k === "tratte") (val.tratte = val.tratte || [])[+t.dataset.i] = v; else val[k] = v;
+      });
+      close(val);
+    };
+    fetch(`${BACKEND}/api/ai/prompt`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tipo, dati }) })
+      .then((r) => r.json()).catch((e) => ({ ok: false, msg: String(e) })).then((r) => {
+        if (done) return;
+        const body = q(".cp-body");
+        q(".cp-ok").disabled = false;
+        if (!r.ok) {
+          body.innerHTML = `<p class="cp-err">${escapeHtml(r.msg || "Claude non ha risposto.")}</p><p class="cp-note">Puoi generare lo stesso con il prompt di base.</p>`;
+          return;
+        }
+        out = r;
+        const area = (k, label, v, i) => `<label class="ai-l">${escapeHtml(label)}<textarea data-k="${k}"${i != null ? ` data-i="${i}"` : ""} rows="${k === "tratte" ? 4 : 6}">${escapeHtml(v || "")}</textarea></label>`;
+        body.innerHTML = '<p class="cp-note">Scritto da Claude con la skill condivisa. Puoi cambiarlo prima di generare.</p>'
+          + (r.tratte ? r.tratte.map((v, i) => area("tratte", `Tratta ${String.fromCharCode(65 + i)} → ${String.fromCharCode(66 + i)}`, v, i)).join("") : "")
+          + (r.posto != null ? area("posto", "Il posto (Nano Banana Pro)", r.posto) : "")
+          + (r.prompt ? area("prompt", "Prompt", r.prompt) : "");
+      });
+  });
+}
+
+// 👍 / 👎 on a result: Claude looks at it and writes the lesson into the shared skill
+async function voteAIResult(it, voto) {
+  let nota = "";
+  if (voto === "giu") {
+    nota = await new Promise((resolve) => {
+      const box = document.createElement("div");
+      box.className = "ai-view ai-editbox";
+      box.innerHTML = `<div class="ai-edlg cp-dlg"><div class="ai-vbar"><b>Cosa non va in «${escapeHtml(it.nome)}»?</b><button class="ai-vx">✕</button></div>
+        <label class="ai-l">Dillo con parole tue: Claude lo trasforma in una lezione per i prossimi prompt<textarea rows="3" placeholder="es. la camera gira troppo veloce, il palazzo si deforma a metà"></textarea></label>
+        <div class="ai-go"><div></div><div class="ed-btns"><button class="btn2 cp-no">Annulla</button><button class="send cp-ok">Invia</button></div></div></div>`;
+      document.body.appendChild(box);
+      const end = (v) => { box.remove(); resolve(v); };
+      box.querySelector(".ai-vx").onclick = () => end(null); box.querySelector(".cp-no").onclick = () => end(null);
+      box.querySelector(".cp-ok").onclick = () => end(box.querySelector("textarea").value.trim());
+      box.querySelector("textarea").focus();
+    });
+    if (nota === null) return;
+  }
+  const r = await (await fetch(`${BACKEND}/api/ai/feedback`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: it.id, voto, nota }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+  if (!r.ok) return notify(r.msg || "Non sono riuscito a salvare il voto.", "err");
+  notify("Claude impara da questo risultato e condivide la lezione con il team.", "ok");
+  loadAIResults();
 }
 
 async function redoAILeg(it, i) {
@@ -3728,10 +3807,16 @@ async function generateAmb() {
   if (!c || !c.ok) return;
   const how = AMB.rif === "esatto" ? "con la tua immagine come sfondo esatto" : `con un posto ispirato a ${AMB.refs.length} ${AMB.refs.length === 1 ? "immagine" : "immagini"}`;
   const when = AMB.arrivo === "fine" ? "ci arriva alla fine della clip" : "è nel posto dall'inizio";
-  if (!confirm(`Ambientazione con ${m.nome}, ${how}; la persona ${when}.\n\nCosto stimato: ${fmtCost(c, false)}.\nSono crediti veri del tuo account Comfy. Procedo?`)) return;
   const body = { soggetto: AMB.src, contesti: AMB.refs, testo: $("am-text").value.trim(), modello: AMB.modello, risoluzione: $("am-res").value,
                  riferimento: AMB.rif, arrivo: AMB.arrivo, formato: $("am-fmt").value, nome: $("am-name").value.trim(),
                  durata: (AMB.info && AMB.info.durata) || 0, fps: (AMB.info && AMB.info.fps) || 24 };
+  if (AMB.modello === "bria-bg" && AMB.rif === "esatto") {            // Bria takes no prompt: nothing for Claude to write
+    if (!confirm(`Ambientazione con ${m.nome}, ${how}; la persona ${when}.\n\nCosto stimato: ${fmtCost(c, false)}.\nSono crediti veri del tuo account Comfy. Procedo?`)) return;
+  } else {
+    const claude = await aiClaudePrompt("amb", body, `Ambientazione con ${m.nome}`, `${how}; la persona ${when} · costo stimato ${fmtCost(c, false)}`);
+    if (claude === undefined) return;
+    body.claude = claude;
+  }
   const r = await (await fetch(`${BACKEND}/api/ai/scene`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body) })).json().catch((e) => ({ ok: false, msg: String(e) }));
   if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");
@@ -3821,17 +3906,21 @@ async function updateImgCost() {
 function syncImg() {
   if (!$("im-generate")) return;
   const c = IMG.stime[IMG.modello];
-  $("im-generate").disabled = !$("im-text").value.trim() || !c || !c.ok || !!GEN.job || !GEN.stato.chiave;
+  const nothing = !$("im-text").value.trim() && !IMG.main && !IMG.refs.length;   // words or pictures: Claude writes the rest
+  $("im-generate").disabled = nothing || !c || !c.ok || !!GEN.job || !GEN.stato.chiave;
 }
 
 async function generateImg() {
   const c = IMG.stime[IMG.modello];
   const m = ((GEN.stato.modelli || {}).immagini || []).find((x) => x.id === IMG.modello) || {};
   if (!c || !c.ok) return;
-  if (!confirm(`Genero un'immagine ${$("im-fmt").value} con ${m.nome}.\n\nCosto stimato: ${fmtCost(c, false)}.\nSono crediti veri del tuo account Comfy. Procedo?`)) return;
+  const body = { main: IMG.main || "", refs: IMG.refs, testo: $("im-text").value.trim(), modello: IMG.modello,
+                 formato: $("im-fmt").value, nome: $("im-name").value.trim() };
+  const claude = await aiClaudePrompt("img", body, `Immagine con ${m.nome}`, `${$("im-fmt").value} · costo stimato ${fmtCost(c, false)}`);
+  if (claude === undefined) return;
+  body.claude = claude;
   const r = await (await fetch(`${BACKEND}/api/ai/image`, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ main: IMG.main || "", refs: IMG.refs, testo: $("im-text").value.trim(), modello: IMG.modello,
-                           formato: $("im-fmt").value, nome: $("im-name").value.trim() }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
+    body: JSON.stringify(body) })).json().catch((e) => ({ ok: false, msg: String(e) }));
   if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");
   watchAIJob(r.job_id, 1);
 }
