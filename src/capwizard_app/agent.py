@@ -619,10 +619,10 @@ Procedura:
      della voce misurato sull'energia dell'audio (0–0,05 s prima), non sull'inizio della parola di Whisper, che dopo il "vai!" è 0,2–0,4 s in anticipo;
    - clip senza parlato vero nella cartella delle clip (trascrizione vuota, assurda o "Grazie a tutti"): spesso sono B-ROLL del posto,
      guarda i fotogrammi prima di scartarle; quando si nomina il posto mettine uno (esterno poi interno); b-roll solo pertinenti e leggibili;
-   - QUANTITÀ dei suoni: quella dello stile dell'agenzia, che vince (Exodia dal 22/10: pochi e con senso — parole grandi animate
-     all'inizio dell'animazione con ding variati, Positive Pick, Gliss o My presets1; swish SOLO sulle transizioni vere, circa 6-7 a video,
-     zoom di norma senza swish, Soft Wipe massimo 1-2 a video, pochi ding, niente bong né riser in mezzo);
-   - ogni suono ha il colpo all'INIZIO di un sottotitolo (quando compare la parola chiave), riser che finiscono su un sottotitolo o su un taglio;
+   - QUANTITÀ dei suoni: quella dello stile dell'agenzia, che vince (Exodia dal 30/10: misto, sezione "Suoni: misto" di Stile Exodia — suono scelto per il
+     significato della frase, circa un terzo dentro la frase, colpo a inizio animazione sulle parole grandi importanti, swoosh 4-5 a video,
+     0,1-0,15 s prima del taglio, zoom di norma senza, Soft Wipe massimo 1-2, niente bong né riser in mezzo);
+   - i colpi sulle parole chiave cadono all'INIZIO del sottotitolo, riser che finiscono su un sottotitolo o su un taglio; se lo stile dell'agenzia dice altro, vince lo stile;
    - niente transizione subito dopo il titolo;
    - titolo dietro la testa: copia della clip su una traccia video SOPRA i testi del titolo, stesso tempo e stessa sorgente; lo scontorno
      lo fa l'app quando installa il progetto (non scrivere a Daniel di premere "Rimuovi sfondo");
