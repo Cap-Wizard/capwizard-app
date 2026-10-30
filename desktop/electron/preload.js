@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("api", {
   saveSkill: (name) => ipcRenderer.invoke("save-skill", name),
   openPath: (p) => ipcRenderer.invoke("open-path", p),
   revealPath: (p) => ipcRenderer.invoke("reveal-path", p),
+  version: () => ipcRenderer.invoke("version"),
   trashAIResult: (p) => ipcRenderer.invoke("trash-ai-result", p),
   // real path of a file or folder dropped on the window
   pathForFile: (f) => webUtils.getPathForFile(f),

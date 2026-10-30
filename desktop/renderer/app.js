@@ -1306,6 +1306,19 @@ function paintDate() {
 paintDate();
 setInterval(paintDate, 60 * 60 * 1000);
 
+// The version left of the settings: «v1.<commits>», the same for everyone on the same commit of GitHub.
+// Orange with a «+» when this copy has changes not yet on GitHub.
+(async () => {
+  const v = window.api && window.api.version ? await window.api.version().catch(() => null) : null;
+  if (!v) return;
+  const el = $("tb-version");
+  el.textContent = v.versione + (v.locale ? "+" : "");
+  el.classList.toggle("local", !!v.locale);
+  const when = v.data ? new Date(v.data).toLocaleString("it-IT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  el.title = `Commit ${v.commit}${when ? ` del ${when}` : ""}` + (v.locale ? "\nCon modifiche non ancora su GitHub" : "\nUguale a GitHub");
+  el.hidden = false;
+})();
+
 // The line between the two halves of Nuovo video and Smistamento clip can be dragged; each view keeps its width.
 function wireGutters() {
   for (const g of document.querySelectorAll(".split > .gutter")) {

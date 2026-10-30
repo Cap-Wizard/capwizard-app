@@ -279,6 +279,9 @@ ipcMain.handle("open-path", async (_e, p) => {
   else await shell.openPath(p);
 });
 
+// the version next to the settings («v1.<commits>»), to tell at a glance who has the latest
+ipcMain.handle("version", () => require("./build-info").buildInfo(app));
+
 // «Rivela nel Finder»: the file selected in its folder, nothing opened or run
 ipcMain.handle("reveal-path", async (_e, p) => {
   if (typeof p === "string" && p) shell.showItemInFolder(p);
