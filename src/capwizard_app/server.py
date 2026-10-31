@@ -1187,8 +1187,8 @@ def _ai(fn, *args, **kw) -> dict:
 
 
 @app.get("/api/ai/status")
-def ai_status() -> dict:
-    return {**comfy_ai.status(), "templates": comfy_ai.templates(), "modelli": comfy_ai.models()}
+def ai_status_endpoint() -> dict:
+    return {**ai_status(), **comfy_ai.status(), "templates": comfy_ai.templates(), "modelli": comfy_ai.models()}
 
 
 class AIEstimate(BaseModel):
@@ -1754,11 +1754,6 @@ def project_get(project_id: str) -> dict:
 def project_delete(project_id: str) -> dict:
     # only the app's record: a CapCut project is never deleted from here
     return {"removed": False if project_id.startswith("capcut:") else registry.remove_project(project_id)}
-
-
-@app.get("/api/ai/status")
-def ai_status_endpoint() -> dict:
-    return ai_status()
 
 
 @app.post("/api/ai/test")
