@@ -619,18 +619,27 @@ function check() {
   if (!hasFolder) miss.push("cartella delle clip");
   else if (state.batch && !state.batchCount) miss.push("sottocartelle con video");
   if (!hasName) miss.push("nome del progetto");
-  const ready = state.backendReady && state.aiReady && !state.running && !state.modRunning && !miss.length;
-  $("btn-generate").disabled = !ready;
+  const canRun = state.backendReady && state.aiReady && !state.running && !state.modRunning;
+  // with a queue the one big button handles it: the video on screen joins the queue and everything starts
+  const waiting = state.queueWaiting || 0, qRunning = !!state.queueRunning, useQueue = !state.batch && (waiting > 0 || qRunning);
+  const formEmpty = !hasFolder && !$("name").value.trim();
+  const onlyQueue = useQueue && formEmpty && waiting > 0 && !qRunning;
+  $("btn-generate").disabled = !canRun || !(onlyQueue || !miss.length);
   // the queue takes new videos even while another one is being edited
   $("btn-queue").disabled = !(state.backendReady && state.aiReady && !state.batch && !miss.length);
   $("missing").textContent = state.running ? "Montaggio in corso…"
     : !state.backendReady ? "Avvio del motore dell'app…"
+    : onlyQueue ? `${waiting} ${waiting === 1 ? "video pronto" : "video pronti"} in coda`
     : miss.length ? `Manca: ${miss.join(", ")}`
     : !state.aiReady ? "Collega Claude: clicca «Claude» in alto"
     : "Tutto pronto ✓";
   if (!state.running) {
+    const total = waiting + (formEmpty || miss.length ? 0 : 1);
     $("btn-generate").textContent = state.batch
-      ? (state.batchCount ? `MONTA ${state.batchCount} VIDEO` : "MONTA TUTTI") : "INIZIA A EDITARE";
+      ? (state.batchCount ? `MONTA ${state.batchCount} VIDEO` : "MONTA TUTTI")
+      : qRunning ? "METTI IN CODA"
+      : useQueue ? (total === 1 ? "INIZIA A EDITARLO" : `INIZIA A EDITARLI TUTTI (${total})`)
+      : "INIZIA A EDITARE";
   }
 }
 
@@ -785,7 +794,6 @@ function wireEditor() {
 
   $("btn-generate").onclick = onGenerate;
   $("btn-queue").onclick = addToQueue;
-  $("btn-queue-start").onclick = startQueue;
   $("btn-queue-clear").onclick = async () => { await fetch(`${BACKEND}/api/queue/clear`, { method: "POST" }); loadQueue(); };
   loadQueue();
   $("btn-stop").onclick = async () => {
@@ -832,6 +840,7 @@ function buildRequest() {
 }
 
 async function onGenerate() {
+  if (!state.batch && (state.queueWaiting || state.queueRunning)) return runQueue();
   state.running = true;
   check();
   $("console").innerHTML = "";
@@ -932,21 +941,26 @@ async function addToQueue() {
   try {
     const r = await (await fetch(`${BACKEND}/api/queue`, { method: "POST", headers: { "Content-Type": "application/json" },
                                                          body: JSON.stringify(body) })).json();
-    if (r.error) { $("missing").textContent = "⚠️ " + r.error; check(); return; }
+    if (r.error) { check(); $("missing").textContent = "⚠️ " + r.error; return false; }
     addLog(`＋ In coda: ${body.name} · ${state.client ? state.client.nome : body.template}`, "step");
     // ready for the next video of the same client: clear folder, b-roll, name and notes
     setFolder("");
     setBroll(""); $("name").value = ""; $("name").dataset.auto = "1"; $("notes").value = "";
-  } catch (e) { addLog(`Il motore dell'app non risponde (${e}).`, "err"); }
+  } catch (e) { addLog(`Il motore dell'app non risponde (${e}).`, "err"); check(); return false; }
   check();
   loadQueue();
+  return true;
 }
 
-async function startQueue() {
-  $("btn-queue-start").disabled = true;
-  try { await fetch(`${BACKEND}/api/queue/start`, { method: "POST" }); }
-  catch (e) { addLog(`Il motore dell'app non risponde (${e}).`, "err"); }
-  $("btn-queue-start").disabled = false;
+// the big button when there is a queue: the video on screen (if any) joins it, then all start
+async function runQueue() {
+  const btn = $("btn-generate");
+  btn.disabled = true;
+  if ($("input-path").value && !(await addToQueue())) return;
+  if (!state.queueRunning) {
+    try { await fetch(`${BACKEND}/api/queue/start`, { method: "POST" }); }
+    catch (e) { addLog(`Il motore dell'app non risponde (${e}).`, "err"); }
+  }
   loadQueue();
 }
 
@@ -959,8 +973,8 @@ async function loadQueue() {
   $("queue-card").hidden = !items.length;
   const waiting = items.filter((i) => i.status === "in coda").length, running = items.find((i) => i.status === "in corso");
   $("queue-tag").textContent = running ? `${waiting + 1} da fare` : waiting ? `${waiting} in attesa` : "finita";
-  $("btn-queue-start").hidden = !waiting || !!running;
-  $("btn-queue-start").textContent = waiting === 1 ? "INIZIA A EDITARLO" : `INIZIA A EDITARLI TUTTI (${waiting})`;
+  state.queueWaiting = waiting; state.queueRunning = !!running;
+  check();
   const box = $("queue-list");
   box.innerHTML = "";
   for (const it of items) {
