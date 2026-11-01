@@ -785,6 +785,7 @@ function wireEditor() {
 
   $("btn-generate").onclick = onGenerate;
   $("btn-queue").onclick = addToQueue;
+  $("btn-queue-start").onclick = startQueue;
   $("btn-queue-clear").onclick = async () => { await fetch(`${BACKEND}/api/queue/clear`, { method: "POST" }); loadQueue(); };
   loadQueue();
   $("btn-stop").onclick = async () => {
@@ -920,7 +921,7 @@ async function onGenerate() {
 }
 
 // ---------------------------------------------------------------------------
-// Queue: add videos one after the other, they are edited one at a time; a sound when all are done
+// Queue: add videos one after the other, "inizia" starts them one at a time; a sound when all are done
 // ---------------------------------------------------------------------------
 
 let queueTimer = null, queueSel = null;
@@ -941,6 +942,14 @@ async function addToQueue() {
   loadQueue();
 }
 
+async function startQueue() {
+  $("btn-queue-start").disabled = true;
+  try { await fetch(`${BACKEND}/api/queue/start`, { method: "POST" }); }
+  catch (e) { addLog(`Il motore dell'app non risponde (${e}).`, "err"); }
+  $("btn-queue-start").disabled = false;
+  loadQueue();
+}
+
 const Q_LABEL = { "in coda": "⏳ in coda", "in corso": "▶ in corso", "fatto": "✓ pronto", "errore": "✕ errore", "tolto": "fermato" };
 
 async function loadQueue() {
@@ -950,6 +959,8 @@ async function loadQueue() {
   $("queue-card").hidden = !items.length;
   const waiting = items.filter((i) => i.status === "in coda").length, running = items.find((i) => i.status === "in corso");
   $("queue-tag").textContent = running ? `${waiting + 1} da fare` : waiting ? `${waiting} in attesa` : "finita";
+  $("btn-queue-start").hidden = !waiting || !!running;
+  $("btn-queue-start").textContent = waiting === 1 ? "INIZIA A EDITARLO" : `INIZIA A EDITARLI TUTTI (${waiting})`;
   const box = $("queue-list");
   box.innerHTML = "";
   for (const it of items) {
@@ -960,7 +971,7 @@ async function loadQueue() {
     row.innerHTML = `<div style="min-width:0"><div class="qn"></div><div class="ql"></div></div><span class="qs ${cls}">${Q_LABEL[it.status] || it.status}${step}</span>`
       + `<button class="qx" title="${it.status === "in corso" ? "Ferma" : "Togli"}">✕</button>`;
     row.querySelector(".qn").textContent = `${it.name} · ${it.cliente}`;
-    row.querySelector(".ql").textContent = it.status === "errore" ? (it.error || "") : it.last || (it.status === "in coda" ? "aspetta il suo turno" : "");
+    row.querySelector(".ql").textContent = it.status === "errore" ? (it.error || "") : it.last || (it.status === "in coda" ? (running ? "aspetta il suo turno" : "parte quando premi inizia") : "");
     row.querySelector(".qx").onclick = async (e) => {
       e.stopPropagation();
       if (it.status === "in corso" && !confirm(`Fermo il montaggio di «${it.name}»?`)) return;

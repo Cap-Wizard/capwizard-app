@@ -727,8 +727,8 @@ def batch(req: BatchRequest) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Queue: several reels added one after the other, edited one at a time. When the
-# last one ends the Mac plays a sound and shows a notification.
+# Queue: several reels added one after the other, they wait until the user presses
+# start, then they are edited one at a time. When the last one ends the Mac plays a sound and shows a notification.
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -767,10 +767,16 @@ class Queue:
         item = QueueItem(id=uuid.uuid4().hex[:10], req=req, cliente=c["nome"] if c else (req.template or ""))
         with self.lock:
             self.items.append(item)
-            if not (self.worker and self.worker.is_alive()):
+        return item
+
+    def start(self) -> int:
+        """Start editing what is waiting; returns how many videos are waiting."""
+        with self.lock:
+            waiting = sum(1 for i in self.items if i.status == "in coda")
+            if waiting and not (self.worker and self.worker.is_alive()):
                 self.worker = threading.Thread(target=self._loop, daemon=True)
                 self.worker.start()
-        return item
+        return waiting
 
     def _next(self) -> QueueItem | None:
         with self.lock:
@@ -839,6 +845,11 @@ def queue_add(req: GenerateRequest) -> dict:
     if any(i.req.name == req.name and i.status in ("in coda", "in corso") for i in queue.items):
         return {"error": f"«{req.name}» è già in coda."}
     return {"ok": True, "item": queue.add(req).view()}
+
+
+@app.post("/api/queue/start")
+def queue_start() -> dict:
+    return {"ok": True, "avviati": queue.start()}
 
 
 @app.get("/api/queue")
