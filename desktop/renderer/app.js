@@ -3241,7 +3241,9 @@ async function loadAIResults() {
         <div class="ai-meta">${it.costo.usd ? `Speso: ${fmtCost(it.costo)}` : it.stima && it.stima.crediti != null ? `Stima: ${fmtCost(it.stima)}` : ""}${tratte.length && done < tratte.length ? ` · ${done} di ${tratte.length} tratte fatte` : ""}</div>
         ${it.testo ? `<div class="ai-meta ai-prompt" title="${escapeHtml(it.testo)}">«${escapeHtml(it.testo)}»</div>` : ""}
         ${tratte.length ? `<div class="ai-legs">${tratte.map((t, i) => `<span class="ai-chip ${t.stato === "fatta" ? "ok" : t.stato === "errore" ? "err" : ""}">
-          ${String.fromCharCode(65 + i)} → ${String.fromCharCode(66 + i)}<button data-i="${i}" title="Rigenera solo questa tratta">↻</button></span>`).join("")}</div>` : ""}
+          ${String.fromCharCode(65 + i)} → ${String.fromCharCode(66 + i)}${t.in_comfy
+            ? `<button data-i="${i}" title="Il video è ancora in ComfyUI: lo riprendo senza pagarlo di nuovo">↻ Riprendi</button>`
+            : `<button data-i="${i}" title="Rigenera solo questa tratta">↻</button>`}</span>`).join("")}</div>` : ""}
         ${(it.modifiche || []).length ? `<div class="ai-vers">${it.modifiche.map((m, k) => `<button class="ai-ver" data-k="${k}" title="${escapeHtml(m.testo)}">✎ ${k + 1} ▶</button>`).join("")}</div>` : ""}
         <div class="ai-acts">${video && !isImg ? '<button class="btn2 ai-edit">✎ Modifica</button>' : ""}<button class="btn2 ai-reveal">Rivela nel Finder</button>
           ${video ? `<span class="ai-vote">${(() => { const v = ((it.voti || []).filter((x) => x.voto !== "modifica").slice(-1)[0] || {}).voto;
@@ -3479,12 +3481,17 @@ async function voteAIResult(it, voto) {
 async function redoAILeg(it, i) {
   if (GEN.job) return notify("Aspetta che finisca la generazione in corso.", "err");
   const t = it.tratte[i];
+  if (t.in_comfy) return startAIRedo(it, i);       // still in ComfyUI: picked up as it is, nothing paid again
   const r0 = await (await fetch(`${BACKEND}/api/ai/estimate`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ durate: [t.durata || it.durata || 5], modello: it.modello || "kling-v3", risoluzione: it.risoluzione }) })).json()
     .catch(() => ({}));
   const c = ((r0.stime || {})[it.modello || "kling-v3"] || {}).comfy;
   if (!c || !c.ok) return notify("Non riesco a stimare il costo.", "err");
   if (!confirm(`Rigenero la tratta ${String.fromCharCode(65 + i)} → ${String.fromCharCode(66 + i)} di «${it.nome}»; le altre restano come sono.\n\nCosto stimato: ${fmtCost(c, false)}. Procedo?`)) return;
+  startAIRedo(it, i);
+}
+
+async function startAIRedo(it, i) {
   const r = await (await fetch(`${BACKEND}/api/ai/transition/redo`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: it.id, tratta: i }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
   if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");

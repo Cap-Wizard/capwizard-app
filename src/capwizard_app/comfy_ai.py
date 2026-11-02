@@ -240,8 +240,9 @@ def _upload(p: Path, kind: str = "image/png") -> str:
         return json.load(r)["name"]
 
 
-def _run(prompt: dict, log, label: str) -> dict:
-    """Queue a workflow with the account's key and wait for it; returns its outputs."""
+def _run(prompt: dict, log, label: str, queued=None) -> dict:
+    """Queue a workflow with the account's key and wait for it; returns its outputs. `queued` gets the Comfy id
+    as soon as the job is in, so a result that arrives late can still be picked up."""
     key = _key()
     if not key:
         raise AIError("Manca la API key di Comfy nel Portachiavi (account capwizard, servizio comfy-org-api-key).")
@@ -253,8 +254,29 @@ def _run(prompt: dict, log, label: str) -> dict:
             res = json.load(r)
     except urllib.error.HTTPError as e:
         raise AIError(f"ComfyUI ha rifiutato il workflow: {e.read().decode(errors='replace')[:300]}") from None
-    pid, t0 = res["prompt_id"], time.time()
-    while time.time() - t0 < 1800:
+    if queued:
+        queued(res["prompt_id"])
+    return _wait(res["prompt_id"], log, label)
+
+
+def comfy_state(pid: str) -> str:
+    """Where a queued job is: «finito» (in the history), «in coda» (still running or waiting), «perso» (ComfyUI
+    was closed or doesn't know it)."""
+    try:
+        if _get(f"/history/{pid}").get(pid):
+            return "finito"
+        q = _get("/queue")
+    except (OSError, ValueError):
+        return "perso"
+    jobs = q.get("queue_running", []) + q.get("queue_pending", [])
+    return "in coda" if any(len(j) > 1 and j[1] == pid for j in jobs) else "perso"
+
+
+def _wait(pid: str, log, label: str) -> dict:
+    """Wait for a job for as long as ComfyUI still has it: the providers (Kling above all) sometimes keep it in their
+    queue for a long time, and giving up would lose a video that is paid for anyway."""
+    t0 = time.time()
+    while time.time() - t0 < 4 * 3600:
         h = _get(f"/history/{pid}").get(pid)
         if h:
             st = h.get("status", {})
@@ -266,11 +288,15 @@ def _run(prompt: dict, log, label: str) -> dict:
                     msg = "La API key di Comfy non è valida: salvane una nuova nel Portachiavi."
                 raise AIError(msg.strip() or "La generazione non è riuscita.")
             return h.get("outputs", {})
-        mins = int(time.time() - t0) // 60
-        if mins and int(time.time() - t0) % 60 < 5:
-            log(f"{label}: in corso da {mins} min…")
+        secs = int(time.time() - t0)
+        if secs % 60 < 5 and secs >= 60:
+            if comfy_state(pid) == "perso":
+                raise AIError("ComfyUI non ha più questa generazione: è stato chiuso mentre lavorava.")
+            mins = secs // 60
+            log(f"{label}: in corso da {mins} min…" if mins < 20 else
+                f"{label}: in corso da {mins} min. Il provider è lento, aspetto: il video non va perso.")
         time.sleep(5)
-    raise AIError("Dopo 30 minuti la generazione non è finita.")
+    raise AIError("Dopo 4 ore la generazione non è finita: premi ↻ sulla tratta per riprenderla.")
 
 
 def _download(outputs: dict, dest: Path) -> Path:
@@ -286,7 +312,8 @@ def _download(outputs: dict, dest: Path) -> Path:
     raise AIError("ComfyUI non ha restituito nessun file.")
 
 
-def _leg(a: Path, b: Path, text: str, modello: str, durata: int, risoluzione: str, audio: bool, dest: Path, log, label: str) -> dict:
+def _leg(a: Path, b: Path, text: str, modello: str, durata: int, risoluzione: str, audio: bool, dest: Path, log, label: str,
+         queued=None) -> dict:
     """One leg from frame a to frame b with the chosen model."""
     m = _model(modello)
     ia, ib = _upload(a), _upload(b)
@@ -314,7 +341,7 @@ def _leg(a: Path, b: Path, text: str, modello: str, durata: int, risoluzione: st
     }
     log(f"{label}: genero con {m['nome']} ({risoluzione}, {durata} s)…")
     t0 = time.time()
-    _download(_run(prompt, log, label), dest)
+    _download(_run(prompt, log, label, queued), dest)
     log(f"{label}: pronta in {int(time.time() - t0) // 60} min {int(time.time() - t0) % 60} s.")
     return {"seed": seed, "secondi": int(time.time() - t0)}
 
@@ -456,14 +483,26 @@ def generate(folder: Path, only: int | None = None, log=print) -> dict:
         label = f"Tratta {i + 1} di {len(meta['tratte'])}"
         written = (meta.get("claude") or {}).get("tratte") or []      # Claude's prompt for this leg, when it wrote one
         text = written[i] if i < len(written) and written[i] else meta["prompt"] + (f" {t['nota']}" if t["nota"] else "")
+        def queued(pid, t=t):
+            t.update(comfy=pid, stato="in corso")
+            _save(folder, meta)
         try:
             want = t.get("durata", meta.get("durata", 5))
             made = _gen_len(meta.get("modello", "kling-v3"), want)
-            info = _leg(folder / "frame" / meta["frame"][i], folder / "frame" / (meta.get("entrata") or meta["frame"])[i + 1], text,
-                        meta.get("modello", "kling-v3"), made, meta["risoluzione"], meta["audio"], folder / t["file"], log, label)
-            if want < made:                               # shorter than the model can make: the leg is sped up
-                log(f"{label}: accelero da {made} s a {want} s…")
-                _speed(folder / t["file"], want)
+            if t.get("comfy") and t.get("stato") != "fatta" and comfy_state(t["comfy"]) != "perso":
+                # the job from before is still in ComfyUI (finished or in the provider's queue): take that one, paid once
+                log(f"{label}: riprendo la generazione già partita…")
+                _download(_wait(t["comfy"], log, label), folder / t["file"])
+                if want < made:
+                    _speed(folder / t["file"], want)
+                info = {"ripresa": True}
+            else:
+                info = _leg(folder / "frame" / meta["frame"][i], folder / "frame" / (meta.get("entrata") or meta["frame"])[i + 1], text,
+                            meta.get("modello", "kling-v3"), made, meta["risoluzione"], meta["audio"], folder / t["file"], log, label,
+                            queued)
+                if want < made:                           # shorter than the model can make: the leg is sped up
+                    log(f"{label}: accelero da {made} s a {want} s…")
+                    _speed(folder / t["file"], want)
         except AIError:
             t["stato"] = "errore"
             _save(folder, meta)
@@ -483,6 +522,9 @@ def generate(folder: Path, only: int | None = None, log=print) -> dict:
 def describe(folder: Path) -> dict:
     meta = _meta(folder)
     fx = eur_per_usd()
+    for t in meta.get("tratte", []):          # a leg cut off while ComfyUI still has it: ↻ takes it back at no new cost
+        if t.get("comfy") and t.get("stato") != "fatta":
+            t["in_comfy"] = running() and comfy_state(t["comfy"]) != "perso"
     spent = meta.get("speso_usd", 0)
     cat = folder.parent.name
     return {**meta, "cartella": str(folder), "id": folder.name if cat == "Transizioni" else f"{cat}/{folder.name}",
