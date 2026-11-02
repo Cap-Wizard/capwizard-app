@@ -3050,14 +3050,14 @@ function renderAIFrames() {
     col.className = "ai-col";
     const tappa = i >= 2;                          // the frames added after B can go; A and B always stay
     col.innerHTML = `<div class="ai-frame drop${p ? " has" : ""}" id="ai-f-${i}"><span class="ai-fl">${label}</span>
-        ${p || tappa ? `<button class="ai-fx" title="${p ? "Togli l'immagine" : "Togli questa tappa"}">✕</button>` : ""}
-        ${p ? `<img alt="" src="${GEN.thumbs[p] || ""}"><span class="ai-fn">${escapeHtml(p.split("/").pop())}</span>`
-            : `<b>＋</b><span>Trascina o clicca</span>`}</div>
+        ${p || tappa ? `<button class="ai-fx" title="${p ? (isVideoPath(p) ? "Togli il video" : "Togli l'immagine") : "Togli questa tappa"}">✕</button>` : ""}
+        ${p ? `<img alt="" src="${GEN.thumbs[p] || ""}">${isVideoPath(p) ? `<span class="ai-fv">▶ video</span>` : ""}<span class="ai-fn">${escapeHtml(p.split("/").pop())}</span>`
+            : `<b>＋</b><span>Trascina o clicca</span><small>immagine o video</small>`}</div>
       <div class="ai-tl dot${i === 0 ? " first" : ""}${i === n - 1 ? " last" : ""}"><i></i></div>`;
     const card = col.querySelector(".ai-frame");
     card.onclick = async (e) => {
       if (e.target.closest(".ai-fx")) return;
-      const files = window.api ? await window.api.selectImages() : [];
+      const files = window.api ? await window.api.selectMedia() : [];
       if (files && files.length) dropAIFrames(files, i);
     };
     const x = col.querySelector(".ai-fx");
@@ -3099,10 +3099,11 @@ function syncAIGenerate() {
   $("ai-generate").title = !ok ? `${prov.nome || "Questo provider"} non è collegato: collegalo in alto a destra` : "";
 }
 
-// images dropped or chosen: on box `at`, or (at = null) into the empty boxes in order
+// images or videos dropped or chosen: on box `at`, or (at = null) into the empty boxes in order. A video's leg
+// leaves from its last frame and arrives on its first, and the result has the videos with the legs between them
 async function dropAIFrames(paths, at) {
-  const imgs = paths.filter((p) => /\.(png|jpe?g|heic|webp)$/i.test(p));
-  if (!imgs.length) return notify("Servono immagini: PNG, JPG, HEIC o WebP.", "err");
+  const imgs = paths.filter((p) => /\.(png|jpe?g|heic|webp)$/i.test(p) || isVideoPath(p));
+  if (!imgs.length) return notify("Servono immagini (PNG, JPG, HEIC, WebP) o video (MP4, MOV).", "err");
   let slots = at != null ? [at] : GEN.frames.map((f, i) => (f ? -1 : i)).filter((i) => i >= 0);
   if (at == null && !slots.length) slots = [GEN.frames.length - 1];
   imgs.slice(0, slots.length).forEach((p, k) => { GEN.frames[slots[k]] = p; });
@@ -3171,7 +3172,7 @@ function renderAIModels() {
 }
 
 async function generateAI() {
-  if (GEN.frames.some((f) => !f)) return notify("Metti un'immagine in ogni riquadro.", "err");
+  if (GEN.frames.some((f) => !f)) return notify("Metti un'immagine o un video in ogni riquadro.", "err");
   if (!GEN.stato.chiave) return notify("Manca la API key di Comfy nel Portachiavi.", "err");
   const c = (GEN.stime[GEN.modello] || {})[GEN.prov];
   if (!c || !c.ok) return notify("Non riesco a stimare il costo.", "err");
@@ -3656,7 +3657,7 @@ function fpvAnim(canvas, opt) {
 const AI_DESC = {
   img: "Crea un'immagine: parti da una tua immagine (o anche da nessuna), scrivi cosa vuoi e aggiungi tutte le reference che ti servono. Il risultato è un'immagine.",
   amb: "Metti in un altro posto una persona che parla in un video: è lì dal primo fotogramma, oppure ci arriva poco alla volta ed è lì alla fine della clip. Voce e labiale restano quelli originali.",
-  trans: "Un video che va da un fotogramma all'altro: A, B e tutte le tappe che vuoi in mezzo, ognuna con la sua durata. Serve anche per far entrare qualcuno in un posto durante il video.",
+  trans: "Un video che va da un fotogramma all'altro: A, B e tutte le tappe che vuoi in mezzo, ognuna con la sua durata. Serve anche per far entrare qualcuno in un posto durante il video. Se metti un video, la transizione parte dalla sua fine (o arriva al suo inizio) e il risultato li unisce.",
 };
 function showAIDesc() { $("ai-desc").textContent = AI_DESC[GEN.tab] || ""; }
 

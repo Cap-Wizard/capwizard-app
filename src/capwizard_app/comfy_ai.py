@@ -197,13 +197,23 @@ def _fitvf(fid: str | None, pad: bool = False) -> list[str]:
     return ["-vf", vf + ",setsar=1"]
 
 
-def _frame(src: Path, dest: Path, fmt: str | None = None, pad: bool = False) -> Path:
-    """A frame as PNG (HEIC and WebP too), in the chosen format, checked against Kling's limits: 300 px, between
-    1:2.5 and 2.5:1."""
-    r = subprocess.run([vault.ffmpeg() or "ffmpeg", "-v", "error", "-y", "-i", str(src), "-frames:v", "1", *_fitvf(fmt, pad), str(dest)],
-                       capture_output=True, text=True, timeout=60)
+VIDEO = (".mp4", ".mov", ".m4v", ".webm", ".mkv")
+
+
+def _is_video(p: Path) -> bool:
+    return p.suffix.lower() in VIDEO
+
+
+def _frame(src: Path, dest: Path, fmt: str | None = None, pad: bool = False, last: bool = False) -> Path:
+    """A frame as PNG (HEIC and WebP too; of a video its first frame, or with `last` its last one), in the chosen
+    format, checked against Kling's limits: 300 px, between 1:2.5 and 2.5:1."""
+    dest.unlink(missing_ok=True)
+    pick = ["-sseof", "-1", "-i", str(src), "-update", "1"] if last else ["-i", str(src), "-frames:v", "1"]
+    r = subprocess.run([vault.ffmpeg() or "ffmpeg", "-v", "error", "-y", *pick, *_fitvf(fmt, pad), str(dest)],
+                       capture_output=True, text=True, timeout=120)
     if r.returncode or not dest.exists():
-        raise AIError(f"Non riesco a leggere l'immagine {src.name}.")
+        what = "il video" if _is_video(src) else "l'immagine"
+        raise AIError(f"Non riesco a leggere {what} {src.name}.")
     w, h = _size(dest)
     if min(w, h) < 300:
         raise AIError(f"{src.name} è troppo piccola ({w}x{h}): servono almeno 300 px per lato.")
@@ -337,9 +347,46 @@ def _slug(s: str) -> str:
     return re.sub(r"[^\w\- ]+", "", s).strip().replace(" ", "-")[:50] or "transizione"
 
 
+def _has_audio(p: Path) -> bool:
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", str(p)],
+                       capture_output=True, text=True, timeout=30)
+    return bool(r.stdout.strip())
+
+
+def _join_clips(folder: Path, meta: dict, final: Path) -> Path:
+    """The videos put on the stages, with the generated legs between them: one clip, at the legs' size, with the
+    videos' own sound (silence under the legs that have none)."""
+    parts = []
+    for i, clip in enumerate(meta["clip"]):
+        if clip and Path(clip).exists():
+            parts.append(Path(clip))
+        if i < len(meta["tratte"]):
+            parts.append(folder / meta["tratte"][i]["file"])
+    w, h = _size(folder / meta["tratte"][0]["file"])
+    fps = _fps(folder / meta["tratte"][0]["file"]) or 30
+    args, chains, ins = [], [], ""
+    for k, p in enumerate(parts):
+        args += ["-i", str(p)]
+        chains.append(f"[{k}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,fps={fps:g},format=yuv420p[v{k}]")
+        if _has_audio(p):
+            chains.append(f"[{k}:a]aresample=48000,aformat=channel_layouts=stereo[a{k}]")
+        else:
+            chains.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={_seconds(p):.3f}[a{k}]")
+        ins += f"[v{k}][a{k}]"
+    chains.append(f"{ins}concat=n={len(parts)}:v=1:a=1[v][a]")
+    r = subprocess.run([vault.ffmpeg() or "ffmpeg", "-v", "error", "-y", *args, "-filter_complex", ";".join(chains),
+                        "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-crf", "16", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                        "-b:a", "192k", str(final)], capture_output=True, text=True, timeout=3600)
+    if r.returncode:
+        raise AIError(f"Non riesco a unire i video con la transizione: {r.stderr.strip()[-300:]}")
+    return final
+
+
 def _join(folder: Path, meta: dict) -> Path:
     legs = [folder / t["file"] for t in meta["tratte"] if (folder / t["file"]).exists()]
     final = folder / f"{_slug(meta['nome'])}.mp4"
+    if any(meta.get("clip") or []):
+        return _join_clips(folder, meta, final)
     if len(legs) == 1:
         shutil.copyfile(legs[0], final)
         return final
@@ -381,11 +428,16 @@ def new_transition(frames: list[str], template_id: str, nome: str, durate: list[
         raise AIError(f"{m['nome']} non fa video a {risoluzione}.")
     folder = OUT_ROOT / "Transizioni" / f"{datetime.now():%Y-%m-%d_%H%M}_{_slug(nome or t['nome'])}"
     (folder / "frame").mkdir(parents=True, exist_ok=True)
-    copies = [str(_frame(Path(f), folder / "frame" / f"{i + 1:02d}.png", formato).name) for i, f in enumerate(frames)]
+    # a video on a stage: the leg arriving there ends on its first frame, the leg leaving starts from its last
+    copies, entrata = [], []
+    for i, f in enumerate(frames):
+        src = Path(f)
+        copies.append(_frame(src, folder / "frame" / f"{i + 1:02d}.png", formato, last=_is_video(src)).name)
+        entrata.append(_frame(src, folder / "frame" / f"{i + 1:02d}_inizio.png", formato).name if _is_video(src) else copies[-1])
     meta = {"tipo": "transizione", "formato": formato, "nome": nome or t["nome"], "template": t["id"], "template_nome": t["nome"],
             "modello": m["id"], "modello_nome": m["nome"], "provider": provider,
             "risoluzione": risoluzione, "audio": bool(t.get("audio")), "prompt": t["prompt"],
-            "frame": copies, "creato": datetime.now().isoformat(timespec="seconds"),
+            "frame": copies, "entrata": entrata, "clip": [f if _is_video(Path(f)) else None for f in frames], "creato": datetime.now().isoformat(timespec="seconds"),
             "tratte": [{"file": f"tratta_{i + 1:02d}.mp4", "durata": durate[i],
                         "nota": (note[i] if i < len(note) else "").strip(), "stato": "da fare"} for i in range(legs)]}
     meta["stima"] = estimate(durate, m["id"], risoluzione, provider)
@@ -407,7 +459,7 @@ def generate(folder: Path, only: int | None = None, log=print) -> dict:
         try:
             want = t.get("durata", meta.get("durata", 5))
             made = _gen_len(meta.get("modello", "kling-v3"), want)
-            info = _leg(folder / "frame" / meta["frame"][i], folder / "frame" / meta["frame"][i + 1], text,
+            info = _leg(folder / "frame" / meta["frame"][i], folder / "frame" / (meta.get("entrata") or meta["frame"])[i + 1], text,
                         meta.get("modello", "kling-v3"), made, meta["risoluzione"], meta["audio"], folder / t["file"], log, label)
             if want < made:                               # shorter than the model can make: the leg is sped up
                 log(f"{label}: accelero da {made} s a {want} s…")
