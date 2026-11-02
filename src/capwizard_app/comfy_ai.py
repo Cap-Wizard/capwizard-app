@@ -260,11 +260,12 @@ def _run(prompt: dict, log, label: str, queued=None) -> dict:
 
 
 def comfy_state(pid: str) -> str:
-    """Where a queued job is: «finito» (in the history), «in coda» (still running or waiting), «perso» (ComfyUI
-    was closed or doesn't know it)."""
+    """Where a queued job is: «finito» (done, its video ready), «in coda» (still running or waiting), «perso»
+    (failed, or ComfyUI was closed or doesn't know it)."""
     try:
-        if _get(f"/history/{pid}").get(pid):
-            return "finito"
+        h = _get(f"/history/{pid}").get(pid)
+        if h:
+            return "finito" if h.get("status", {}).get("status_str") == "success" else "perso"
         q = _get("/queue")
     except (OSError, ValueError):
         return "perso"
@@ -286,6 +287,10 @@ def _wait(pid: str, log, label: str) -> dict:
                     msg = "Crediti Comfy finiti: ricarica l'account su platform.comfy.org."
                 elif "Unauthorized" in msg:
                     msg = "La API key di Comfy non è valida: salvane una nuova nel Portachiavi."
+                elif "time out" in msg.lower() or "timed out" in msg.lower():
+                    free = '"final_unit_deduction": "0"' in msg
+                    msg = ("Il provider non è riuscito a generare il video entro il suo tempo massimo (spesso è sovraccarico)."
+                           + (" Non ti ha addebitato niente." if free else "") + " Riprova con ↻ o prova un altro modello.")
                 raise AIError(msg.strip() or "La generazione non è riuscita.")
             return h.get("outputs", {})
         secs = int(time.time() - t0)
