@@ -42,6 +42,7 @@
           <button id="btn-config-ai">Collegamento a Claude</button>
           <button id="btn-ai-services">✦ Servizi AI <small id="ai-count"></small></button>
           <button id="btn-team-board">👥 Bacheca del team</button>
+          <button id="btn-updates">⬆︎ Aggiornamenti <small id="upd-count"></small></button>
           <button id="tb-account" hidden>Gestisci abbonamento</button>
           <button id="tb-logout" hidden>Esci</button>
         </div>
@@ -454,6 +455,22 @@
         <button class="btn2" id="ai-connectors">Apri i connettori di Claude</button>
         <div class="spacer"></div>
         <button class="btn2" id="ai-refresh">Aggiorna</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== AGGIORNAMENTI ==================== -->
+  <div id="update-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Aggiornamenti</h2>
+        <button class="modal-close" id="upd-close">✕</button>
+      </div>
+      <div class="modal-body" id="upd-body"></div>
+      <div class="modal-foot">
+        <button class="btn2" id="upd-check">Controlla ora</button>
+        <div class="spacer"></div>
+        <button class="send" id="upd-go" hidden>Aggiorna</button>
       </div>
     </div>
   </div>

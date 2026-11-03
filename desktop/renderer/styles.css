@@ -975,3 +975,11 @@ pre.cmd { background: var(--bg2, #0b0c0f); border: 1px solid var(--line); border
 .ai-vote { display: inline-flex; gap: 4px; margin-left: auto; }
 .ai-vote button { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: transparent; font-size: 13px; cursor: pointer; filter: grayscale(1); opacity: .65; }
 .ai-vote button:hover, .ai-vote button.on { filter: none; opacity: 1; border-color: var(--accent); }
+
+/* ---- updates ---- */
+.upd-state { font-size: 13px; color: var(--text); margin: 0 0 12px; }
+.upd-state.f-aggiornato { color: var(--ok); }
+.upd-state.f-errore { color: var(--err); }
+.upd-notes { background: var(--panel2, var(--panel)); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; }
+.upd-notes .upd-text { white-space: pre-wrap; color: var(--mute); max-height: 180px; overflow-y: auto; margin: 6px 0 8px; line-height: 1.5; }
+.upd-notes a { color: var(--accent-hover); text-decoration: none; }

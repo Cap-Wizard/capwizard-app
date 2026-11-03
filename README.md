@@ -106,13 +106,27 @@ npm start        # lancia Electron, che a sua volta avvia il backend
 In dev, `main.js` lancia il backend con l'interprete della `.venv`. Nella build
 impacchettata userà un sidecar PyInstaller in `resources/backend/` (da fare).
 
-### Distribuzione (TODO)
+### Release e aggiornamenti
 
-- Sidecar Python via **PyInstaller** (un binario per OS)
-- `ffmpeg` e skill `reel-capcut-mac` installati al primo avvio
-- `electron-builder` → `.dmg` (Mac) + `.exe`/NSIS (Windows)
-- Code signing: Apple Developer ID + notarization; certificato Windows
-- Auto-update
+`npm run dist` fa il backend PyInstaller e, con electron-builder, il `.dmg` e lo `.zip` per Mac
+(firmati ad hoc). Per pubblicare una versione: alza `version` in `desktop/package.json`, committa
+e lancia
+
+```bash
+cd desktop && scripts/release.sh note.md
+```
+
+che compila, scrive lo `.sha256` dello zip, crea il tag `v<versione>` e la release su GitHub
+(pre-release se la versione ha un «-») con DMG, zip e checksum.
+
+L'app installata da DMG si aggiorna da quelle release (`electron/updater.js`): ogni 6 ore guarda
+le release di Cap-Wizard/capwizard-app, e se ce n'è una più nuova scarica lo zip, controlla lo
+SHA-256, lo scompatta e sostituisce l'app quando si chiude (o subito con «Riavvia e aggiorna»).
+In ⚙ → «Aggiornamenti» si sceglie **Chiedi prima** (un avviso, e l'aggiornamento parte con un
+clic) o **Automatico**. Non usa electron-updater perché su Mac vuole un'app firmata con un Apple
+Developer ID. Funziona finché la repo è pubblica; la versione di sviluppo si aggiorna con git.
+
+Da fare: firma Apple Developer ID + notarization (niente più «tasto destro → Apri»), build Windows.
 
 ## Clienti condivisi (VIDEO EDIT BRAIN)
 

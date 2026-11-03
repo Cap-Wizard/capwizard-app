@@ -26,4 +26,11 @@ contextBridge.exposeInMainWorld("api", {
   clearToken: () => ipcRenderer.invoke("auth-clear-token"),
   onBackendReady: (cb) =>
     ipcRenderer.on("backend-ready", (_e, data) => cb(data)),
+  // updates from the GitHub releases
+  updateState: () => ipcRenderer.invoke("update-state"),
+  updateCheck: () => ipcRenderer.invoke("update-check"),
+  updateDownload: () => ipcRenderer.invoke("update-download"),
+  updateInstall: () => ipcRenderer.invoke("update-install"),
+  updateMode: (modo) => ipcRenderer.invoke("update-mode", modo),
+  onUpdateState: (cb) => ipcRenderer.on("update-state", (_e, st) => cb(st)),
 });
