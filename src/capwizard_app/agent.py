@@ -665,6 +665,8 @@ Procedura:
    - take ripetute: tieni l'ultima take completa, mai doppioni;
    - b-roll solo quando servono, quelli 🐢 rallentati; se è un VIDEO CINE segui anche la nota "Video cine";
    - musica SEMPRE dalla libreria Musica di CapCut (mai mp3 scaricati o brani commerciali), DIVERSA dagli ultimi video (lista nel brief).
+   - volume della musica MISURATO, non a occhio: ~18 dB sotto la voce (LUFS della voce usata − LUFS del tratto di brano usato, con ffmpeg ebur128),
+     di solito 0,08–0,3; a 0,02–0,03 non si sente (correzione di Daniel 04/11);
 4. NON aprire né chiudere CapCut e NON installare il progetto: lo fa l'app. Alla fine scrivi il file `{result}` con:
    {{"staging": "{staging}", "nome": "{name}", "durata": <secondi>, "riassunto": "<cosa hai fatto, in italiano, 5-8 righe>",
     "da_fare_a_mano": ["<cosa resta da fare in CapCut>", ...]}}
