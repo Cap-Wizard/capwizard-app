@@ -95,6 +95,7 @@ async function bootBackend() {
         await loadProjects();
         if (!$("view-dash").hidden) loadBoard();
         if (!$("view-ai").hidden) loadAI();       // the AI section was open before the backend was up
+        if (!$("view-scarico").hidden) loadScaricoCodes();
         loadAiServices();
         check();
         checkClaude();                      // real request, takes a few seconds
@@ -2780,6 +2781,7 @@ function wireScarico() {
   };
   $("sc-code").onchange = () => { $("sc-code-new").hidden = $("sc-code").value !== "__new"; checkScarico(); };
   $("sc-search").oninput = renderScaricoChips;
+  $("sc-search").onkeydown = (e) => { if (e.key === "Enter") { const c = $("sc-chips").querySelector(".chip:not(.other)"); if (c) c.click(); } };
   ["sc-out", "sc-code-new", "sc-shoot", "sc-mmaa"].forEach((i) => { $(i).oninput = checkScarico; });
   $("sc-go").onclick = startScarico;
   $("sc-exec").onclick = execScarico;
@@ -2796,7 +2798,9 @@ async function loadScaricoCodes() {
     sc.codes = d.codici;
     sc.codesLoaded = true;
     renderScaricoChips();
-  } catch (_) { /* backend busy: retried next time the view opens */ }
+  } catch (_) {                                // backend busy: try again while the view stays open
+    setTimeout(() => { if (!$("view-scarico").hidden) loadScaricoCodes(); }, 3000);
+  }
   checkScarico();
 }
 
@@ -2847,7 +2851,7 @@ function renderScaricoChips() {
 }
 
 function scaricoCode() {
-  return ($("sc-code").value === "__new" ? $("sc-code-new").value : $("sc-code").value).trim().toUpperCase();
+  return ($("sc-code").value === "__new" || !$("sc-code-new").hidden ? $("sc-code-new").value : $("sc-code").value).trim().toUpperCase();
 }
 
 function addScaricoPath(p) {
@@ -2881,6 +2885,7 @@ function checkScarico() {
   if (!sc.clips.length) miss.push("clip");
   if (!$("sc-out").value.trim()) miss.push("cartella di destinazione");
   if (!scaricoCode()) miss.push("cliente");
+  else if (!/^[A-Z0-9]{2,6}$/.test(scaricoCode())) miss.push("codice cliente di 4 lettere");
   $("sc1").classList.toggle("done", !!sc.clips.length);
   $("sc2").classList.toggle("done", !!$("sc-out").value.trim() && !!scaricoCode());
   $("sc-dest").textContent = scaricoDest() ? `Le cartelle dei video andranno in: ${scaricoDest()}` : "";
