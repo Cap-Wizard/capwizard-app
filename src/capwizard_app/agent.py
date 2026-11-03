@@ -649,8 +649,10 @@ Procedura:
    ~/Desktop/VIDEO CLAUDE/720 STUDI0 ci sono script di video simili (work_*/), riusali e adattali.
    Tagli, titolo, sottotitoli, suoni, musica, b-roll, foto: tutto secondo le regole del cliente.
 3. Controlla il risultato (JSON valido, nessun riferimento rotto, durata giusta) e in particolare:
-   - tagli STRETTI: ogni clip finisce ~0,05–0,1 s dopo l'ultima parola (niente code di silenzio) e INIZIA sull'attacco reale
-     della voce misurato sull'energia dell'audio (0–0,05 s prima), non sull'inizio della parola di Whisper, che dopo il "vai!" è 0,2–0,4 s in anticipo;
+   - tagli STRETTI ma con la PAROLA FINITA: niente spazi tra le frasi, però la clip finisce 0,10–0,12 s dopo la fine VERA della voce, misurata
+     sull'energia con una soglia bassa (rumore di fondo + 10 dB: con picco −32 dB si mangia la coda di vocali e "s", i clienti lo sentono),
+     mai oltre l'attacco della frase dopo; e INIZIA 0,04 s prima del primo suono sopra rumore + 10 dB, non sull'inizio della parola di Whisper,
+     che dopo il "vai!" è 0,2–0,4 s in anticipo; tagli allineati ai fotogrammi;
    - clip senza parlato vero nella cartella delle clip (trascrizione vuota, assurda o "Grazie a tutti"): spesso sono B-ROLL del posto,
      guarda i fotogrammi prima di scartarle; quando si nomina il posto mettine uno (esterno poi interno); b-roll solo pertinenti e leggibili;
    - QUANTITÀ dei suoni: quella dello stile dell'agenzia, che vince (Exodia dal 30/10: misto, sezione "Suoni: misto" di Stile Exodia — suono scelto per il
