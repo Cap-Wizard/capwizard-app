@@ -11,12 +11,14 @@ NOTES="$1"
 VER=$(node -p 'require("./package.json").version')
 [ -z "$(git status --porcelain)" ] || { echo "Ci sono modifiche non committate: committa prima di fare la release."; exit 1; }
 git rev-parse -q --verify "refs/tags/v$VER" >/dev/null && { echo "Esiste già il tag v$VER: alza la versione in package.json."; exit 1; }
+# on GitHub before building: the version shown in the app (build-info) counts commits on GitHub
+git push origin HEAD
 [ -n "$SKIP_BUILD" ] || npm run dist
 ZIP="dist/CapWizard-$VER-arm64.zip"
 DMG="dist/CapWizard-$VER-arm64.dmg"
 [ -f "$ZIP" ] && [ -f "$DMG" ] || { echo "Mancano $DMG o $ZIP: lancia npm run dist."; exit 1; }
 shasum -a 256 "$ZIP" | cut -d' ' -f1 > "$ZIP.sha256"
 git tag -a "v$VER" -m "CapWizard $VER"
-git push origin HEAD "v$VER"
+git push origin "v$VER"
 PRE=""; [[ "$VER" == *-* ]] && PRE="--prerelease"
 gh release create "v$VER" $PRE --title "CapWizard $VER" --notes-file "$NOTES" "$DMG" "$ZIP" "$ZIP.sha256"
