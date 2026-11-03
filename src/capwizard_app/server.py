@@ -152,7 +152,7 @@ class BatchRequest(GenerateRequest):
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="CapWizard API", version="0.2.0-alpha.2")
+app = FastAPI(title="CapWizard API", version="0.2.0-alpha.3")
 
 # Only the CapWizard window may drive this API. 127.0.0.1 alone is not enough: any web page open
 # in a browser on this Mac can call it. Electron hands the backend a random token at launch
