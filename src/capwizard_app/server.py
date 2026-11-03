@@ -311,20 +311,33 @@ def _run_job(job: Job, req: GenerateRequest) -> None:
     brain.push_soon(f"Lezioni dal reel «{req.name}»")
 
 
+def natural_key(name: str) -> list:
+    """VIDEO 2 before VIDEO 10."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
+
+
+def _videos_in(d: Path) -> int:
+    """Videos in a folder and in its own subfolders (VIDEO 1/CLIP, VIDEO 1/BROLL)."""
+    n = 0
+    try:
+        for p in d.iterdir():
+            if p.name.startswith("."):
+                continue
+            if p.is_dir():
+                n += sum(1 for q in p.iterdir() if not q.name.startswith(".") and is_video(q))
+            elif is_video(p):
+                n += 1
+    except OSError:
+        pass
+    return n
+
+
 def _project_subfolders(parent: Path) -> list[Path]:
-    """Immediate subfolders of `parent` that contain at least one video."""
+    """Immediate subfolders of `parent` that contain at least one video (directly or one level down)."""
     if not parent.is_dir():
         return []
-    out: list[Path] = []
-    for d in sorted(parent.iterdir()):
-        if not d.is_dir() or d.name.startswith("."):
-            continue
-        try:
-            if any(is_video(p) for p in d.iterdir()):
-                out.append(d)
-        except OSError:
-            continue
-    return out
+    return [d for d in sorted(parent.iterdir(), key=lambda p: natural_key(p.name))
+            if d.is_dir() and not d.name.startswith(".") and _videos_in(d)]
 
 
 def _run_batch(job: Job, req: BatchRequest) -> None:
@@ -714,8 +727,13 @@ def job_stop(job_id: str) -> dict:
 
 @app.get("/api/subfolders")
 def subfolders(path: str) -> dict:
-    subs = _project_subfolders(Path(path))
-    return {"folders": [{"name": s.name, "path": str(s)} for s in subs]}
+    parent = Path(path)
+    subs = _project_subfolders(parent)
+    try:
+        direct = parent.is_dir() and any(is_video(p) for p in parent.iterdir() if not p.name.startswith("."))
+    except OSError:
+        direct = False
+    return {"direct": direct, "folders": [{"name": s.name, "path": str(s), "clips": _videos_in(s)} for s in subs]}
 
 
 @app.post("/api/batch")

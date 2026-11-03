@@ -495,7 +495,23 @@ async function setFolder(path, exclude = []) {
   suggestName();
   check();
   if (path && state.batch) previewBatch();
+  if (path && !state.batch) detectShooting(path);
   await loadStrip(strips.clips, path, exclude);
+}
+
+// A folder with no clips of its own but several video folders inside (VIDEO → VIDEO 1, VIDEO 2…): that's a whole shooting.
+async function detectShooting(path) {
+  try {
+    const d = await (await fetch(`${BACKEND}/api/subfolders?path=${encodeURIComponent(path)}`)).json();
+    if (d.direct || (d.folders || []).length < 2 || $("input-path").value !== path || state.batch) return;
+    if (d.folders.some((f) => /^(clip|b[- ]?roll|audio|raw|proxy|foto)/i.test(f.name))) return;   // one video with CLIP/ and BROLL/
+    state.batch = true;
+    updateBatchUI();
+    notice("shooting", { icon: "🗂️", title: `Ho trovato ${d.folders.length} video in questa cartella`,
+      text: "Monto un progetto per ogni sottocartella. Se invece è un video solo, torna a «Un video».",
+      actions: [{ label: "Ok", primary: true, run: () => dropNotice("shooting") },
+                { label: "È un video solo", run: () => { dropNotice("shooting"); state.batch = false; updateBatchUI(); } }] });
+  } catch (_) { /* backend busy: the tabs still work by hand */ }
 }
 
 // The clips box and the b-roll box: one frame per video, each with its ✕, and a ✕ on the box for all of them.
@@ -587,17 +603,23 @@ async function previewBatch() {
     const el = $("batch-preview");
     el.hidden = false;
     el.textContent = folders.length
-      ? `Farò ${folders.length} progetti: ${folders.map((f) => f.name).join(", ")}`
-      : "Nessuna sottocartella con video qui.";
+      ? `Farò ${folders.length} video, uno per cartella: ${folders.map((f) => `${f.name}${f.clips ? ` (${f.clips} clip)` : ""}`).join(", ")}`
+      : "Nessuna sottocartella con video qui: trascina la cartella che contiene le cartelle dei video.";
   } catch (_) { state.batchCount = 0; }
   check();
 }
 
 function updateBatchUI() {
   const b = state.batch;
-  $("sw-batch").classList.toggle("on", b);
+  $("mode-one").classList.toggle("on", !b);
+  $("mode-batch").classList.toggle("on", b);
+  $("drop-title").textContent = b ? "📁 Trascina qui la cartella dello shooting" : "📁 Trascina qui la cartella delle clip";
+  $("drop-sub").textContent = b ? "quella con dentro una sottocartella per ogni video (es. VIDEO → VIDEO 1, VIDEO 2…)"
+    : "oppure clicca per sceglierla dal Finder";
   $("name-label").textContent = b ? "Prefisso dei nomi (facoltativo)" : "Nome del nuovo progetto";
-  $("name").placeholder = b ? "es. CHIRONE" : "es. CLIENTE - Video 1";
+  $("name").placeholder = b ? (state.client ? `es. ${state.client.nome.toUpperCase()} -` : "es. CHIRONE") : "es. CLIENTE - Video 1";
+  if (b && $("name").dataset.auto) { $("name").value = ""; $("name").dataset.auto = ""; }
+  if (!b) suggestName();
   $("batch-preview").hidden = true;
   state.batchCount = 0;
   if (b && $("input-path").value) previewBatch();
@@ -787,7 +809,8 @@ function wireEditor() {
     if (p) $("airender-path").value = p;
   };
   wireAiModal();
-  $("row-batch").onclick = () => { state.batch = !state.batch; updateBatchUI(); };
+  $("mode-one").onclick = () => { state.batch = false; updateBatchUI(); };
+  $("mode-batch").onclick = () => { state.batch = true; updateBatchUI(); };
 
   $("btn-client-open").onclick = () => { if (state.client) window.api.openPath(state.client.path); };
   $("btn-kit-guide").onclick = () => { $("kit-guide").hidden = false; };
@@ -856,7 +879,7 @@ async function onGenerate() {
   if (state.batch) {
     endpoint = "/api/batch";
     body.parent_folder = body.input_path;
-    body.name_prefix = body.name;
+    body.name_prefix = body.name || (state.client ? `${state.client.nome.toUpperCase()} -` : "");
     delete body.input_path;
     delete body.name;
   }
