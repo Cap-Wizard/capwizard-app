@@ -108,12 +108,12 @@ def analyse(job, d: dict) -> dict:
     if not md:
         raise RuntimeError("Manca la skill scarico.")
     codice = (d.get("codice") or "").strip().upper()
-    if not re.fullmatch(r"[A-Z0-9]{2,6}", codice):
-        raise RuntimeError("Scrivi il codice del cliente (es. GISE).")
+    if codice and not re.fullmatch(r"[A-Z0-9]{2,6}", codice):
+        raise RuntimeError("Il codice del cliente va di 2-6 lettere (es. GISE), oppure lascialo vuoto.")
     if not d.get("clip"):
         raise RuntimeError("Trascina le clip o la cartella dello shooting.")
     _check_output(d.get("output") or "")
-    work = WORK_DIR / f"scarico {_slug(codice)} {time.strftime('%m%d-%H%M')}"
+    work = WORK_DIR / f"scarico {_slug(codice or 'clip')} {time.strftime('%m%d-%H%M')}"
     work.mkdir(parents=True, exist_ok=True)
 
     job.log(f"▶ 1/2 Inventario, clip nere e trascrizione ({len(d['clip'])} elementi trascinati)")
@@ -147,7 +147,7 @@ def analyse(job, d: dict) -> dict:
     own = {c["codice"]: c["cliente"] for c in own_codes()} if brain.disabled() and vault.enabled() else {}
     prompt = PROMPT.format(agenzia=f"il cliente {own[codice]}" if codice in own else "l'agenzia Kora",
                            chi="Daniel" if own else "Nicola", skill=SKILL, skill_md=md, inventario=inv_path,
-                           codice=f"{codice} — {own[codice]}" if codice in own else codice,
+                           codice=f"{codice} — {own[codice]}" if codice in own else codice or "non indicato",
                            pdp=f"in `{work / 'pdp.txt'}`" if pdp else "nessuno",
                            note=(d.get("note") or "").strip() or "nessuna", ffmpeg=vault.ffmpeg() or "ffmpeg",
                            work=work, result=result)
@@ -168,9 +168,15 @@ def _with_names(plan: dict, inv: list[dict], codice: str, work: Path) -> dict:
     by_n = {r["n"]: r for r in inv}
     width = max(4, len(str(len(inv))))
 
+    dup = {k for k in (r["nome"] for r in inv) if [r["nome"] for r in inv].count(k) > 1}
+
     def clip(n):
         r = by_n[n]
-        return {"n": n, "nome": r["nome"], "nuovo": f"{codice} - {n:0{width}d}{Path(r['nome']).suffix}"}
+        if codice:
+            nuovo = f"{codice} - {n:0{width}d}{Path(r['nome']).suffix}"
+        else:                                     # no code: the clip keeps its name (two cards with C0001: add the number)
+            nuovo = f"{Path(r['nome']).stem} ({n}){Path(r['nome']).suffix}" if r["nome"] in dup else r["nome"]
+        return {"n": n, "nome": r["nome"], "nuovo": nuovo}
 
     used = set()
     gruppi = []
@@ -200,7 +206,7 @@ def execute(job, d: dict) -> dict:
     root = _check_output(d.get("output") or "")
     shooting = (d.get("shooting") or "").strip().rstrip("°")
     if shooting:
-        root = root / f"{plan['codice']} - {shooting}° Shooting - {(d.get('mmaa') or time.strftime('%m%y')).strip()}"
+        root = root / f"{plan['codice'] + ' - ' if plan.get('codice') else ''}{shooting}° Shooting - {(d.get('mmaa') or time.strftime('%m%y')).strip()}"
     move = d.get("modo") == "sposta"
 
     moves = []   # (src, dest, folder, title)

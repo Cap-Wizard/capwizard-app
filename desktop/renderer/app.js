@@ -2876,7 +2876,7 @@ function renderScaricoClips() {
 function scaricoDest() {
   const out = $("sc-out").value.trim().replace(/\/$/, "");
   const n = $("sc-shoot").value.trim().replace(/°$/, "");
-  return out && n ? `${out}/${scaricoCode() || "CODICE"} - ${n}° Shooting - ${$("sc-mmaa").value.trim()}` : out;
+  return out && n ? `${out}/${scaricoCode() ? scaricoCode() + " - " : ""}${n}° Shooting - ${$("sc-mmaa").value.trim()}` : out;
 }
 
 function checkScarico() {
@@ -2884,10 +2884,9 @@ function checkScarico() {
   const miss = [];
   if (!sc.clips.length) miss.push("clip");
   if (!$("sc-out").value.trim()) miss.push("cartella di destinazione");
-  if (!scaricoCode()) miss.push("cliente");
-  else if (!/^[A-Z0-9]{2,6}$/.test(scaricoCode())) miss.push("codice cliente di 4 lettere");
+  if (scaricoCode() && !/^[A-Z0-9]{2,6}$/.test(scaricoCode())) miss.push("codice cliente di 2-6 lettere (o lascialo vuoto)");
   $("sc1").classList.toggle("done", !!sc.clips.length);
-  $("sc2").classList.toggle("done", !!$("sc-out").value.trim() && !!scaricoCode());
+  $("sc2").classList.toggle("done", !!$("sc-out").value.trim());
   $("sc-dest").textContent = scaricoDest() ? `Le cartelle dei video andranno in: ${scaricoDest()}` : "";
   $("sc-go").disabled = busy || !!miss.length || !state.backendReady || !state.aiReady;
   $("sc-missing").textContent = busy ? "" : miss.length ? `Manca: ${miss.join(", ")}`
@@ -2939,7 +2938,7 @@ async function startScarico() {
   sc.plan = null;
   $("sc-plan-card").hidden = true;
   $("sc-console").innerHTML = "";
-  scLog(`🗂️ Smistamento ${scaricoCode()}: ${sc.clips.length} elementi → ${scaricoDest()}`, "step");
+  scLog(`🗂️ Smistamento ${scaricoCode() || "clip"}: ${sc.clips.length} elementi → ${scaricoDest()}`, "step");
   const plan = await scaricoJob("/api/scarico/analizza", { clip: sc.clips, output: $("sc-out").value.trim(), codice: scaricoCode(),
     pdp: $("sc-pdp").value, note: $("sc-note").value, ai_model: "sonnet" }, "Claude sta analizzando…");
   if (!plan) return;
