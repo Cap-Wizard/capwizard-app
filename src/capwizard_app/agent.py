@@ -660,6 +660,9 @@ Procedura:
      0,1-0,15 s prima del taglio, zoom di norma senza, Soft Wipe massimo 1-2, niente bong né riser in mezzo);
    - i colpi sulle parole chiave cadono all'INIZIO del sottotitolo, riser che finiscono su un sottotitolo o su un taglio; se lo stile dell'agenzia dice altro, vince lo stile;
    - niente transizione subito dopo il titolo;
+   - impaginazione del titolo (TUTTE le agenzie, Daniel 04/11): riga 1 alta, y 0,42–0,56; riga 2 ATTACCATA, 0,07–0,095 sotto; righe lunghe
+     rimpicciolite per starci (0,8–0,9), riga 2 più grande; emoji all'altezza della riga 1, di lato, scala 1,1–2, poco inclinata (−5…+26°,
+     mai −65,7° fissi) — dettagli in «Impaginazione del titolo» delle regole generali;
    - titolo dietro la testa: copia della clip su una traccia video SOPRA i testi del titolo, stesso tempo e stessa sorgente; lo scontorno
      lo fa l'app quando installa il progetto (non scrivere a Daniel di premere "Rimuovi sfondo");
    - take ripetute: tieni l'ultima take completa, mai doppioni;
