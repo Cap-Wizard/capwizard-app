@@ -197,13 +197,23 @@ def _fitvf(fid: str | None, pad: bool = False) -> list[str]:
     return ["-vf", vf + ",setsar=1"]
 
 
-def _frame(src: Path, dest: Path, fmt: str | None = None, pad: bool = False) -> Path:
-    """A frame as PNG (HEIC and WebP too), in the chosen format, checked against Kling's limits: 300 px, between
-    1:2.5 and 2.5:1."""
-    r = subprocess.run([vault.ffmpeg() or "ffmpeg", "-v", "error", "-y", "-i", str(src), "-frames:v", "1", *_fitvf(fmt, pad), str(dest)],
-                       capture_output=True, text=True, timeout=60)
+VIDEO = (".mp4", ".mov", ".m4v", ".webm", ".mkv")
+
+
+def _is_video(p: Path) -> bool:
+    return p.suffix.lower() in VIDEO
+
+
+def _frame(src: Path, dest: Path, fmt: str | None = None, pad: bool = False, last: bool = False) -> Path:
+    """A frame as PNG (HEIC and WebP too; of a video its first frame, or with `last` its last one), in the chosen
+    format, checked against Kling's limits: 300 px, between 1:2.5 and 2.5:1."""
+    dest.unlink(missing_ok=True)
+    pick = ["-sseof", "-1", "-i", str(src), "-update", "1"] if last else ["-i", str(src), "-frames:v", "1"]
+    r = subprocess.run([vault.ffmpeg() or "ffmpeg", "-v", "error", "-y", *pick, *_fitvf(fmt, pad), str(dest)],
+                       capture_output=True, text=True, timeout=120)
     if r.returncode or not dest.exists():
-        raise AIError(f"Non riesco a leggere l'immagine {src.name}.")
+        what = "il video" if _is_video(src) else "l'immagine"
+        raise AIError(f"Non riesco a leggere {what} {src.name}.")
     w, h = _size(dest)
     if min(w, h) < 300:
         raise AIError(f"{src.name} è troppo piccola ({w}x{h}): servono almeno 300 px per lato.")
@@ -230,8 +240,9 @@ def _upload(p: Path, kind: str = "image/png") -> str:
         return json.load(r)["name"]
 
 
-def _run(prompt: dict, log, label: str) -> dict:
-    """Queue a workflow with the account's key and wait for it; returns its outputs."""
+def _run(prompt: dict, log, label: str, queued=None) -> dict:
+    """Queue a workflow with the account's key and wait for it; returns its outputs. `queued` gets the Comfy id
+    as soon as the job is in, so a result that arrives late can still be picked up."""
     key = _key()
     if not key:
         raise AIError("Manca la API key di Comfy nel Portachiavi (account capwizard, servizio comfy-org-api-key).")
@@ -243,8 +254,30 @@ def _run(prompt: dict, log, label: str) -> dict:
             res = json.load(r)
     except urllib.error.HTTPError as e:
         raise AIError(f"ComfyUI ha rifiutato il workflow: {e.read().decode(errors='replace')[:300]}") from None
-    pid, t0 = res["prompt_id"], time.time()
-    while time.time() - t0 < 1800:
+    if queued:
+        queued(res["prompt_id"])
+    return _wait(res["prompt_id"], log, label)
+
+
+def comfy_state(pid: str) -> str:
+    """Where a queued job is: «finito» (done, its video ready), «in coda» (still running or waiting), «perso»
+    (failed, or ComfyUI was closed or doesn't know it)."""
+    try:
+        h = _get(f"/history/{pid}").get(pid)
+        if h:
+            return "finito" if h.get("status", {}).get("status_str") == "success" else "perso"
+        q = _get("/queue")
+    except (OSError, ValueError):
+        return "perso"
+    jobs = q.get("queue_running", []) + q.get("queue_pending", [])
+    return "in coda" if any(len(j) > 1 and j[1] == pid for j in jobs) else "perso"
+
+
+def _wait(pid: str, log, label: str) -> dict:
+    """Wait for a job for as long as ComfyUI still has it: the providers (Kling above all) sometimes keep it in their
+    queue for a long time, and giving up would lose a video that is paid for anyway."""
+    t0 = time.time()
+    while time.time() - t0 < 4 * 3600:
         h = _get(f"/history/{pid}").get(pid)
         if h:
             st = h.get("status", {})
@@ -254,13 +287,21 @@ def _run(prompt: dict, log, label: str) -> dict:
                     msg = "Crediti Comfy finiti: ricarica l'account su platform.comfy.org."
                 elif "Unauthorized" in msg:
                     msg = "La API key di Comfy non è valida: salvane una nuova nel Portachiavi."
+                elif "time out" in msg.lower() or "timed out" in msg.lower():
+                    free = '"final_unit_deduction": "0"' in msg
+                    msg = ("Il provider non è riuscito a generare il video entro il suo tempo massimo (spesso è sovraccarico)."
+                           + (" Non ti ha addebitato niente." if free else "") + " Riprova con ↻ o prova un altro modello.")
                 raise AIError(msg.strip() or "La generazione non è riuscita.")
             return h.get("outputs", {})
-        mins = int(time.time() - t0) // 60
-        if mins and int(time.time() - t0) % 60 < 5:
-            log(f"{label}: in corso da {mins} min…")
+        secs = int(time.time() - t0)
+        if secs % 60 < 5 and secs >= 60:
+            if comfy_state(pid) == "perso":
+                raise AIError("ComfyUI non ha più questa generazione: è stato chiuso mentre lavorava.")
+            mins = secs // 60
+            log(f"{label}: in corso da {mins} min…" if mins < 20 else
+                f"{label}: in corso da {mins} min. Il provider è lento, aspetto: il video non va perso.")
         time.sleep(5)
-    raise AIError("Dopo 30 minuti la generazione non è finita.")
+    raise AIError("Dopo 4 ore la generazione non è finita: premi ↻ sulla tratta per riprenderla.")
 
 
 def _download(outputs: dict, dest: Path) -> Path:
@@ -276,7 +317,8 @@ def _download(outputs: dict, dest: Path) -> Path:
     raise AIError("ComfyUI non ha restituito nessun file.")
 
 
-def _leg(a: Path, b: Path, text: str, modello: str, durata: int, risoluzione: str, audio: bool, dest: Path, log, label: str) -> dict:
+def _leg(a: Path, b: Path, text: str, modello: str, durata: int, risoluzione: str, audio: bool, dest: Path, log, label: str,
+         queued=None) -> dict:
     """One leg from frame a to frame b with the chosen model."""
     m = _model(modello)
     ia, ib = _upload(a), _upload(b)
@@ -304,7 +346,7 @@ def _leg(a: Path, b: Path, text: str, modello: str, durata: int, risoluzione: st
     }
     log(f"{label}: genero con {m['nome']} ({risoluzione}, {durata} s)…")
     t0 = time.time()
-    _download(_run(prompt, log, label), dest)
+    _download(_run(prompt, log, label, queued), dest)
     log(f"{label}: pronta in {int(time.time() - t0) // 60} min {int(time.time() - t0) % 60} s.")
     return {"seed": seed, "secondi": int(time.time() - t0)}
 
@@ -337,9 +379,46 @@ def _slug(s: str) -> str:
     return re.sub(r"[^\w\- ]+", "", s).strip().replace(" ", "-")[:50] or "transizione"
 
 
+def _has_audio(p: Path) -> bool:
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", str(p)],
+                       capture_output=True, text=True, timeout=30)
+    return bool(r.stdout.strip())
+
+
+def _join_clips(folder: Path, meta: dict, final: Path) -> Path:
+    """The videos put on the stages, with the generated legs between them: one clip, at the legs' size, with the
+    videos' own sound (silence under the legs that have none)."""
+    parts = []
+    for i, clip in enumerate(meta["clip"]):
+        if clip and Path(clip).exists():
+            parts.append(Path(clip))
+        if i < len(meta["tratte"]):
+            parts.append(folder / meta["tratte"][i]["file"])
+    w, h = _size(folder / meta["tratte"][0]["file"])
+    fps = _fps(folder / meta["tratte"][0]["file"]) or 30
+    args, chains, ins = [], [], ""
+    for k, p in enumerate(parts):
+        args += ["-i", str(p)]
+        chains.append(f"[{k}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,fps={fps:g},format=yuv420p[v{k}]")
+        if _has_audio(p):
+            chains.append(f"[{k}:a]aresample=48000,aformat=channel_layouts=stereo[a{k}]")
+        else:
+            chains.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={_seconds(p):.3f}[a{k}]")
+        ins += f"[v{k}][a{k}]"
+    chains.append(f"{ins}concat=n={len(parts)}:v=1:a=1[v][a]")
+    r = subprocess.run([vault.ffmpeg() or "ffmpeg", "-v", "error", "-y", *args, "-filter_complex", ";".join(chains),
+                        "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-crf", "16", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                        "-b:a", "192k", str(final)], capture_output=True, text=True, timeout=3600)
+    if r.returncode:
+        raise AIError(f"Non riesco a unire i video con la transizione: {r.stderr.strip()[-300:]}")
+    return final
+
+
 def _join(folder: Path, meta: dict) -> Path:
     legs = [folder / t["file"] for t in meta["tratte"] if (folder / t["file"]).exists()]
     final = folder / f"{_slug(meta['nome'])}.mp4"
+    if any(meta.get("clip") or []):
+        return _join_clips(folder, meta, final)
     if len(legs) == 1:
         shutil.copyfile(legs[0], final)
         return final
@@ -381,11 +460,16 @@ def new_transition(frames: list[str], template_id: str, nome: str, durate: list[
         raise AIError(f"{m['nome']} non fa video a {risoluzione}.")
     folder = OUT_ROOT / "Transizioni" / f"{datetime.now():%Y-%m-%d_%H%M}_{_slug(nome or t['nome'])}"
     (folder / "frame").mkdir(parents=True, exist_ok=True)
-    copies = [str(_frame(Path(f), folder / "frame" / f"{i + 1:02d}.png", formato).name) for i, f in enumerate(frames)]
+    # a video on a stage: the leg arriving there ends on its first frame, the leg leaving starts from its last
+    copies, entrata = [], []
+    for i, f in enumerate(frames):
+        src = Path(f)
+        copies.append(_frame(src, folder / "frame" / f"{i + 1:02d}.png", formato, last=_is_video(src)).name)
+        entrata.append(_frame(src, folder / "frame" / f"{i + 1:02d}_inizio.png", formato).name if _is_video(src) else copies[-1])
     meta = {"tipo": "transizione", "formato": formato, "nome": nome or t["nome"], "template": t["id"], "template_nome": t["nome"],
             "modello": m["id"], "modello_nome": m["nome"], "provider": provider,
             "risoluzione": risoluzione, "audio": bool(t.get("audio")), "prompt": t["prompt"],
-            "frame": copies, "creato": datetime.now().isoformat(timespec="seconds"),
+            "frame": copies, "entrata": entrata, "clip": [f if _is_video(Path(f)) else None for f in frames], "creato": datetime.now().isoformat(timespec="seconds"),
             "tratte": [{"file": f"tratta_{i + 1:02d}.mp4", "durata": durate[i],
                         "nota": (note[i] if i < len(note) else "").strip(), "stato": "da fare"} for i in range(legs)]}
     meta["stima"] = estimate(durate, m["id"], risoluzione, provider)
@@ -404,14 +488,26 @@ def generate(folder: Path, only: int | None = None, log=print) -> dict:
         label = f"Tratta {i + 1} di {len(meta['tratte'])}"
         written = (meta.get("claude") or {}).get("tratte") or []      # Claude's prompt for this leg, when it wrote one
         text = written[i] if i < len(written) and written[i] else meta["prompt"] + (f" {t['nota']}" if t["nota"] else "")
+        def queued(pid, t=t):
+            t.update(comfy=pid, stato="in corso")
+            _save(folder, meta)
         try:
             want = t.get("durata", meta.get("durata", 5))
             made = _gen_len(meta.get("modello", "kling-v3"), want)
-            info = _leg(folder / "frame" / meta["frame"][i], folder / "frame" / meta["frame"][i + 1], text,
-                        meta.get("modello", "kling-v3"), made, meta["risoluzione"], meta["audio"], folder / t["file"], log, label)
-            if want < made:                               # shorter than the model can make: the leg is sped up
-                log(f"{label}: accelero da {made} s a {want} s…")
-                _speed(folder / t["file"], want)
+            if t.get("comfy") and t.get("stato") != "fatta" and comfy_state(t["comfy"]) != "perso":
+                # the job from before is still in ComfyUI (finished or in the provider's queue): take that one, paid once
+                log(f"{label}: riprendo la generazione già partita…")
+                _download(_wait(t["comfy"], log, label), folder / t["file"])
+                if want < made:
+                    _speed(folder / t["file"], want)
+                info = {"ripresa": True}
+            else:
+                info = _leg(folder / "frame" / meta["frame"][i], folder / "frame" / (meta.get("entrata") or meta["frame"])[i + 1], text,
+                            meta.get("modello", "kling-v3"), made, meta["risoluzione"], meta["audio"], folder / t["file"], log, label,
+                            queued)
+                if want < made:                           # shorter than the model can make: the leg is sped up
+                    log(f"{label}: accelero da {made} s a {want} s…")
+                    _speed(folder / t["file"], want)
         except AIError:
             t["stato"] = "errore"
             _save(folder, meta)
@@ -431,6 +527,9 @@ def generate(folder: Path, only: int | None = None, log=print) -> dict:
 def describe(folder: Path) -> dict:
     meta = _meta(folder)
     fx = eur_per_usd()
+    for t in meta.get("tratte", []):          # a leg cut off while ComfyUI still has it: ↻ takes it back at no new cost
+        if t.get("comfy") and t.get("stato") != "fatta":
+            t["in_comfy"] = running() and comfy_state(t["comfy"]) != "perso"
     spent = meta.get("speso_usd", 0)
     cat = folder.parent.name
     return {**meta, "cartella": str(folder), "id": folder.name if cat == "Transizioni" else f"{cat}/{folder.name}",

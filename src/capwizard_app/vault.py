@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import unicodedata
 import uuid
@@ -580,6 +581,16 @@ def install(staging: str, nome: str, log=print, cutout: bool = True) -> str:
     meta.update(draft_name=nome, draft_fold_path=str(dst), draft_root_path=str(CAPCUT_PROJECTS_DIR))
     json.dump(meta, open(meta_p, "w"), ensure_ascii=False)
     root = CAPCUT_PROJECTS_DIR / "root_meta_info.json"
+    with _ROOT_LOCK:                  # two montages of the queue may finish together
+        listed = _list_in_capcut(root, dst, nome, meta, d)
+    return " ".join(x for x in (f"✅ Progetto «{nome}» installato.", cut, media, listed) if x)
+
+
+_ROOT_LOCK = threading.Lock()
+
+
+def _list_in_capcut(root: Path, dst: Path, nome: str, meta: dict, d: dict) -> str:
+    """With CapCut closed, put the new project first in CapCut's home list (root_meta_info)."""
     listed = ""
     if not capcut_running() and root.exists():
         r = json.load(open(root))
@@ -600,7 +611,7 @@ def install(staging: str, nome: str, log=print, cutout: bool = True) -> str:
             listed = "È il primo in alto nella home di CapCut."
     else:
         listed = "CapCut è aperto: chiudilo e riaprilo per vederlo nella lista."
-    return " ".join(x for x in (f"✅ Progetto «{nome}» installato.", cut, media, listed) if x)
+    return listed
 
 
 def open_capcut() -> None:

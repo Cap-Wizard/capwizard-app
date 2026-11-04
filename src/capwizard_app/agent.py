@@ -340,6 +340,62 @@ def check_request(req) -> str | None:
     return None
 
 
+def _real(path: str | Path) -> Path:
+    """Where a profile really is. ~/.claude/skills/<cliente> is a link into the shared brain repo, and
+    Claude Code refuses to edit anything under ~/.claude: it gets the real path to write lessons."""
+    return Path(path).resolve()
+
+
+def _pre_step(job, cmd: list[str], cwd: Path, label: str, done: Path, save: Path | None = None) -> bool:
+    """A step of the montage that needs no judgement, run by the app before Claude starts (Whisper on
+    the clips): the very command the skill would have Claude run, so the files are where it expects
+    them. Its progress goes to the job's log. False if it didn't produce `done` (Claude then runs it)."""
+    job.log(label)
+    try:
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    except OSError as e:
+        job.log(f"   (non riesco: {e}; lo farà Claude)")
+        return False
+    lines = []
+    for line in p.stdout:
+        lines.append(line)
+        if job.stopped:
+            p.kill()
+            break
+        if line.startswith("## "):                     # analizza.py: one line per clip
+            job.log("   " + line[3:].strip()[:120])
+    p.wait()
+    if p.returncode != 0 or not done.exists():
+        job.log("   (non è andata: lo rifarà Claude) " + "".join(lines[-3:]).strip()[:200])
+        return False
+    if save:                                       # what Claude would have read on screen
+        save.write_text("".join(l for l in lines if not l.startswith("Fetching")))
+    return True
+
+
+def _analyse_first(job, scripts: Path, clips: str, out: Path) -> str:
+    """Step 2 of the skill done by the app: the prompt line that tells Claude it's done ("" if not)."""
+    out.mkdir(parents=True, exist_ok=True)
+    job.set_step(2)
+    if not _pre_step(job, [vault.tools_python(), str(scripts / "analizza.py"), clips, str(out), "--mosaico"], scripts,
+                     "🎧 Analizzo le clip con Whisper prima di avviare Claude…", out / "res", out / "analisi.txt"):
+        return ""
+    return (f"- **Analisi delle clip già fatta dall'app** (passo 2, non rilanciarla): `<lavoro>/<video>` = `{out}`; "
+            f"riassunto `{out}/analisi.txt`, dati per clip `{out}/res/`, mosaico `{out}/mosaico.jpg`.")
+
+
+def _builder_line(client: dict | None) -> str:
+    """The client's own builder (passi 5-6), if one was saved in its profile."""
+    if not client:
+        return ""
+    d = _real(client["path"]).parent
+    line = f"- Costruisci con `monta.py … --profilo \"{d}\"` (passi 5-6 in un comando)."
+    if (d / "costruisci.py").is_file():
+        line += (f" Il cliente ha il suo costruttore `{d}/costruisci.py`: usalo, partendo da `{d}/config-esempio.json`; "
+                 "non riscriverlo e non leggere i sorgenti degli script.")
+    return line
+
+
 def run_agent(job, req) -> tuple[str, str]:
     """Edit one reel with Claude Code. Returns (project path, report path)."""
     client = get_client(getattr(req, "client", None))
@@ -367,9 +423,14 @@ def run_agent(job, req) -> tuple[str, str]:
                      + ", ".join(str(Path(p).relative_to(req.input_path)) if Path(p).is_relative_to(req.input_path) else p for p in req.exclude))
     if getattr(req, "reference", None):
         extra.append(reference_section(req.reference, work))
+    if _builder_line(client):
+        extra.append(_builder_line(client))
+    analysed = _analyse_first(job, skill_md.parent / "scripts", req.input_path, work / "video")
+    if analysed:
+        extra.append(analysed)
     prompt = PROMPT.format(
         skill=EDITOR_SKILL, skill_md=skill_md, skill_dir=skill_md.parent,
-        client=(f"2. Profilo del cliente **{client['nome']}**: leggi `{client['path']}`. Prevale sulla skill "
+        client=(f"2. Profilo del cliente **{client['nome']}**: leggi `{_real(client['path'])}`. Prevale sulla skill "
                 f"generale dove è più preciso.\n") if client else "",
         clips=req.input_path, name=req.name, template=req.template,
         script=f"`{req.script_path}` (indicazioni vincolanti)" if req.script_path else "nessuno",
@@ -380,7 +441,7 @@ def run_agent(job, req) -> tuple[str, str]:
 
     dirs = {str(Path(req.input_path)), str(CAPCUT_PROJECTS_DIR), str(skill_md.parent), str(work)}
     if client:
-        dirs.add(str(Path(client["path"]).parent))
+        dirs.add(str(_real(client["path"]).parent))
     if req.script_path:
         dirs.add(str(Path(req.script_path).parent))
     dirs.update(str(Path(p).parent) for p in getattr(req, "reference", None) or [] if Path(p).is_file())
@@ -536,15 +597,38 @@ def writable_profile(client: dict) -> Path:
     sync can't drop the lessons."""
     p = Path(client["path"])
     if "synced" not in p.parts:
-        return p
+        return _real(p)
     from capwizard_app import brain
     shared = brain.adopt_profile(p.parent)
     if shared:
-        return shared
+        return _real(shared)
     local = SKILLS_DIR / p.parent.name
     if not (local / "SKILL.md").exists():
         shutil.copytree(p.parent, local, dirs_exist_ok=True)
     return local / "SKILL.md"
+
+
+def add_lesson(profile: Path, lesson: str) -> bool:
+    """Append a lesson to the profile's «## Lezioni» (made at the end if missing). Used when Claude
+    couldn't write it itself (a profile Claude Code won't edit)."""
+    try:
+        text = profile.read_text()
+    except OSError:
+        return False
+    line = lesson.strip()
+    if not re.match(r"\d{1,2}/\d{1,2}/\d{4}", line):
+        line = f"{time.strftime('%d/%m/%Y')}: {line}"
+    entry = f"- {line}\n"
+    m = re.search(r"^## Lezioni[^\n]*\n", text, re.M)
+    if not m:
+        text = text.rstrip("\n") + "\n\n## Lezioni\n" + entry
+    else:
+        nxt = re.search(r"^## ", text[m.end():], re.M)
+        at = m.end() + nxt.start() if nxt else len(text)
+        head = text[:at].rstrip("\n") + "\n"
+        text = head + entry + ("\n" + text[at:] if nxt else "")
+    profile.write_text(text)
+    return True
 
 
 def run_modify(job, project: dict, text: str, images: list[str], model: str = "opus") -> dict:
@@ -560,6 +644,7 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
     if client and client.get("source") == "vault":
         return run_vault_modify(job, project, client, text, images, model)
     profile = writable_profile(client) if client else None
+    before = profile.read_text() if profile and profile.exists() else None
     skill_md = editor_skill()
 
     mods = list_mods(project["id"])
@@ -619,6 +704,8 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
     _save_mods(project["id"], mods)
     job.log("✓ " + (res.get("riassunto") or "Modifiche fatte.").replace("\n", " "))
     if res.get("lezione"):
+        if profile and before is not None and profile.read_text() == before:      # Claude didn't manage to write it
+            add_lesson(profile, res["lezione"])
         job.log(f"📒 Lezione salvata{' nel profilo di ' + client['nome'] if client else ''}: {res['lezione']}")
     if not vault.capcut_running():
         vault.open_capcut()          # back on CapCut's home, the changed project in the list
@@ -641,8 +728,7 @@ gli script della skill). Se una precisione in più richiederebbe strumenti nuovi
 {brief}
 
 Procedura:
-1. Trascrivi le clip (parola per parola):
-   "{py}" "{tools}/trascrivi.py" "{clips}" "{work}/words.json"{escluse}
+{trascrivi}
    (se c'è la cartella b-roll, guarda i fotogrammi dei b-roll con ffmpeg `{ff}` per capire cosa mostrano).
 2. Costruisci il progetto CapCut clonando la base tecnica «{base}» (`{capcut}/{base}`) in `{staging}` (cartella NUOVA, copia tutta la
    cartella della base e poi riscrivi la timeline), applicando le regole. Scrivi gli script in `{work}/`. Se in
@@ -795,7 +881,16 @@ def run_vault(job, req, client: dict) -> tuple[str, str]:
     if req.ai_target_duration:
         brief += f"\nDurata voluta: {req.ai_target_duration:g} s"
     brief += reference_section(getattr(req, "reference", None) or [], work)
-    prompt = VAULT_PROMPT.format(vault=vault.VAULT, base=base, brief=brief, py=vault.tools_python(), tools=vault.TOOLS,
+    cmd = [vault.tools_python(), str(vault.TOOLS / "trascrivi.py"), req.input_path, str(work / "words.json")]
+    if escluse:
+        cmd.append(str(work / "escluse.txt"))
+    job.set_step(1)
+    if _pre_step(job, cmd, work, "🎧 Trascrivo le clip prima di avviare Claude…", work / "words.json"):
+        trascrivi = f"1. Le clip sono già trascritte parola per parola dall'app: `{work}/words.json` (non rifarlo)."
+    else:
+        trascrivi = (f"1. Trascrivi le clip (parola per parola):\n"
+                     f"   \"{vault.tools_python()}\" \"{vault.TOOLS}/trascrivi.py\" \"{req.input_path}\" \"{work}/words.json\"{escluse}")
+    prompt = VAULT_PROMPT.format(vault=vault.VAULT, base=base, brief=brief, tools=vault.TOOLS, trascrivi=trascrivi,
                                  clips=req.input_path, work=work, ff=vault.ffmpeg() or "ffmpeg", capcut=CAPCUT_PROJECTS_DIR,
                                  staging=staging, result=result, name=req.name, escluse=escluse,
                                  orecchie=_ears(EARS_NEW, staging))

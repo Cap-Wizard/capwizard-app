@@ -6,6 +6,7 @@ const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
 const { spawn, execFileSync } = require("child_process");
+const updater = require("./updater");
 
 // Fixed local port. The backend binds 127.0.0.1 only (never exposed).
 const BACKEND_PORT = 8765;
@@ -174,6 +175,9 @@ app.whenReady().then(async () => {
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   startBackend();
   createWindow();
+  updater.start((st) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("update-state", st);
+  });
 
   const ok = await waitForBackend();
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -292,6 +296,13 @@ ipcMain.handle("open-path", async (_e, p) => {
 
 // the version next to the settings («v1.<commits>»), to tell at a glance who has the latest
 ipcMain.handle("version", () => require("./build-info").buildInfo(app));
+
+// updates from the GitHub releases (see updater.js)
+ipcMain.handle("update-state", () => updater.getState());
+ipcMain.handle("update-check", () => updater.check());
+ipcMain.handle("update-download", () => updater.download());
+ipcMain.handle("update-install", () => updater.installNow());
+ipcMain.handle("update-mode", (_e, modo) => updater.setMode(modo));
 
 // «Rivela nel Finder»: the file selected in its folder, nothing opened or run
 ipcMain.handle("reveal-path", async (_e, p) => {

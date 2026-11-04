@@ -59,10 +59,20 @@ def status() -> dict:
 VIDEO = (".mp4", ".mov", ".m4v", ".webm", ".mkv")
 
 
-def _look(src: Path, out: Path, n: int = 3) -> list[Path]:
-    """Small JPEGs Claude can read: the picture itself, or `n` frames spread over a video."""
+def _look(src: Path, out: Path, n: int = 3, edges: bool = False) -> list[Path]:
+    """Small JPEGs Claude can read: the picture itself, or `n` frames spread over a video (with `edges`, a video's
+    first and last frame, a picture twice)."""
     out.mkdir(parents=True, exist_ok=True)
-    stem = f"{len(list(out.iterdir())):02d}_{re.sub(r'[^\w-]', '_', src.stem)[:30]}"
+    safe = re.sub(r"[^\w-]", "_", src.stem)[:30]                 # outside the f-string: Python 3.11 has no \ there
+    stem = f"{len(list(out.iterdir())):02d}_{safe}"
+    if edges and src.suffix.lower() in VIDEO:
+        frames = []
+        for k, pick in enumerate((["-i", str(src), "-frames:v", "1"], ["-sseof", "-1", "-i", str(src), "-update", "1"])):
+            f = out / f"{stem}_{'inizio' if k == 0 else 'fine'}.jpg"
+            subprocess.run([vault.ffmpeg() or "ffmpeg", "-v", "error", "-y", *pick, "-vf", "scale='min(1024,iw)':-2", str(f)],
+                           capture_output=True, timeout=120)
+            frames.append(f if f.exists() else src)
+        return frames
     if src.suffix.lower() in VIDEO:
         secs = max(0.5, comfy_ai._seconds(src))
         frames = []
@@ -75,7 +85,7 @@ def _look(src: Path, out: Path, n: int = 3) -> list[Path]:
         return frames
     f = out / f"{stem}.jpg"
     subprocess.run(["sips", "-s", "format", "jpeg", "-Z", "1024", str(src), "--out", str(f)], capture_output=True, timeout=60)
-    return [f] if f.exists() else []
+    return ([f, f] if edges else [f]) if f.exists() else []
 
 
 def _claude(prompt: str, dirs: list[Path], edit: bool = False, timeout: int = 300) -> str:
@@ -116,12 +126,17 @@ def _task(kind: str, d: dict, look) -> tuple[str, str, str]:
     if kind == "trans":
         m = comfy_ai._model(d["modello"])
         t = comfy_ai._template("transizioni", d.get("template", "automatico"))
-        frames = [look(Path(f), 1) for f in d["frames"]]
+        # a video on a stage: the leg leaves from its last frame and arrives on its first
+        ends = [look(Path(f), 1, edges=True) * 2 for f in d["frames"]]     # (first, last); a picture is both
         notes = d.get("note") or []
         legs = []
-        for i in range(len(frames) - 1):
+        for i in range(len(ends) - 1):
             a, b = chr(65 + i), chr(66 + i)
-            legs.append(f"- Tratta {a} → {b}, {(d.get('durate') or [5] * 99)[i]} s: frame {a} = {frames[i][0]}, frame {b} = {frames[i + 1][0]}"
+            clip = [x for x, f in ((a, d["frames"][i]), (b, d["frames"][i + 1])) if Path(f).suffix.lower() in VIDEO]
+            legs.append(f"- Tratta {a} → {b}, {(d.get('durate') or [5] * 99)[i]} s: frame {a} = {ends[i][1]}, frame {b} = {ends[i + 1][0]}"
+                        + (f" ({' e '.join(clip)} {'è un video' if len(clip) == 1 else 'sono video'} del cliente: la tratta parte "
+                           "dall'ultimo fotogramma del video prima e arriva al primo di quello dopo, la camera continua il loro movimento)"
+                           if clip else "")
                         + (f"; richiesta per questa tratta: «{notes[i]}»" if i < len(notes) and notes[i].strip() else ""))
         job = (f"Transizione A, B to Z con {m['nome']} (primo e ultimo frame, formato {fmt}, {d.get('risoluzione', '')}).\n"
                f"Preset scelto: {t['nome']}. Il suo prompt di base è: «{t['prompt']}»\n" + "\n".join(legs))
@@ -165,7 +180,7 @@ def write(kind: str, d: dict) -> dict:
     sd = skill_dir()
     with tempfile.TemporaryDirectory(prefix="capwizard-prompt-") as tmp:
         tmp = Path(tmp)
-        look = lambda p, n: _look(p, tmp, n) or [p]        # noqa: E731 — a picture it can't convert is read as it is
+        look = lambda p, n, **k: _look(p, tmp, n, **k) or [p]        # noqa: E731 — a picture it can't convert is read as it is
         model, job, shape = _task(kind, d, look)
         ask = (f"Sei il regista che scrive i prompt per i modelli AI di CapWizard. Leggi prima la skill: {sd / 'SKILL.md'}\n"
                f"Lezioni per questo modello ({model}):\n{_lessons(sd, model)}\n\n"

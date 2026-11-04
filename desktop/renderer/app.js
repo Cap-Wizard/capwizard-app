@@ -69,6 +69,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     window.api.onBackendReady(() => bootBackend());
   }
   bootBackend();          // sidecar readiness (pills + editing), runs regardless
+  initUpdates();
 
   if (LOCAL_MODE) {
     showView("dash");     // private use: skip the login/subscription gate
@@ -1398,6 +1399,84 @@ setInterval(paintDate, 60 * 60 * 1000);
   el.title = `Commit ${v.commit}${when ? ` del ${when}` : ""}` + (v.locale ? "\nCon modifiche non ancora su GitHub" : "\nUguale a GitHub");
   el.hidden = false;
 })();
+
+// ---------------------------------------------------------------------------
+// Updates from the GitHub releases (electron/updater.js downloads, checks and swaps the app)
+// ---------------------------------------------------------------------------
+
+const UPD = { st: null, offered: "" };
+
+function initUpdates() {
+  if (!window.api || !window.api.updateState) return;
+  window.api.onUpdateState(onUpdateState);
+  window.api.updateState().then(onUpdateState).catch(() => {});
+  $("btn-updates").onclick = () => { $("settings-menu").hidden = true; openUpdateModal(); };
+  $("upd-close").onclick = () => { $("update-modal").hidden = true; };
+  $("upd-check").onclick = () => window.api.updateCheck();
+}
+
+function onUpdateState(st) {
+  UPD.st = st;
+  const v = st.nuova ? st.nuova.versione : "";
+  $("upd-count").textContent = ["disponibile", "scarico", "pronto"].includes(st.fase) ? "nuova" : "";
+  const shown = !!document.getElementById("notice-update");
+  if (st.fase === "disponibile" && st.modo === "chiedi" && UPD.offered !== v) {        // offered once per version
+    UPD.offered = v;
+    notice("update", { icon: "⬆️", tone: "warn", title: `È uscita CapWizard ${v}`,
+      text: `Tu hai la ${st.versione}. L'app la scarica e al riavvio è aggiornata.`,
+      actions: [{ label: "Aggiorna", primary: true, run: () => window.api.updateDownload() },
+                { label: "Novità", run: openUpdateModal }, { label: "Dopo", run: () => dropNotice("update") }] });
+  } else if (st.fase === "scarico" && shown) {
+    notice("update", { icon: "⬇️", tone: "warn", title: `Scarico CapWizard ${v}… ${st.pct}%`, text: "Intanto puoi continuare a lavorare." });
+  } else if (st.fase === "pronto") {
+    notice("update", { icon: "⬆️", tone: "warn", title: `CapWizard ${v} è pronta`,
+      text: "Si installa quando chiudi l'app, oppure adesso (l'app si riapre da sola).",
+      actions: [{ label: "Riavvia e aggiorna", primary: true, run: () => window.api.updateInstall() },
+                { label: "Alla chiusura", run: () => dropNotice("update") }] });
+  } else if (st.fase === "errore" && shown) {
+    notice("update", { icon: "⚠️", title: "Aggiornamento non riuscito", text: st.errore,
+      actions: st.nuova ? [{ label: "Pagina della release", run: () => window.api.openExternal(st.nuova.pagina) }] : [] });
+  }
+  if (!$("update-modal").hidden) renderUpdateModal();
+}
+
+function openUpdateModal() {
+  $("update-modal").hidden = false;
+  renderUpdateModal();
+}
+
+function renderUpdateModal() {
+  const st = UPD.st || {};
+  const n = st.nuova;
+  const when = st.controllato ? new Date(st.controllato).toLocaleString("it-IT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "non ancora";
+  const status = {
+    sviluppo: "Questa è la versione di sviluppo: si aggiorna con git pull, non dalle release.",
+    controllo: "Controllo le release su GitHub…", aggiornato: "✓ Hai l'ultima versione.",
+    disponibile: n && `È uscita la ${n.versione}.`, scarico: n && `Scarico la ${n.versione}… ${st.pct}%`,
+    pronto: n && `La ${n.versione} è scaricata: si installa quando chiudi l'app, o adesso con «Riavvia e aggiorna».`,
+    errore: st.errore,
+  }[st.fase] || "";
+  const notes = n ? (n.note.length > 1500 ? n.note.slice(0, 1500) + "…" : n.note) : "";
+  $("upd-body").innerHTML = `<p class="ai-intro">Versione installata: <b>${escapeHtml(st.versione || "?")}</b> · ultimo controllo: ${when}</p>
+    <p class="upd-state f-${st.fase || ""}">${escapeHtml(status)}</p>
+    ${n ? `<div class="upd-notes"><b>${escapeHtml(n.titolo)}</b><div class="upd-text">${escapeHtml(notes)}</div>
+      <a href="#" id="upd-page">Pagina della release ↗</a></div>` : ""}
+    <label>Come aggiornare</label>
+    <div class="lib-tabs" id="upd-mode">
+      <button class="tab ${st.modo === "chiedi" ? "on" : ""}" data-m="chiedi">Chiedi prima</button>
+      <button class="tab ${st.modo === "automatico" ? "on" : ""}" data-m="automatico">Automatico</button>
+    </div>
+    <p class="ai-foot">${st.modo === "automatico"
+      ? "Scarica da sola le nuove versioni e le installa quando chiudi l'app."
+      : "Ti avvisa quando esce una nuova versione: la installi tu, con un clic."}</p>`;
+  if (n) $("upd-page").onclick = (e) => { e.preventDefault(); window.api.openExternal(n.pagina); };
+  $("upd-mode").querySelectorAll(".tab").forEach((b) => { b.onclick = () => window.api.updateMode(b.dataset.m); });
+  const go = $("upd-go");
+  go.hidden = !["disponibile", "pronto"].includes(st.fase);
+  go.textContent = st.fase === "pronto" ? "Riavvia e aggiorna" : "Aggiorna";
+  go.onclick = () => (st.fase === "pronto" ? window.api.updateInstall() : window.api.updateDownload());
+  $("upd-check").disabled = st.fase === "sviluppo" || st.fase === "controllo";
+}
 
 // The line between the two halves of Nuovo video and Smistamento clip can be dragged; each view keeps its width.
 function wireGutters() {
@@ -3306,14 +3385,14 @@ function renderAIFrames() {
     col.className = "ai-col";
     const tappa = i >= 2;                          // the frames added after B can go; A and B always stay
     col.innerHTML = `<div class="ai-frame drop${p ? " has" : ""}" id="ai-f-${i}"><span class="ai-fl">${label}</span>
-        ${p || tappa ? `<button class="ai-fx" title="${p ? "Togli l'immagine" : "Togli questa tappa"}">✕</button>` : ""}
-        ${p ? `<img alt="" src="${GEN.thumbs[p] || ""}"><span class="ai-fn">${escapeHtml(p.split("/").pop())}</span>`
-            : `<b>＋</b><span>Trascina o clicca</span>`}</div>
+        ${p || tappa ? `<button class="ai-fx" title="${p ? (isVideoPath(p) ? "Togli il video" : "Togli l'immagine") : "Togli questa tappa"}">✕</button>` : ""}
+        ${p ? `<img alt="" src="${GEN.thumbs[p] || ""}">${isVideoPath(p) ? `<span class="ai-fv">▶ video</span>` : ""}<span class="ai-fn">${escapeHtml(p.split("/").pop())}</span>`
+            : `<b>＋</b><span>Trascina o clicca</span><small>immagine o video</small>`}</div>
       <div class="ai-tl dot${i === 0 ? " first" : ""}${i === n - 1 ? " last" : ""}"><i></i></div>`;
     const card = col.querySelector(".ai-frame");
     card.onclick = async (e) => {
       if (e.target.closest(".ai-fx")) return;
-      const files = window.api ? await window.api.selectImages() : [];
+      const files = window.api ? await window.api.selectMedia() : [];
       if (files && files.length) dropAIFrames(files, i);
     };
     const x = col.querySelector(".ai-fx");
@@ -3355,10 +3434,11 @@ function syncAIGenerate() {
   $("ai-generate").title = !ok ? `${prov.nome || "Questo provider"} non è collegato: collegalo in alto a destra` : "";
 }
 
-// images dropped or chosen: on box `at`, or (at = null) into the empty boxes in order
+// images or videos dropped or chosen: on box `at`, or (at = null) into the empty boxes in order. A video's leg
+// leaves from its last frame and arrives on its first, and the result has the videos with the legs between them
 async function dropAIFrames(paths, at) {
-  const imgs = paths.filter((p) => /\.(png|jpe?g|heic|webp)$/i.test(p));
-  if (!imgs.length) return notify("Servono immagini: PNG, JPG, HEIC o WebP.", "err");
+  const imgs = paths.filter((p) => /\.(png|jpe?g|heic|webp)$/i.test(p) || isVideoPath(p));
+  if (!imgs.length) return notify("Servono immagini (PNG, JPG, HEIC, WebP) o video (MP4, MOV).", "err");
   let slots = at != null ? [at] : GEN.frames.map((f, i) => (f ? -1 : i)).filter((i) => i >= 0);
   if (at == null && !slots.length) slots = [GEN.frames.length - 1];
   imgs.slice(0, slots.length).forEach((p, k) => { GEN.frames[slots[k]] = p; });
@@ -3427,7 +3507,7 @@ function renderAIModels() {
 }
 
 async function generateAI() {
-  if (GEN.frames.some((f) => !f)) return notify("Metti un'immagine in ogni riquadro.", "err");
+  if (GEN.frames.some((f) => !f)) return notify("Metti un'immagine o un video in ogni riquadro.", "err");
   if (!GEN.stato.chiave) return notify("Manca la API key di Comfy nel Portachiavi.", "err");
   const c = (GEN.stime[GEN.modello] || {})[GEN.prov];
   if (!c || !c.ok) return notify("Non riesco a stimare il costo.", "err");
@@ -3496,7 +3576,9 @@ async function loadAIResults() {
         <div class="ai-meta">${it.costo.usd ? `Speso: ${fmtCost(it.costo)}` : it.stima && it.stima.crediti != null ? `Stima: ${fmtCost(it.stima)}` : ""}${tratte.length && done < tratte.length ? ` · ${done} di ${tratte.length} tratte fatte` : ""}</div>
         ${it.testo ? `<div class="ai-meta ai-prompt" title="${escapeHtml(it.testo)}">«${escapeHtml(it.testo)}»</div>` : ""}
         ${tratte.length ? `<div class="ai-legs">${tratte.map((t, i) => `<span class="ai-chip ${t.stato === "fatta" ? "ok" : t.stato === "errore" ? "err" : ""}">
-          ${String.fromCharCode(65 + i)} → ${String.fromCharCode(66 + i)}<button data-i="${i}" title="Rigenera solo questa tratta">↻</button></span>`).join("")}</div>` : ""}
+          ${String.fromCharCode(65 + i)} → ${String.fromCharCode(66 + i)}${t.in_comfy
+            ? `<button data-i="${i}" title="Il video è ancora in ComfyUI: lo riprendo senza pagarlo di nuovo">↻ Riprendi</button>`
+            : `<button data-i="${i}" title="Rigenera solo questa tratta">↻</button>`}</span>`).join("")}</div>` : ""}
         ${(it.modifiche || []).length ? `<div class="ai-vers">${it.modifiche.map((m, k) => `<button class="ai-ver" data-k="${k}" title="${escapeHtml(m.testo)}">✎ ${k + 1} ▶</button>`).join("")}</div>` : ""}
         <div class="ai-acts">${video && !isImg ? '<button class="btn2 ai-edit">✎ Modifica</button>' : ""}<button class="btn2 ai-reveal">Rivela nel Finder</button>
           ${video ? `<span class="ai-vote">${(() => { const v = ((it.voti || []).filter((x) => x.voto !== "modifica").slice(-1)[0] || {}).voto;
@@ -3734,12 +3816,17 @@ async function voteAIResult(it, voto) {
 async function redoAILeg(it, i) {
   if (GEN.job) return notify("Aspetta che finisca la generazione in corso.", "err");
   const t = it.tratte[i];
+  if (t.in_comfy) return startAIRedo(it, i);       // still in ComfyUI: picked up as it is, nothing paid again
   const r0 = await (await fetch(`${BACKEND}/api/ai/estimate`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ durate: [t.durata || it.durata || 5], modello: it.modello || "kling-v3", risoluzione: it.risoluzione }) })).json()
     .catch(() => ({}));
   const c = ((r0.stime || {})[it.modello || "kling-v3"] || {}).comfy;
   if (!c || !c.ok) return notify("Non riesco a stimare il costo.", "err");
   if (!confirm(`Rigenero la tratta ${String.fromCharCode(65 + i)} → ${String.fromCharCode(66 + i)} di «${it.nome}»; le altre restano come sono.\n\nCosto stimato: ${fmtCost(c, false)}. Procedo?`)) return;
+  startAIRedo(it, i);
+}
+
+async function startAIRedo(it, i) {
   const r = await (await fetch(`${BACKEND}/api/ai/transition/redo`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: it.id, tratta: i }) })).json().catch((e) => ({ ok: false, msg: String(e) }));
   if (!r.ok) return notify(r.msg || "Non sono riuscito a partire.", "err");
@@ -3912,7 +3999,7 @@ function fpvAnim(canvas, opt) {
 const AI_DESC = {
   img: "Crea un'immagine: parti da una tua immagine (o anche da nessuna), scrivi cosa vuoi e aggiungi tutte le reference che ti servono. Il risultato è un'immagine.",
   amb: "Metti in un altro posto una persona che parla in un video: è lì dal primo fotogramma, oppure ci arriva poco alla volta ed è lì alla fine della clip. Voce e labiale restano quelli originali.",
-  trans: "Un video che va da un fotogramma all'altro: A, B e tutte le tappe che vuoi in mezzo, ognuna con la sua durata. Serve anche per far entrare qualcuno in un posto durante il video.",
+  trans: "Un video che va da un fotogramma all'altro: A, B e tutte le tappe che vuoi in mezzo, ognuna con la sua durata. Serve anche per far entrare qualcuno in un posto durante il video. Se metti un video, la transizione parte dalla sua fine (o arriva al suo inizio) e il risultato li unisce.",
 };
 function showAIDesc() { $("ai-desc").textContent = AI_DESC[GEN.tab] || ""; }
 
