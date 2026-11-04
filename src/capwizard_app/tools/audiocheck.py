@@ -9,7 +9,13 @@ parla (video solo musica) la regola della musica e i controlli dei tagli vengono
 
 Gira con il python di earshot. Uso:
   python audiocheck.py <cartella progetto> --ffmpeg <ffmpeg> --out report.json [--fix]
---fix sistema da solo il volume della musica (in tutte le copie del draft). Il resto viene solo segnalato.
+--fix sistema da solo, in tutte le copie del draft, come un montatore:
+  - le parti morte: vuoto dopo la frase prima del taglio, prima che parli, all'inizio e alla fine del video,
+    pause lunghe dentro una clip (la spezza e toglie il buco) -> resta ~0,11 s dopo la parola, ~0,06 s prima
+  - le code corte (parola a filo del taglio): allunga la clip se la sorgente lo permette
+  - il volume della musica
+  tutto quello che viene dopo scorre (sfx compresi, restano sul loro taglio), poi ricontrolla.
+Il resto (parole tagliate, sfx in ritardo) viene solo segnalato.
 """
 import argparse
 import glob
@@ -22,13 +28,20 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).parent))
+import tagli  # noqa: E402
+
 SR = 24000
 US = 1_000_000
 FR = 0.01                    # energy frame: 10 ms
 GAP_TARGET = 18.0            # music this many LU under the voice
 GAP_OK = (14.0, 22.0)
 VOL_MIN, VOL_MAX = 0.02, 1.0
-LEAD_MAX, TAIL_MAX = 0.25, 0.20   # silence allowed at the start / end of a spoken clip (Daniel: cut right after the sentence)
+# parti morte (Daniel: "taglio appena finisce la frase", e niente pezzi morti, anche all'inizio e alla fine)
+LEAD_MAX, TAIL_MAX = 0.20, 0.20   # silence allowed before the first / after the last word of a spoken clip at a cut
+START_MAX, END_MAX = 0.15, 0.25   # silence allowed at the very start / very end of the video
+MID_MAX = 0.50                    # a pause this long inside one clip is dead: split and close it
+KEEP_TAIL, KEEP_LEAD, KEEP_END = 0.11, 0.06, 0.15   # what to leave after / before the words when fixing
 SFX_LATE = (0.07, 0.35)
 TAIL_MIN = 0.06              # the word must end at least this long before the cut
 VOICE_RANGE = 30             # dB under the clip's loud voice: below that it is room echo, not a word
@@ -126,7 +139,41 @@ def earshot_measure(files, ff="ffmpeg"):
 
 
 def fmt(t):
-    return f"{t:.1f}".replace(".", ",") + " s"
+    return (f"{t:.2f}" if abs(t) < 1 else f"{t:.1f}").replace(".", ",") + " s"
+
+
+def drafts(folder):
+    """every copy of the timeline CapCut keeps"""
+    for f in [folder / "draft_info.json", folder / "template-2.tmp", *map(Path, glob.glob(str(folder / "Timelines/*/draft_info.json"))),
+              *map(Path, glob.glob(str(folder / "Timelines/*/template-2.tmp")))]:
+        if not f.exists() or f.stat().st_size == 0:
+            continue
+        try:
+            yield f, json.load(open(f))
+        except ValueError:
+            continue
+
+
+def apply_ops(folder, ops):
+    """the timing fixes, from the last one back (earlier times stay valid), on every copy of the draft"""
+    ops = sorted(ops, key=lambda o: -o["at"])
+    for f, dd in drafts(folder):
+        for o in ops:
+            if o["op"] == "remove":
+                tagli.remove(dd, o["a"], o["x"], o.get("cut"))
+            elif o["op"] == "extend":
+                tagli.extend(dd, o["seg"], o["x"])
+            elif o["op"] == "gap":
+                a = o["a"]
+                for tr in dd.get("tracks", []):          # the clip and what is cut on top of it (cut-outs, b-roll)
+                    if tr["type"] != "video":
+                        continue
+                    for sg in list(tr["segments"]):
+                        st = sg["target_timerange"]
+                        if st["start"] / US < a < (st["start"] + st["duration"]) / US:
+                            tagli.split(dd, sg["id"], a)
+                tagli.remove(dd, a, o["x"], a)
+        json.dump(dd, open(f, "w"), ensure_ascii=False)
 
 
 def main():
@@ -137,6 +184,29 @@ def main():
     ap.add_argument("--fix", action="store_true")
     a = ap.parse_args()
     folder = Path(a.project)
+    done = []
+    rep = check(folder, a.ffmpeg, False)
+    for _ in range(3):                       # fix the timing, listen again (a fix can open a new problem)
+        ops = rep.pop("_ops") if a.fix else []
+        if not ops:
+            break
+        apply_ops(folder, ops)
+        done += [o["testo"] for o in sorted(ops, key=lambda o: o["at"])]
+        rep = check(folder, a.ffmpeg, False)
+    rep.pop("_ops", None)
+    if a.fix and rep.get("musica_fix"):
+        rep = check(folder, a.ffmpeg, True)
+        rep.pop("_ops", None)
+    rep["sistemato"] = done + rep["sistemato"]
+    txt = json.dumps(rep, ensure_ascii=False, indent=1)
+    if a.out:
+        open(a.out, "w").write(txt)
+    print(txt)
+
+
+def check(folder, ffmpeg, fix_music):
+    a = argparse.Namespace(ffmpeg=ffmpeg, fix=fix_music)
+    ops = []
     d = json.load(open(folder / "draft_info.json"))
     dur = d["duration"] / US
     mats = {}
@@ -277,16 +347,43 @@ def main():
             lead = loud[0] * FR / sp
             tail = (len(inside) - 1 - loud[-1]) * FR / sp
             last = e[max(f0, f1 - 15):f1].max(initial=-120)
+            auto = vt is main                     # timing fixes only on the main talking track
+            at_end = nxt is None and abs(t1 - dur) < 0.05
             if not same_next and nxt is not None and run_after < CHOP_MIN and tail < TAIL_MIN and last > thr \
                     and last + vol_db > bed_at(t1 - 0.1) + MASK_DB:
                 problems.append({"tipo": "coda corta", "t": round(t1, 2),
                                  "testo": f"a {fmt(t1)} la parola finisce a filo del taglio ({int(tail * 1000)} ms): lascia 0,10–0,12 s"})
-            if not same_prev and prv is not None and lead > LEAD_MAX:
-                problems.append({"tipo": "pausa", "t": round(t0, 2),
-                                 "testo": f"a {fmt(t0)} {fmt(lead)} di silenzio prima che parli"})
-            if not same_next and nxt is not None and tail > TAIL_MAX:
-                problems.append({"tipo": "pausa", "t": round(t1 - tail, 2),
-                                 "testo": f"a {fmt(t1 - tail)} {fmt(tail)} di silenzio prima del taglio: taglia ~0,11 s dopo la parola"})
+                quiet = run(e[f1:f1 + 30] <= thr) * FR / sp      # silence the source still has after the cut
+                x = round(min(KEEP_TAIL - tail, quiet - 0.02), 3)
+                if auto and x >= 0.03:
+                    ops.append({"op": "extend", "seg": s["id"], "x": x, "at": t1,
+                                "testo": f"a {fmt(t1)} coda allungata di {fmt(x)}: ora la parola finisce"})
+            if not same_prev and lead > (LEAD_MAX if prv is not None else START_MAX) and (prv is not None or t0 < 0.05):
+                x = round(lead - KEEP_LEAD, 3)
+                where = "all'inizio del video" if prv is None else f"a {fmt(t0)}"
+                problems.append({"tipo": "parte morta", "t": round(t0, 2),
+                                 "testo": f"{where} {fmt(lead)} di vuoto prima che parli: toglilo"})
+                if auto:
+                    ops.append({"op": "remove", "a": t0, "x": x, "at": t0, "cut": t0,
+                                "testo": f"{where} tolti {fmt(x)} di vuoto prima che parli"})
+            if not same_next and (nxt is not None or at_end) and tail > (TAIL_MAX if not at_end else END_MAX):
+                keep = KEEP_END if at_end else KEEP_TAIL
+                x = round(tail - keep, 3)
+                where = "finale:" if at_end else f"a {fmt(t1 - tail)}"
+                problems.append({"tipo": "parte morta", "t": round(t1 - tail, 2),
+                                 "testo": f"{where} {fmt(tail)} di vuoto dopo la frase: taglia ~{fmt(keep)} dopo la parola"})
+                if auto:
+                    ops.append({"op": "remove", "a": t1 - x, "x": x, "at": t1 - x,
+                                "testo": f"{where} tolti {fmt(x)} di vuoto dopo la frase"})
+            gaps = np.nonzero(np.diff(loud) * FR / sp > MID_MAX)[0]
+            for j in gaps:                        # dead pause inside the clip
+                g0, g1 = t0 + loud[j] * FR / sp, t0 + loud[j + 1] * FR / sp
+                x = round((g1 - KEEP_LEAD) - (g0 + KEEP_TAIL), 3)
+                problems.append({"tipo": "parte morta", "t": round(g0, 2),
+                                 "testo": f"a {fmt(g0)} pausa di {fmt(g1 - g0)} dentro la clip: spezzala e togli il vuoto"})
+                if auto and not s.get("common_keyframes"):
+                    ops.append({"op": "gap", "seg": s["id"], "a": round(g0 + KEEP_TAIL, 3), "x": x, "at": g0 + KEEP_TAIL,
+                                "testo": f"a {fmt(g0)} tolta una pausa di {fmt(x)} dentro la clip"})
 
     # ---- loudness with earshot --------------------------------------------------------------------------------
     import soundfile as sf
@@ -315,14 +412,7 @@ def main():
             what = "troppo bassa" if gap > GAP_OK[1] else "troppo alta"
             rep["musica_fix"] = {"fattore": round(factor, 3), "era": what, "distanza_era": round(gap, 1)}
             if a.fix:
-                for f in [folder / "draft_info.json", folder / "template-2.tmp", *map(Path, glob.glob(str(folder / "Timelines/*/draft_info.json"))),
-                          *map(Path, glob.glob(str(folder / "Timelines/*/template-2.tmp")))]:
-                    if not f.exists() or f.stat().st_size == 0:
-                        continue
-                    try:
-                        dd = json.load(open(f))
-                    except ValueError:
-                        continue
+                for f, dd in drafts(folder):
                     changed = False
                     for t in dd.get("tracks", []):
                         for s in t.get("segments", []):
@@ -337,10 +427,8 @@ def main():
                                  "testo": f"musica {what}: {gap:.0f} dB sotto la voce, deve stare ~18 (volume ×{factor:.2f})"})
     rep["sistemato"] = fixes
     rep["problemi"] = sorted(problems, key=lambda p: p["t"])
-    txt = json.dumps(rep, ensure_ascii=False, indent=1)
-    if a.out:
-        open(a.out, "w").write(txt)
-    print(txt)
+    rep["_ops"] = ops if speech else []
+    return rep
 
 
 if __name__ == "__main__":

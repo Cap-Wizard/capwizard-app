@@ -678,12 +678,14 @@ Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
 
 EARS_NEW = """   - ASCOLTA il risultato con earshot prima di finire (ricostruisce l'audio dal draft e lo misura, ~10 s):
      "{py}" "{tools}/audiocheck.py" "{folder}" --ffmpeg "{ff}"
-     Correggi nel progetto ogni "parola tagliata", "coda corta" e "pausa" che trova (allunga o accorcia il taglio e risincronizza le
-     altre tracce) e gli "sfx in ritardo" secondo lo stile dell'agenzia; poi rilancialo finché è pulito. La musica la sistema l'app.
+     Monta già stretto: niente parti morte (vuoto dopo la frase, prima che parli, all'inizio, alla fine, pause dentro una clip):
+     il taglio arriva ~0,11 s dopo l'ultima parola. Correggi ogni "parola tagliata" e gli "sfx in ritardo" secondo lo stile
+     dell'agenzia, e le "parte morta" / "coda corta" che puoi; poi rilancialo finché è pulito. Alla fine l'app ricontrolla e
+     sistema da sola parti morte, code corte e musica, quindi non lasciarne apposta.
      Non correggere quello che le regole del cliente vogliono così: in quel caso scrivilo nel riassunto.
 """
 EARS_MOD = """ Poi ASCOLTALO con earshot: "{py}" "{tools}/audiocheck.py" "{folder}" --ffmpeg "{ff}" e sistema
-   "parola tagliata", "coda corta", "pausa" e "sfx in ritardo" che riguardano i punti che hai toccato."""
+   "parola tagliata", "coda corta", "parte morta" e "sfx in ritardo" che riguardano i punti che hai toccato."""
 
 
 def _ears(template: str, folder) -> str:
@@ -692,7 +694,7 @@ def _ears(template: str, folder) -> str:
 
 
 def _listen(job, folder: str, todo: list[str]) -> str:
-    """After install: earshot listens to the project, fixes the music level and lists what is left (into "da fare a mano")."""
+    """After install: earshot listens to the project, cuts the dead parts, lengthens short word tails, fixes the music level and lists what is left (into "da fare a mano")."""
     try:
         rep = vault.audio_check(folder, fix=True)
     except Exception as e:  # noqa: BLE001 — the check is a help, never a reason to fail a video
