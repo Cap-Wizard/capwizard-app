@@ -670,11 +670,47 @@ Procedura:
    - musica SEMPRE dalla libreria Musica di CapCut (mai mp3 scaricati o brani commerciali), DIVERSA dagli ultimi video (lista nel brief).
    - volume della musica MISURATO, non a occhio: ~18 dB sotto la voce (LUFS della voce usata − LUFS del tratto di brano usato, con ffmpeg ebur128),
      di solito 0,08–0,3; a 0,02–0,03 non si sente (correzione di Daniel 04/11);
-4. NON aprire né chiudere CapCut e NON installare il progetto: lo fa l'app. Alla fine scrivi il file `{result}` con:
+{orecchie}4. NON aprire né chiudere CapCut e NON installare il progetto: lo fa l'app. Alla fine scrivi il file `{result}` con:
    {{"staging": "{staging}", "nome": "{name}", "durata": <secondi>, "riassunto": "<cosa hai fatto, in italiano, 5-8 righe>",
     "da_fare_a_mano": ["<cosa resta da fare in CapCut>", ...]}}
    Se non riesci scrivi lo stesso il file con "staging": null e il motivo nel riassunto.
 Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
+
+EARS_NEW = """   - ASCOLTA il risultato con earshot prima di finire (ricostruisce l'audio dal draft e lo misura, ~10 s):
+     "{py}" "{tools}/audiocheck.py" "{folder}" --ffmpeg "{ff}"
+     Correggi nel progetto ogni "parola tagliata", "coda corta" e "pausa" che trova (allunga o accorcia il taglio e risincronizza le
+     altre tracce) e gli "sfx in ritardo" secondo lo stile dell'agenzia; poi rilancialo finché è pulito. La musica la sistema l'app.
+     Non correggere quello che le regole del cliente vogliono così: in quel caso scrivilo nel riassunto.
+"""
+EARS_MOD = """ Poi ASCOLTALO con earshot: "{py}" "{tools}/audiocheck.py" "{folder}" --ffmpeg "{ff}" e sistema
+   "parola tagliata", "coda corta", "pausa" e "sfx in ritardo" che riguardano i punti che hai toccato."""
+
+
+def _ears(template: str, folder) -> str:
+    py = vault.earshot_python()
+    return template.format(py=py, tools=vault.TOOLS, folder=folder, ff=vault.ffmpeg() or "ffmpeg") if py else ""
+
+
+def _listen(job, folder: str, todo: list[str]) -> str:
+    """After install: earshot listens to the project, fixes the music level and lists what is left (into "da fare a mano")."""
+    try:
+        rep = vault.audio_check(folder, fix=True)
+    except Exception as e:  # noqa: BLE001 — the check is a help, never a reason to fail a video
+        job.log(f"⚠ controllo audio non riuscito: {e}")
+        return ""
+    if rep is None:
+        return ""
+    lines = [f"✓ {f}" for f in rep.get("sistemato") or []]
+    for p in rep.get("problemi") or []:
+        lines.append(f"☐ {p['testo']}")
+        todo.append(f"audio: {p['testo']}")
+    gap = rep.get("distanza_musica_voce")
+    head = "👂 Controllo audio (earshot): " + (f"musica {gap:.0f} dB sotto la voce" if gap is not None else "nessuna musica")
+    job.log(head + (" · tutto ok" if not lines else ""))
+    for line in lines:
+        job.log("   " + line)
+    return "\n## Controllo audio (earshot)\n" + head + "\n" + "\n".join(f"- {line}" for line in lines) + "\n"
+
 
 VAULT_MOD_PROMPT = """Sei l'assistente di montaggio di Daniel (videomaker). Lavori in automatico dall'app CapWizard: NON fare domande.
 Devi applicare delle MODIFICHE a un video già montato, direttamente sul progetto CapCut esistente (in place: niente copie v2).
@@ -698,7 +734,7 @@ Procedura:
    ha cambiato lui e NON annullare le sue modifiche.
 3. Applica SOLO le modifiche richieste. Se togli o sposti un taglio risincronizza sottotitoli e suoni. Scrivi lo stesso risultato in
    draft_info.json, template-2.tmp e Timelines/<id>/(draft_info.json, template.tmp, template-2.tmp) con lo stesso id timeline, poi elimina i *.bak.
-4. Verifica: JSON valido, nessun riferimento rotto, durata coerente.
+4. Verifica: JSON valido, nessun riferimento rotto, durata coerente.{orecchie}
 5. Aggiorna SEMPRE il vault: nella nota del cliente, sezione "## Lezioni" (creala in fondo se manca), aggiungi
    "- {day}: <cosa voleva e come l'hai risolto>"; se è una preferenza che vale anche per i prossimi video scrivila anche come regola
    nella nota del cliente (o nello stile dell'agenzia in 03 Stili se vale per tutta l'agenzia) e correggi le regole vecchie che contraddice.
@@ -759,7 +795,8 @@ def run_vault(job, req, client: dict) -> tuple[str, str]:
     brief += reference_section(getattr(req, "reference", None) or [], work)
     prompt = VAULT_PROMPT.format(vault=vault.VAULT, base=base, brief=brief, py=vault.tools_python(), tools=vault.TOOLS,
                                  clips=req.input_path, work=work, ff=vault.ffmpeg() or "ffmpeg", capcut=CAPCUT_PROJECTS_DIR,
-                                 staging=staging, result=result, name=req.name, escluse=escluse)
+                                 staging=staging, result=result, name=req.name, escluse=escluse,
+                                 orecchie=_ears(EARS_NEW, staging))
     dirs = {str(Path(req.input_path)), str(CAPCUT_PROJECTS_DIR), str(work), str(vault.VAULT), str(vault.TOOLS)}
     if getattr(req, "broll_path", None):
         dirs.add(str(Path(req.broll_path)))
@@ -788,11 +825,12 @@ def run_vault(job, req, client: dict) -> tuple[str, str]:
     job.log(msg)
     project = str(CAPCUT_PROJECTS_DIR / req.name)
     todo = [t for t in res.get("da_fare_a_mano") or [] if t]
+    ears = _listen(job, project, todo)
     report = work / "report.md"
     report.write_text(
         f"# {req.name}\n\nCliente: {client['nome']} ({client['agenzia']}) · base tecnica «{base}» · durata {res.get('durata', '?')} s\n\n"
         f"## Cosa ha fatto Claude\n{res.get('riassunto', '')}\n\n## DA FARE A MANO IN CAPCUT\n"
-        + ("\n".join(f"- {t}" for t in todo) or "- niente") + "\n\n## Messaggi di Claude\n\n" + "\n\n".join(transcript[1:]) + "\n")
+        + ("\n".join(f"- {t}" for t in todo) or "- niente") + "\n" + ears + "\n## Messaggi di Claude\n\n" + "\n\n".join(transcript[1:]) + "\n")
     job.log("✓ " + res.get("riassunto", "Progetto creato.").replace("\n", " "))
     for t in todo:
         job.log(f"☐ {t}")
@@ -836,8 +874,10 @@ def run_vault_modify(job, project: dict, client: dict, text: str, images: list[s
         name=project["name"], folder=folder, backup=backup, cliente=f"{client['nome']} ({client['agenzia']})", vault=vault.VAULT,
         note=client["path"], summary=summary, staging=settings.get("staging") or "non disponibile", history=history,
         text=text or "(vedi gli screenshot)", day=time.strftime("%d/%m"), result=result,
-        images=attachments_text(images))
+        images=attachments_text(images), orecchie=_ears(EARS_MOD, folder))
     dirs = {str(folder), str(CAPCUT_PROJECTS_DIR), str(work), str(backup), str(ATTACH_DIR), str(vault.VAULT)}
+    if vault.earshot_python():
+        dirs.add(str(vault.TOOLS))
     dirs |= {str(Path(p).parent) for p in images if p.lower().endswith(VIDEO_EXT)}
     if settings.get("staging"):
         dirs.add(str(Path(settings["staging"]).parent))

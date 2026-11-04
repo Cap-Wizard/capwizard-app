@@ -50,7 +50,7 @@ def enabled() -> bool:
 # ---------------------------------------------------------------------------
 
 def ffmpeg() -> str | None:
-    cands = [os.environ.get("CAPWIZARD_FFMPEG"), shutil.which("ffmpeg"),
+    cands = [os.environ.get("CAPWIZARD_FFMPEG"), shutil.which("ffmpeg"), str(HOME / "Developer/earshot/bin/ffmpeg"),
              str(HOME / "Desktop/VIDEO CLAUDE/720 STUDI0/tools/ffmpeg"), str(HOME / "video-editor-mcp/work/tools/ffmpeg")]
     for c in cands:
         if c and os.path.exists(c):
@@ -60,6 +60,35 @@ def ffmpeg() -> str | None:
         return imageio_ffmpeg.get_ffmpeg_exe()
     except Exception:  # noqa: BLE001
         return None
+
+
+def earshot_python() -> str | None:
+    """The Python of earshot (the "ears" that check the audio of a project). Outside the Desktop: iCloud evicts it there."""
+    for c in (os.environ.get("CAPWIZARD_EARSHOT_PYTHON"), str(HOME / "Developer/earshot/.venv/bin/python")):
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+def audio_check(folder: str, fix: bool = False, timeout: int = 600) -> dict | None:
+    """Listen to a CapCut project with earshot (tools/audiocheck.py): music vs voice, chopped words, pauses, late sfx.
+    With fix=True the music volume is set right in every copy of the draft. None when earshot is not installed."""
+    py = earshot_python()
+    if not py:
+        return None
+    out = Path(folder) / ".audiocheck.json"
+    cmd = [py, str(TOOLS / "audiocheck.py"), str(folder), "--ffmpeg", ffmpeg() or "ffmpeg", "--out", str(out)] + (["--fix"] if fix else [])
+    env = {**os.environ, "EARSHOT_THREADS": os.environ.get("EARSHOT_THREADS", "3")}
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+    try:
+        rep = json.loads(out.read_text())
+    except (OSError, ValueError):
+        raise RuntimeError((p.stderr or "audiocheck senza risultato").strip().splitlines()[-1])
+    finally:
+        out.unlink(missing_ok=True)
+    if fix and rep.get("sistemato"):
+        drop_patch(folder)
+    return rep
 
 
 _TOOLS_PY: str | None = None
