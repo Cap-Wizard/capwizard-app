@@ -17,7 +17,7 @@
   --pri-bg: #ffffff; --pri-text: #121214; --pri-hover: #ececec;
   --nav-on-bg: rgba(255, 255, 255, .12); --nav-on-text: #ffffff;
   --title-weight: 600; --title-track: -.015em;
-  --deep: #1c1c1f; --overlay: rgba(10, 10, 12, .5);
+  --deep: #1c1c1f; --overlay: rgba(10, 10, 12, .5); --menu-bg: #2b2a2f;
 }
 body::before { display: none; }
 ::selection { background: rgba(255, 122, 48, .35); }

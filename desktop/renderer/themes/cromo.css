@@ -17,7 +17,7 @@
   --nav-on-bg: rgba(255, 255, 255, .08); --nav-on-text: #ffffff;
   --title-font: "Avenir Next Condensed", "Helvetica Neue", "Arial Narrow", sans-serif; --title-weight: 700;
   --title-case: uppercase; --title-track: .01em;
-  --deep: #111318; --overlay: rgba(5, 6, 8, .6);
+  --deep: #111318; --overlay: rgba(5, 6, 8, .6); --menu-bg: #1a1c22;
 }
 body::before { display: none; }
 ::selection { background: rgba(201, 206, 214, .3); }

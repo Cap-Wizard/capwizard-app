@@ -16,7 +16,7 @@
   --pri-bg: #2b2724; --pri-text: #f7f3ed; --pri-hover: #47413b;
   --nav-on-bg: #2b2724; --nav-on-text: #f7f3ed;
   --title-font: "Didot", "Bodoni 72", "Baskerville", Georgia, serif; --title-weight: 400; --title-track: -.005em;
-  --deep: #efe8de; --overlay: rgba(60, 46, 32, .22);
+  --deep: #efe8de; --overlay: rgba(60, 46, 32, .22); --menu-bg: #f7f2eb;
 }
 body::before { display: none; }
 ::selection { background: rgba(43, 39, 36, .18); }
