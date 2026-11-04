@@ -28,7 +28,7 @@ FR = 0.01                    # energy frame: 10 ms
 GAP_TARGET = 18.0            # music this many LU under the voice
 GAP_OK = (14.0, 22.0)
 VOL_MIN, VOL_MAX = 0.02, 1.0
-LEAD_MAX, TAIL_MAX = 0.25, 0.35   # silence allowed at the start / end of a spoken clip
+LEAD_MAX, TAIL_MAX = 0.25, 0.20   # silence allowed at the start / end of a spoken clip (Daniel: cut right after the sentence)
 SFX_LATE = (0.07, 0.35)
 TAIL_MIN = 0.06              # the word must end at least this long before the cut
 VOICE_RANGE = 30             # dB under the clip's loud voice: below that it is room echo, not a word
@@ -286,7 +286,7 @@ def main():
                                  "testo": f"a {fmt(t0)} {fmt(lead)} di silenzio prima che parli"})
             if not same_next and nxt is not None and tail > TAIL_MAX:
                 problems.append({"tipo": "pausa", "t": round(t1 - tail, 2),
-                                 "testo": f"a {fmt(t1 - tail)} {fmt(tail)} di silenzio prima del taglio"})
+                                 "testo": f"a {fmt(t1 - tail)} {fmt(tail)} di silenzio prima del taglio: taglia ~0,11 s dopo la parola"})
 
     # ---- loudness with earshot --------------------------------------------------------------------------------
     import soundfile as sf
