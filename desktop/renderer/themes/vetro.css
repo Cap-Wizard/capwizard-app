@@ -1,0 +1,33 @@
+/* ==== Vetro (reference 2: dashboard di analytics). Vetro fumé scuro su una luce calda arancio e viola,
+   barra laterale nera che galleggia, card grandi e morbide, bottone principale bianco. ==== */
+:root {
+  --bg: #29292c; --bg2: #141416; --panel: rgba(255, 255, 255, .07); --panel2: rgba(255, 255, 255, .11); --panel3: rgba(255, 255, 255, .17);
+  --line: rgba(255, 255, 255, .08); --line2: rgba(255, 255, 255, .15);
+  --text: #f6f5f3; --mute: #bab4ad; --dim: #87817b;
+  --accent: #ff7a30; --accent-hover: #ff9457; --accent-soft: rgba(255, 122, 48, .14); --accent-hi: #ffb07f; --on-accent: #ffffff;
+  --grad: #ff7a30; --ok: #c8f07a; --warn: #f4d443; --err: #ff6b5e;
+  --r: 26px; --shadow: none;
+  --app-bg: radial-gradient(800px 560px at 48% 38%, rgba(255, 122, 48, .30), transparent 62%),
+            radial-gradient(760px 560px at 12% 12%, rgba(120, 88, 178, .30), transparent 62%),
+            radial-gradient(700px 500px at 95% 95%, rgba(255, 186, 120, .10), transparent 60%),
+            linear-gradient(160deg, #3b3a3f 0%, #2a292d 50%, #1d1d20 100%);
+  --side-bg: #121214; --bar-bg: transparent; --left-bg: transparent;
+  --blur: 24px; --r-card: 26px; --r-ctrl: 14px; --r-nav: 12px; --r-pill: 14px;
+  --card-shadow: 0 30px 60px -36px rgba(0, 0, 0, .8), inset 0 1px 0 rgba(255, 255, 255, .07);
+  --pri-bg: #ffffff; --pri-text: #121214; --pri-hover: #ececec;
+  --nav-on-bg: rgba(255, 255, 255, .12); --nav-on-text: #ffffff;
+  --title-weight: 600; --title-track: -.015em;
+  --deep: #1c1c1f; --overlay: rgba(10, 10, 12, .5);
+}
+body::before { display: none; }
+::selection { background: rgba(255, 122, 48, .35); }
+/* the sidebar floats like a black slab */
+.sidebar { margin: 10px 0 10px 10px; border: 1px solid var(--line); border-radius: 24px; }
+.sidebar .vbtn.on { border: 1px solid var(--line2); }
+.mainbar { border-bottom-color: transparent; }
+.dash-head h2, .lib-head h2 { font-size: 30px; }
+.kpi b { font-size: 34px; font-weight: 500; letter-spacing: -.02em; }
+.kpi { padding: 18px 20px; }
+.go:disabled, .send:disabled { background: rgba(255, 255, 255, .1); color: var(--dim); }
+.tgl.on { background: var(--accent); }
+input[type=text], input[type=password], input[type=date], select, textarea { background-color: rgba(0, 0, 0, .22); }

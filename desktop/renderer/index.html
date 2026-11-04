@@ -7,7 +7,7 @@
   <title>CapWizard</title>
   <link rel="icon" href="logo.png" />
   <link rel="stylesheet" href="styles.css" />
-  <link rel="stylesheet" href="theme-zenus.css" />
+  <script src="themes.js"></script>  <!-- the chosen style (Impostazioni → Stile dell'app) -->
 </head>
 <body>
   <header class="sidebar" id="sidebar">
@@ -40,6 +40,7 @@
         <button class="icon-btn" id="btn-settings" title="Impostazioni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg></button>
         <div class="menu" id="settings-menu" hidden>
           <button id="btn-config-ai">Collegamento a Claude</button>
+          <button id="btn-style">🎨 Stile dell'app <small id="style-name"></small></button>
           <button id="btn-ai-services">✦ Servizi AI <small id="ai-count"></small></button>
           <button id="btn-team-board">👥 Bacheca del team</button>
           <button id="tb-account" hidden>Gestisci abbonamento</button>
@@ -446,6 +447,19 @@
   </div>
 
   <!-- ==================== SERVIZI AI ==================== -->
+  <div id="style-modal" class="modal-overlay" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h2>Stile dell'app</h2>
+        <button class="modal-close" id="style-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="style-intro">Scegli come vuoi vedere CapWizard. Vale solo su questo Mac: ognuno del team tiene il suo.</p>
+        <div class="style-grid" id="style-grid"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="ai-modal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-head">

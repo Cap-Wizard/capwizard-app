@@ -1,0 +1,16 @@
+/* ==== Zenus: the look of Gabriele's dashboard. Flat anthracite, thin borders, 12/8 px corners,
+   no gradients, shadows or glows; a little violet only on the main actions. ==== */
+:root {
+  --bg: #111113; --bg2: #151517; --panel: #18181b; --panel2: #1f1f23; --panel3: #26262b;
+  --line: #27272a; --line2: #34343a;
+  --text: #f4f4f5; --mute: #a1a1aa; --dim: #71717a;
+  --accent: #8b7cf6; --accent-hover: #a99ef9; --accent-soft: rgba(139, 124, 246, .1); --accent-hi: #a99ef9; --on-accent: #ffffff;
+  --grad: #8b7cf6;
+  --ok: #22c55e; --warn: #f97316; --err: #ef4444;
+  --r: 12px; --shadow: none;
+}
+body *, body *::before, body *::after { box-shadow: none !important; text-shadow: none !important; }
+body { background: var(--bg); }
+body::before { display: none; }
+::selection { background: rgba(139, 124, 246, .35); }
+:root { --pri-hover: #7a6aef; }

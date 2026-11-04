@@ -1,0 +1,35 @@
+/* ==== Sabbia (reference 1: studio d'architettura). Chiaro e caldo: sabbia e vetro smerigliato, card molto
+   arrotondate, bottoni a pillola antracite, titoli in serif sottile. ==== */
+:root {
+  --bg: #ebe5dc; --bg2: #e3dcd1; --panel: rgba(255, 255, 255, .5); --panel2: rgba(255, 255, 255, .7); --panel3: rgba(255, 255, 255, .92);
+  --line: rgba(70, 56, 42, .10); --line2: rgba(70, 56, 42, .17);
+  --text: #2a2520; --mute: #6e655b; --dim: #9b9187;
+  --accent: #2b2724; --accent-hover: #47413b; --accent-soft: rgba(43, 39, 36, .07); --accent-hi: #2b2724; --on-accent: #f7f3ed;
+  --grad: #2b2724; --ok: #3c8a56; --warn: #b8742a; --err: #c0453a;
+  --r: 22px; --shadow: none;
+  --app-bg: radial-gradient(1100px 650px at 78% -10%, #fff6e8 0%, transparent 62%),
+            radial-gradient(900px 600px at -5% 105%, #d6c7b5 0%, transparent 60%),
+            linear-gradient(160deg, #f1ebe3 0%, #e4dbcf 55%, #d9cec0 100%);
+  --side-bg: rgba(255, 255, 255, .34); --bar-bg: rgba(255, 255, 255, .26); --left-bg: rgba(255, 255, 255, .16);
+  --blur: 18px; --r-card: 22px; --r-ctrl: 999px; --r-nav: 999px; --r-pill: 999px;
+  --card-shadow: 0 22px 50px -32px rgba(80, 58, 36, .5), inset 0 1px 0 rgba(255, 255, 255, .75);
+  --pri-bg: #2b2724; --pri-text: #f7f3ed; --pri-hover: #47413b;
+  --nav-on-bg: #2b2724; --nav-on-text: #f7f3ed;
+  --title-font: "Didot", "Bodoni 72", "Baskerville", Georgia, serif; --title-weight: 400; --title-track: -.005em;
+  --deep: #efe8de; --overlay: rgba(60, 46, 32, .22);
+}
+body::before { display: none; }
+::selection { background: rgba(43, 39, 36, .18); }
+.logo { filter: brightness(.18); }
+.dash-head h2, .lib-head h2 { font-size: 34px; line-height: 1.05; }
+.dash-sub, .sb-label { letter-spacing: .14em; text-transform: uppercase; font-size: 10.5px; }
+.mb-title { font-size: 17px; }
+.vbtn { padding: 9px 14px; }
+.vbtn.on b { color: rgba(247, 243, 237, .7); }
+.kpi b { font-family: var(--title-font); font-weight: 400; font-size: 32px; }
+.chip.on { background: var(--panel3); border-color: var(--text); }
+input[type=text], input[type=password], input[type=date], select, textarea { background-color: rgba(255, 255, 255, .6); }
+.badge.ok, .qitem .qs.ok, .ai-state.st-collegato { color: #2f7a48; }
+.badge.run, .qitem .qs.run, .due.soon, .ai-state.st-da-autorizzare { color: #a5621d; }
+.badge.err, .qitem .qs.err, .due.late { color: #b03a30; }
+.go:disabled, .send:disabled { background: rgba(43, 39, 36, .12); color: var(--dim); }

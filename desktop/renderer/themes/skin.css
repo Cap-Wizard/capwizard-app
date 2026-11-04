@@ -1,36 +1,32 @@
-/* ==== Zenus: the look of Gabriele's dashboard. Flat anthracite, thin borders, 12/8 px corners,
-   no gradients, shadows or glows; a little violet only on the main actions.
-   Loaded after styles.css: remove its <link> in index.html to go back to the light blue. */
+/* ==== Skin: the structure every CapWizard style shares (made from the Zenus look). A style file in themes/
+   only sets the tokens below (+ its own touches). Loaded after styles.css, before the style file. ==== */
 :root {
-  --bg: #111113; --bg2: #151517; --panel: #18181b; --panel2: #1f1f23; --panel3: #26262b;
-  --line: #27272a; --line2: #34343a;
-  --text: #f4f4f5; --mute: #a1a1aa; --dim: #71717a;
-  --accent: #8b7cf6; --accent-hover: #a99ef9; --accent-soft: rgba(139, 124, 246, .1); --accent-hi: #a99ef9; --on-accent: #ffffff;
-  --grad: #8b7cf6;
-  --ok: #22c55e; --warn: #f97316; --err: #ef4444;
-  --r: 12px; --shadow: none;
+  --app-bg: var(--bg); --side-bg: var(--bg2); --bar-bg: var(--bg); --left-bg: var(--bg);
+  --blur: 0px; --r-card: 12px; --r-ctrl: 8px; --r-nav: 8px; --r-pill: 8px; --card-shadow: none;
+  --pri-bg: var(--accent); --pri-text: #fff; --pri-hover: var(--accent-hover);
+  --nav-on-bg: var(--panel3); --nav-on-text: var(--text);
+  --title-font: var(--font-display); --title-weight: 600; --title-case: none; --title-track: -.01em;
+  --deep: #0c0d10;   /* the dark base cards and overlays are mixed with */
+  --overlay: rgba(0, 0, 0, .6);
 }
-body *, body *::before, body *::after { box-shadow: none !important; text-shadow: none !important; }
-body { background: var(--bg); }
-body::before { display: none; }
-::selection { background: rgba(139, 124, 246, .35); }
-.modal-overlay { backdrop-filter: none; background: rgba(0, 0, 0, .6); }
+body { background: var(--app-bg); background-attachment: fixed; }
+.modal-overlay { backdrop-filter: blur(calc(var(--blur) / 2)); background: var(--overlay); }
 
 /* ---- frame ---- */
-.sidebar { background: var(--bg2); border-right: 1px solid var(--line); }
-.mainbar { background: var(--bg); border-bottom: 1px solid var(--line); }
-.mb-title { font-weight: 500; font-size: 14px; }
+.sidebar { background: var(--side-bg); backdrop-filter: blur(var(--blur)); border-right: 1px solid var(--line); }
+.mainbar { background: var(--bar-bg); backdrop-filter: blur(var(--blur)); border-bottom: 1px solid var(--line); }
+.mb-title { font-family: var(--title-font); font-weight: var(--title-weight); text-transform: var(--title-case); letter-spacing: var(--title-track); font-size: 14px; }
 .mb-date { font-weight: 400; color: var(--mute); font-size: 12.5px; }
 .logo { filter: none; width: 29px; height: 23px; }
-h1 { font-weight: 600; letter-spacing: -.01em; }
+h1 { font-family: var(--title-font); font-weight: var(--title-weight); letter-spacing: var(--title-track); text-transform: var(--title-case); }
 h1 span { color: var(--text); }
 .sb-brand { padding-bottom: 14px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
 .sb-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; color: var(--dim); margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
-.vbtn { border-radius: 8px; font-weight: 500; color: var(--mute); padding: 8px 10px; }
+.vbtn { border-radius: var(--r-nav); font-weight: 500; color: var(--mute); padding: 8px 10px; }
 .vbtn svg { color: var(--mute); }
 .vbtn:hover { background: var(--panel2); color: var(--text); }
-.vbtn.on { background: var(--panel3); color: var(--text); font-weight: 600; }
-.vbtn.on svg { color: var(--text); }
+.vbtn.on { background: var(--nav-on-bg); color: var(--nav-on-text); font-weight: 600; }
+.vbtn.on svg { color: var(--nav-on-text); }
 .vbtn b, .vbtn.on b { font-weight: 500; color: var(--dim); }
 .icon-btn { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .icon-btn:hover { background: var(--panel2); }
@@ -40,12 +36,13 @@ h1 span { color: var(--text); }
 
 /* ---- surfaces: flat panels with a thin border ---- */
 .step, .card, .phead, .composer, .kpi, .gate-card, .ai-row, .pcard, .qitem, .kit-panel, .tpl-picker, .status-block, .notice {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
-.modal { background: var(--panel); border: 1px solid var(--line2); border-radius: 12px; }
-.left, .plist { background: var(--bg); }
-.lfoot { background: var(--bg); border-top: 1px solid var(--line); }
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card);
+  backdrop-filter: blur(var(--blur)); box-shadow: var(--card-shadow); }
+.modal { background: var(--panel); border: 1px solid var(--line2); border-radius: var(--r-card); backdrop-filter: blur(calc(var(--blur) * 2)); box-shadow: var(--card-shadow); }
+.left, .plist { background: var(--left-bg); }
+.lfoot { background: var(--left-bg); border-top: 1px solid var(--line); }
 .plist { border-right: 1px solid var(--line); }
-.step h2 { font-weight: 600; }
+.step h2 { font-family: var(--title-font); font-weight: var(--title-weight); letter-spacing: var(--title-track); }
 .num { background: var(--panel2); border: 1px solid var(--line2); border-radius: 6px; }
 .step.done { border-color: var(--line); }
 .card h3 { color: var(--mute); font-weight: 600; }
@@ -58,17 +55,17 @@ h1 span { color: var(--text); }
 .gutter:hover::after, body.resizing .gutter::after { background: var(--mute); }
 
 /* ---- buttons: neutral with a border; violet only for the main action ---- */
-.btn2, .bbtn { background: var(--panel); border: 1px solid var(--line2); color: var(--text); border-radius: 8px; font-weight: 500; }
+.btn2, .bbtn { background: var(--panel); border: 1px solid var(--line2); color: var(--text); border-radius: var(--r-pill); font-weight: 500; }
 .btn2:hover, .bbtn:hover { background: var(--panel2); border-color: var(--line2); }
-.go, .send, .btn-primary-sm, .bbtn.primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 8px; }
+.go, .send, .btn-primary-sm, .bbtn.primary { background: var(--pri-bg); color: var(--pri-text); border: 1px solid transparent; border-radius: var(--r-pill); }
 .go:hover:not(:disabled), .send:hover:not(:disabled), .btn-primary-sm:hover, .bbtn.primary:hover {
-  background: #7a6aef; border-color: #7a6aef; filter: none; transform: none; }
+  background: var(--pri-hover); border-color: transparent; filter: none; transform: none; }
 .go { height: 46px; font: 600 13.5px var(--font-ui); letter-spacing: .02em; }
 .go::after { display: none; }
 .go:disabled, .send:disabled { background: var(--panel2); color: var(--dim); border-color: var(--line); }
 .send { font-weight: 600; letter-spacing: .02em; }
 .tgl { background: var(--panel3); }
-.tgl.on { background: var(--accent); }
+.tgl.on { background: var(--pri-bg); }
 .btn-link { color: var(--mute); } .btn-link:hover { color: var(--text); }
 
 /* segmented tabs, like «30 Days · 3 Months · 1 years» */
@@ -109,7 +106,7 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .msg.ai { background: transparent; border: 1px solid var(--line); }
 
 /* ---- Home: white figures, neutral cards with the client's colour as a small mark ---- */
-.dash-head h2, .lib-head h2 { font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+.dash-head h2, .lib-head h2 { font-family: var(--title-font); font-size: 22px; font-weight: var(--title-weight); letter-spacing: var(--title-track); text-transform: var(--title-case); }
 .kpi { padding: 16px; }
 .kpi b { font-size: 26px; font-weight: 600; color: var(--text); }
 .kpi .ic { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
@@ -118,7 +115,7 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .bcol.c-in_lavorazione h3::before { background: var(--accent); }
 .bcol.over { background: var(--panel); }
 .bempty { border: 1px dashed var(--line2); border-radius: 10px; }
-.bcard, .bcard:hover { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; transform: none; }
+.bcard, .bcard:hover { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card); transform: none; backdrop-filter: blur(var(--blur)); }
 .bcard:hover { border-color: var(--line2); }
 .bclient { color: var(--mute); }
 .bclient i { width: 10px; height: 10px; border-radius: 3px; }
@@ -126,7 +123,7 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .bcard .bx { color: var(--dim); opacity: 1; }
 
 /* ---- Clienti / Agenzie ---- */
-.lib-card, .lib-card:hover { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; transform: none; }
+.lib-card, .lib-card:hover { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card); transform: none; backdrop-filter: blur(var(--blur)); box-shadow: var(--card-shadow); }
 .lib-card:hover { border-color: var(--line2); }
 .lc-top i { border-radius: 10px; }
 .lc-name b { font-weight: 600; }
@@ -145,6 +142,16 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 
 /* ---- one height, one corner for the controls side by side in a page head ---- */
 .dash-actions > button, .lib-actions > button, .lib-actions .hsearch {
-  height: 38px; padding-top: 0; padding-bottom: 0; border-radius: 8px; box-sizing: border-box; display: inline-flex; align-items: center; }
+  height: 38px; padding-top: 0; padding-bottom: 0; border-radius: var(--r-pill); box-sizing: border-box; display: inline-flex; align-items: center; }
 /* empty board columns: same box in every column, text in the middle */
 .bempty { min-height: 88px; display: flex; align-items: center; justify-content: center; padding: 14px 16px; line-height: 1.45; }
+
+/* ---- base spots that were painted dark on purpose: now from the tokens, so a light style works ---- */
+.notice { background: color-mix(in srgb, var(--nc, var(--err)) 10%, var(--panel)); backdrop-filter: blur(var(--blur)); }
+body.dragging::after, .ai-view { background: color-mix(in srgb, var(--bg) 92%, transparent); }
+.tab.on { color: var(--text); }
+pre.cmd { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--text) 12%, transparent); }
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--text) 22%, transparent); }
+.kpi, .step, .card, .gate-card, .composer { box-shadow: var(--card-shadow); }
+:is(.vbtn.on, .go:not(:disabled), .send:not(:disabled), .btn-primary-sm, .bbtn.primary, .notice .na button.primary) { text-shadow: none; }

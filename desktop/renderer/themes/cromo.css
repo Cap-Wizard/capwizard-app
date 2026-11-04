@@ -1,0 +1,36 @@
+/* ==== Cromo (reference 3: portfolio da designer). Quasi nero e freddo, titoli condensati maiuscoli in
+   argento, bordi sottili, angoli piccoli, bottone principale in metallo spazzolato. ==== */
+:root {
+  --bg: #14161b; --bg2: #101216; --panel: rgba(255, 255, 255, .035); --panel2: rgba(255, 255, 255, .06); --panel3: rgba(255, 255, 255, .1);
+  --line: rgba(255, 255, 255, .09); --line2: rgba(255, 255, 255, .16);
+  --text: #eceef2; --mute: #a3a8b2; --dim: #6f7580;
+  --accent: #c9ced6; --accent-hover: #e6e9ee; --accent-soft: rgba(201, 206, 214, .1); --accent-hi: #ffffff; --on-accent: #111318;
+  --grad: #c9ced6; --ok: #8fd6a8; --warn: #e7c27a; --err: #ef8a8a;
+  --r: 10px; --shadow: none;
+  --app-bg: radial-gradient(900px 520px at 70% -10%, rgba(180, 190, 210, .10), transparent 60%),
+            linear-gradient(180deg, #181b21 0%, #13151a 60%, #0f1115 100%);
+  --side-bg: #0f1115; --bar-bg: rgba(15, 17, 21, .7); --left-bg: transparent;
+  --blur: 6px; --r-card: 10px; --r-ctrl: 6px; --r-nav: 6px; --r-pill: 6px;
+  --card-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+  --pri-bg: linear-gradient(115deg, #f4f5f7 0%, #a7adb6 38%, #eef0f3 62%, #9aa0aa 100%); --pri-text: #111318;
+  --pri-hover: linear-gradient(115deg, #ffffff 0%, #b8bec7 38%, #ffffff 62%, #aab0ba 100%);
+  --nav-on-bg: rgba(255, 255, 255, .08); --nav-on-text: #ffffff;
+  --title-font: "Avenir Next Condensed", "Helvetica Neue", "Arial Narrow", sans-serif; --title-weight: 700;
+  --title-case: uppercase; --title-track: .01em;
+  --deep: #111318; --overlay: rgba(5, 6, 8, .6);
+}
+body::before { display: none; }
+::selection { background: rgba(201, 206, 214, .3); }
+/* silver titles */
+.dash-head h2, .lib-head h2, h1 {
+  background: linear-gradient(180deg, #ffffff 0%, #d9dde3 45%, #8d939c 100%);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.dash-head h2, .lib-head h2 { font-size: 40px; line-height: .95; font-weight: 800; }
+h1 span { -webkit-text-fill-color: transparent; }
+.dash-sub, .sb-label, .card h3, .bcol h3 { text-transform: uppercase; letter-spacing: .16em; font-size: 10.5px; }
+.mb-title { letter-spacing: .08em; font-size: 13px; }
+.vbtn.on { border: 1px solid var(--line2); }
+.kpi b { font-family: var(--title-font); font-weight: 600; font-size: 36px; letter-spacing: 0; }
+.go, .send, .btn-primary-sm, .bbtn.primary { text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+.go:disabled, .send:disabled { background: rgba(255, 255, 255, .07); color: var(--dim); }
+.tgl.on { background: #c9ced6; }
