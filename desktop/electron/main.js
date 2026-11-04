@@ -11,7 +11,18 @@ const { spawn, execFileSync } = require("child_process");
 const BACKEND_PORT = 8765;
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 // Secret the window sends with every backend call, so web pages open in a browser can't drive it.
-const BACKEND_TOKEN = crypto.randomBytes(24).toString("hex");
+// Kept in a private file, so a backend restarted on its own (or a window left open
+// across a restart) still matches: a fresh token each launch made every call 403.
+const BACKEND_TOKEN = (() => {
+  const f = path.join(app.getPath("userData"), "backend-token");
+  try {
+    const t = fs.readFileSync(f, "utf8").trim();
+    if (/^[0-9a-f]{48}$/.test(t)) return t;
+  } catch (_) {}
+  const t = crypto.randomBytes(24).toString("hex");
+  try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t, { mode: 0o600 }); } catch (_) {}
+  return t;
+})();
 
 // Cloud licensing backend (accounts + Stripe subscription check).
 // Override with CAPWIZARD_CLOUD_URL; defaults to local dev server.
