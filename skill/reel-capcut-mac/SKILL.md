@@ -1,7 +1,7 @@
 ---
 name: reel-capcut-mac
 metadata:
-  version: "0.2.0-alpha.3"
+  version: "0.2.0-alpha.3.1"
 description: Monta reel verticali (Instagram/TikTok) in CapCut direttamente sul Mac di Nicola con Claude Code - analisi delle clip con Whisper sul chip Apple, tagli secondo le sue regole, progetto CapCut generato dal template del cliente, b-roll Magnific, profilo del cliente e lezioni. Usala quando Nicola chiede di montare reel da una cartella di clip o di correggere un reel già montato (anche da screenshot della chat del cliente).
 ---
 
@@ -49,8 +49,22 @@ bash "$SKILL_DIR/scripts/installa.sh"     # ffmpeg (Homebrew), mlx-whisper, mode
   (da terminale) e lavora senza profilo.
 - Leggilo **tutto** prima di analizzare le clip: kit e misure, volumi, girato tipico, b-roll,
   sezione «## Lezioni».
-- Per scriverci (lezioni) usa sempre la copia locale: se il profilo è solo in `synced/`, prima
-  copia la sua cartella in `~/.claude/skills/<nome>` (altrimenti una sincronizzazione la perde).
+- Per scriverci (lezioni, costruttore) usa il **percorso che ti dà l'app** nel prompt: è il file
+  vero, nella repo condivisa dei clienti. I file dentro `~/.claude` sono protetti e Claude Code non
+  li modifica (il collegamento `~/.claude/skills/<nome>` punta lì). Da terminale, se il profilo è
+  solo in `synced/`, copia la sua cartella fuori da `~/.claude` e dillo a Nicola.
+
+### Il costruttore del cliente
+Se il template del cliente non ha lo schema che si aspetta `costruisci_draft.py`, il progetto si
+costruisce con uno script apposta: **`costruisci.py` nella cartella del profilo**, con accanto
+**`config-esempio.json`** (il config di un video approvato).
+- Se c'è, **usalo** (`monta.py` lo trova da solo con `--profilo`): parti da `config-esempio.json`,
+  non rileggere il sorgente dello script e non riscriverlo. Se un video ha bisogno di qualcosa che
+  lo script non fa, aggiungilo allo script, che resta valido per tutti i video del cliente.
+- Se non c'è e lo devi scrivere: stesso uso di `costruisci_draft.py` (`CARTELLA_OUT "NOME"
+  config.json`, scrive `draft_info.json`, `draft_meta_info.json`, `plan.json`), tutto quello che
+  cambia da video a video nel config. Alla fine salvalo come `costruisci.py` nella cartella del
+  profilo, il config del video come `config-esempio.json`, e scrivilo nel profilo («## Costruttore»).
 
 ## Cartelle di CapWizard
 Tutto in `~/Library/Application Support/CapWizard` (le stesse dell'app):
@@ -83,6 +97,8 @@ python3 analizza.py "<cartella clip>" "<lavoro>/<video>" --mosaico
 Per ogni clip: durata reale, rotazione e come metterla in CapCut, parole con tempi e livello,
 tratti di voce piena con trascrizione. Nel riassunto le parole **deboli** sono tra [parentesi]:
 suggeritore, conti alla rovescia, voci lontane. Apri `mosaico.jpg` con Read.
+**Dall'app l'analisi è già fatta** prima che tu parta (te lo dice il prompt): non rilanciarla,
+leggi il riassunto in `<lavoro>/<video>/analisi.txt` e il mosaico.
 
 ### Voce di chi parla e suggeritore
 Dietro la camera spesso c'è chi **suggerisce la battuta** prima che venga detta, e Whisper la
@@ -129,6 +145,17 @@ vale quello che trovi (stessi tempi = stesso ruolo). Lo schema è in `src/capwiz
 ## 4. Decidi il montaggio e scrivi il config
 Applica le «Regole di montaggio». Scrivi `config.json` (formato sotto): spezzoni, pause da
 togliere, transizioni, regia (titoletti, elenchi, coperture), emoji, correzioni dei nomi.
+
+## 5-6. Controlla, costruisci, livella, verifica: un comando solo
+```bash
+python3 monta.py "<lavoro>/<video>" "NOME PROGETTO" config.json --profilo "<cartella del profilo>"
+```
+Fa in fila i passi qui sotto (controllo dei tagli, costruzione con il costruttore del cliente o
+`costruisci_draft.py`, copia dei due file tra i progetti di CapCut, livello della voce, verifica) e
+alla fine elenca i «!» rimasti. Guardali: se uno conta, correggi il config e rilancia con
+`--rifai` (sostituisce il progetto del giro prima; se i tagli non sono cambiati non rifà il
+controllo). Usa i comandi singoli solo per capire un problema. **Non leggere i sorgenti degli
+script**: l'uso è descritto qui.
 
 ## 5. Controlla i tagli
 ```bash
@@ -206,7 +233,7 @@ tutti con Read. Si corregge **lo stesso progetto** (niente copie «v2»).
    Se hai aggiunto, tolto o cambiato spezzoni parlati, o la voce «salta» (Nicola: «in certi
    punti è molto più alta»), rilancia `livella_voce.py <progetto>` e poi con `--applica`:
    tiene i volumi già messi come base e corregge solo gli scarti.
-8. **Lezione nel profilo del cliente** (copia locale, vedi sopra): nella sezione «## Lezioni»
+8. **Lezione nel profilo del cliente** (il percorso che ti dà l'app, vedi sopra): nella sezione «## Lezioni»
    (creala in fondo se manca) aggiungi `- GG/MM/AAAA: <cosa voleva e come l'hai risolto>`. Se è
    una preferenza che vale anche per i prossimi video («meno suoni», «sottotitoli più in
    alto»), scrivila anche come regola nella sezione giusta del profilo e correggi le regole
@@ -223,6 +250,8 @@ tutti con Read. Si corregge **lo stesso progetto** (niente copie «v2»).
   aperto in CapCut (`.locked`).
 - Non dire che il video «va bene» se Nicola non l'ha visto.
 - Non cancellare file di Nicola: sposta in una cartella nascosta e diglielo.
+- Non modificare gli script di questa skill: li aggiorna l'app. Quello che serve a un cliente va
+  nel suo costruttore (`costruisci.py` nella cartella del profilo).
 
 ---
 

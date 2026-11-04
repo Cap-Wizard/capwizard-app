@@ -705,39 +705,56 @@ class QueueItem:
 
 
 class Queue:
+    """Videos to edit, CAPWIZARD_PARALLEL at a time (default 2): most of a montage is Claude working in
+    the cloud, so two run side by side without slowing each other much. The sound and the
+    notification come once, when the whole queue is done."""
+
     def __init__(self) -> None:
         self.items: list[QueueItem] = []
         self.lock = threading.Lock()
-        self.worker: threading.Thread | None = None
-        self.current: QueueItem | None = None
+        self.workers: list[threading.Thread] = []
+        self.parallel = max(1, int(os.environ.get("CAPWIZARD_PARALLEL") or 2))
+        self.done: list[QueueItem] = []
 
     def add(self, req: GenerateRequest) -> QueueItem:
         c = agent.get_client(req.client)
         item = QueueItem(id=uuid.uuid4().hex[:10], req=req, cliente=c["nome"] if c else (req.template or ""))
         with self.lock:
             self.items.append(item)
-            if not (self.worker and self.worker.is_alive()):
-                self.worker = threading.Thread(target=self._loop, daemon=True)
-                self.worker.start()
+            self.workers = [w for w in self.workers if w.is_alive()]
+            waiting = sum(1 for i in self.items if i.status == "in coda")
+            for _ in range(min(self.parallel - len(self.workers), waiting)):
+                w = threading.Thread(target=self._loop, daemon=True)
+                self.workers.append(w)
+                w.start()
         return item
 
-    def _next(self) -> QueueItem | None:
+    def _take(self) -> tuple[QueueItem, object] | None:
+        """The next video, marked as started in the same breath, so two workers never take the same one."""
         with self.lock:
-            return next((i for i in self.items if i.status == "in coda"), None)
+            item = next((i for i in self.items if i.status == "in coda"), None)
+            if not item:
+                return None
+            job = manager.create()
+            item.job_id, item.status = job.id, "in corso"
+            return item, job
 
     def _loop(self) -> None:
-        done = []
         while True:
-            item = self._next()
-            if not item:
+            got = self._take()
+            if not got:
                 break
-            job = manager.create()
-            item.job_id, item.status, self.current = job.id, "in corso", item
+            item, job = got
             _run_job(job, item.req)
             item.result_path, item.error = job.result_path, job.error
             item.status = "fatto" if job.status == "done" else ("tolto" if job.stopped else "errore")
-            self.current = None
-            done.append(item)
+            with self.lock:
+                self.done.append(item)
+        with self.lock:                     # the last worker out rings the bell for everything done
+            others = [w for w in self.workers if w.is_alive() and w is not threading.current_thread()]
+            if others or any(i.status in ("in coda", "in corso") for i in self.items):
+                return
+            done, self.done = self.done, []
         if done:
             _all_done([i for i in done if i.status == "fatto"], [i for i in done if i.status == "errore"])
 
