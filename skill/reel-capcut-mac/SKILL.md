@@ -1,7 +1,7 @@
 ---
 name: reel-capcut-mac
 metadata:
-  version: "0.2.0-alpha.6"
+  version: "0.2.0-alpha.9"
 description: Monta reel verticali (Instagram/TikTok) in CapCut direttamente sul Mac di Nicola con Claude Code - analisi delle clip con Whisper sul chip Apple, tagli secondo le sue regole, progetto CapCut generato dal template del cliente, b-roll Magnific, profilo del cliente e lezioni. Usala quando Nicola chiede di montare reel da una cartella di clip o di correggere un reel già montato (anche da screenshot della chat del cliente).
 ---
 
@@ -111,7 +111,10 @@ python3 scomponi.py "<clip>" "<lavoro>/<video>/<clip>-inquadrature"
   `inquadrature.jpg`, poi decidi tu spezzoni, ordine e durata con le «Regole di montaggio» (pause
   tolte, ripetizioni e incisi via, gancio forte all'inizio, una frase per spezzone).
 - Taglia dentro le inquadrature sulle parole (non solo sui loro tagli) e non lasciare mai un
-  lampo dell'inquadratura dopo: controlla inizio e fine di ogni spezzone su un fotogramma.
+  lampo dell'inquadratura dopo: nessun bordo (inizio, fine **o pausa tolta**) a meno di 0,15 s da un
+  taglio di `inquadrature.json`; controlla inizio e fine di ogni spezzone su un fotogramma.
+- Le pause sotto 0,30-0,35 s dentro una frase sono **respiro**: restano. Ogni pausa tolta è un salto
+  d'immagine: in una frase detta d'un fiato spezza il discorso (Sara Mutti 3, 6/11/2026).
 - Titoli, sottotitoli, musica, suoni ed effetti li rifai dal template del cliente. Se il file ha
   **scritte impresse** o **musica sotto la voce**, non si tolgono: scrivilo nel «DA FARE A MANO»
   (per la musica si può provare la separazione della voce di CapCut).
@@ -153,11 +156,13 @@ dal tempo:
   (es. Hot Flash, Glare II), le clip no;
 - **FILTRI**: tutti, per tutta la durata;
 - **MUSICHE**: più tracce = lo **stile musicale del cliente**: in ogni video ne usi **una**, bassa
-  sotto la voce al volume del profilo (`music_db`, es. −21 dB per Sara; senza, 0,15), e nel video dopo
+  sotto la voce al volume del profilo (`music_db`, es. −28 dB per Sara; senza, 0,15), e nel video dopo
   un'altra;
 - **SUONI**: la traccia dei suoni, ognuno col **suo volume** del template.
 **Regola del catalogo: gli effetti non si ripetono di fila.** Transizioni, animazioni delle emoji,
 dati e suoni girano: mai due volte di fila lo stesso. Il suono «che sale» solo all'apertura.
+Ogni transizione ha il suo woosh (anche se il suono prima è vicino); anticipo, volumi e tagli in
+testa dei suoni del cliente vanno nel config (`woosh_prima`, `vol`, `taglia_testa`) dal suo profilo.
 Con un catalogo il progetto si costruisce con **`costruisci_catalogo.py`** (non con
 `costruisci_draft.py`): prende da solo dal template i file giusti (clip composte, preset, font,
 transizioni, musica, suoni e filtri con i loro id della libreria CapCut) e li monta. Nella regia del

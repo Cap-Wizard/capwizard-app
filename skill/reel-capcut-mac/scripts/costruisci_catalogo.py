@@ -18,7 +18,9 @@ uso:
   python3 costruisci_catalogo.py CARTELLA_OUT "NOME" config.json  scrive draft_info.json, draft_meta_info.json, plan.json
 
 Config: come per costruisci_draft.py (template, modello, clipdir, ext, cuts, trans_after, auto_subs, words, fix,
-regia) più «musica» (inizio del nome, facoltativo) e «music_db» (volume della musica in dB, es. -21). Funzioni della regia:
+regia) più «musica» (inizio del nome, facoltativo), «music_db» (volume della musica in dB, es. -21),
+«vol» ({inizio del nome del suono: volume}), «woosh_prima» (secondi prima della transizione, 0.2) e
+«taglia_testa» ({inizio del nome: secondi da togliere all'inizio del suono}). Funzioni della regia:
   titolo("RIGA\\nRIGA", "riga bianca", start, end)   parola("TESTO", start, end)   dato("9-14 ANNI", start, end)
   elenco([(voce, start), …], end, "etichetta")        emoji("📱", start, secondi)    cta(start)
 """
@@ -642,8 +644,9 @@ ROLE_WORDS = {"apertura": ("going up", "riser", "rise", "woosh"), "transizione":
               "parola": ("bell", "impact", "ding"), "voce": ("ding", "click", "pop"),
               "emoji": ("glitter", "kirarin", "chime", "pop", "ding"), "cta": ("correct", "answer", "success")}
 RISER = ("going up", "riser", "rise")
+WOOSH_PRIMA = us(float(CFG.get("woosh_prima", 0.2)))   # il woosh parte prima della transizione (Sara: 0,8 s)
 for n in TRANS_AFTER:
-    moments.append((seg_end(n) - 200_000, "transizione"))
+    moments.append((max(0, seg_end(n) - WOOSH_PRIMA), "transizione"))
 moments.sort()
 riser = [s for s in CAT["suoni"] if any(x in TIX[s["material_id"]][1].get("name", "").lower() for x in RISER)]
 sound_giro = Giro([s for s in CAT["suoni"] if s not in riser] or CAT["suoni"], key=lambda s: TIX[s["material_id"]][1].get("name"))
@@ -655,7 +658,12 @@ def audio_seg(proto, start, dur):
     s["id"] = nid()
     s["extra_material_refs"] = [clone_mat(TIX, r)[1]["id"] for r in proto["extra_material_refs"] if r in TIX]
     s["target_timerange"] = {"start": start, "duration": dur}
-    s["source_timerange"] = {"start": proto["source_timerange"]["start"], "duration": dur}
+    name = TIX[proto["material_id"]][1].get("name", "")
+    head = next((us(v) for k, v in CFG.get("taglia_testa", {}).items() if name.startswith(k)), 0)
+    s["source_timerange"] = {"start": proto["source_timerange"]["start"] + head, "duration": dur}
+    for k, v in CFG.get("vol", {}).items():      # volumi del cliente (profilo), se no quelli del template
+        if name.startswith(k):
+            s["volume"] = s["last_nonzero_volume"] = float(v)
     mid = proto["material_id"]
     if mid not in audio_mats:
         audio_mats[mid] = add("audios", copy.deepcopy(TIX[mid][1]))
@@ -664,17 +672,22 @@ def audio_seg(proto, start, dur):
 
 
 for st, role in moments:
-    if st - last < 900_000 and role != "apertura":
+    if st - last < 900_000 and role not in ("apertura", "transizione"):   # ogni transizione ha il suo woosh
         continue
     words = ROLE_WORDS.get(role, ())
     if role == "apertura" and riser:          # il suono che sale solo sull'apertura
         p = riser[0]
+    elif role == "transizione" and any(x in TIX[s["material_id"]][1].get("name", "").lower() for s in CAT["suoni"] for x in words):
+        p = next(s for s in CAT["suoni"] if any(x in TIX[s["material_id"]][1].get("name", "").lower() for x in words))
+        sound_giro.last = TIX[p["material_id"]][1].get("name")
     else:
         p = sound_giro.next(prefer=lambda s, w=words: next(
             (i for i, x in enumerate(w) if x in TIX[s["material_id"]][1].get("name", "").lower()), None))
     if p is None:
         break
-    dur = min(p["target_timerange"]["duration"], TOTAL - st, 4_000_000 if role != "apertura" else 10 ** 12)
+    head = next((us(v) for k, v in CFG.get("taglia_testa", {}).items()
+                 if TIX[p["material_id"]][1].get("name", "").startswith(k)), 0)
+    dur = min(p["target_timerange"]["duration"] - head, TOTAL - st, 4_000_000 if role != "apertura" else 10 ** 12)
     if dur < 200_000:
         continue
     sound_segs.append(audio_seg(p, st, dur))
@@ -689,7 +702,7 @@ music = None
 if pick is not None:
     full = int(TIX[pick["material_id"]][1].get("duration") or TOTAL)
     music = audio_seg(pick, 0, min(TOTAL, full))
-    # volume: «music_db» del config (il profilo del cliente lo dice, es. −21 per Sara), se no quello del
+    # volume: «music_db» del config (il profilo del cliente lo dice, es. −28 per Sara), se no quello del
     # template se è stato abbassato in CapCut, se no «music_vol» (0,15 ≈ −16,5 dB)
     if "music_db" in CFG:
         vol = round(10 ** (float(CFG["music_db"]) / 20), 4)
