@@ -1,7 +1,7 @@
 ---
 name: reel-capcut-mac
 metadata:
-  version: "0.2.0-alpha.3.1"
+  version: "0.2.0-alpha.5"
 description: Monta reel verticali (Instagram/TikTok) in CapCut direttamente sul Mac di Nicola con Claude Code - analisi delle clip con Whisper sul chip Apple, tagli secondo le sue regole, progetto CapCut generato dal template del cliente, b-roll Magnific, profilo del cliente e lezioni. Usala quando Nicola chiede di montare reel da una cartella di clip o di correggere un reel già montato (anche da screenshot della chat del cliente).
 ---
 
@@ -100,6 +100,23 @@ suggeritore, conti alla rovescia, voci lontane. Apri `mosaico.jpg` con Read.
 **Dall'app l'analisi è già fatta** prima che tu parta (te lo dice il prompt): non rilanciarla,
 leggi il riassunto in `<lavoro>/<video>/analisi.txt` e il mosaico.
 
+### Video già montato da altri: si riscompone e si ritaglia sempre
+Se una clip è già un montaggio (un file lungo con tagli dentro, voce continua, a volte musica o
+scritte di chi l'ha fatto), **non tenere il suo montaggio** (Gabriele, 6/11/2026): lo riscomponi e lo
+ritagli come facciamo noi, sempre.
+```bash
+python3 scomponi.py "<clip>" "<lavoro>/<video>/<clip>-inquadrature"
+```
+- Ogni inquadratura di `inquadrature.json` è **materiale grezzo**, come una clip girata: guarda
+  `inquadrature.jpg`, poi decidi tu spezzoni, ordine e durata con le «Regole di montaggio» (pause
+  tolte, ripetizioni e incisi via, gancio forte all'inizio, una frase per spezzone).
+- Taglia dentro le inquadrature sulle parole (non solo sui loro tagli) e non lasciare mai un
+  lampo dell'inquadratura dopo: controlla inizio e fine di ogni spezzone su un fotogramma.
+- Titoli, sottotitoli, musica, suoni ed effetti li rifai dal template del cliente. Se il file ha
+  **scritte impresse** o **musica sotto la voce**, non si tolgono: scrivilo nel «DA FARE A MANO»
+  (per la musica si può provare la separazione della voce di CapCut).
+- Nel report scrivi «premontato riscomposto: N inquadrature, M spezzoni».
+
 ### Voce di chi parla e suggeritore
 Dietro la camera spesso c'è chi **suggerisce la battuta** prima che venga detta, e Whisper la
 trascrive: la frase c'è ma chi è in camera ha la bocca chiusa.
@@ -118,14 +135,47 @@ trascrive: la frase c'è ma chi è in camera ha la bocca chiusa.
 Verifica sempre su un fotogramma.
 
 ## 3. Leggi il template
-Ricava il kit: titolo (spesso una **clip composta** con parola grande, riga piccola, emoji e
+**Prima guarda se è un template a catalogo** (il formato di Gabriele, novembre 2026; il primo è
+TEMPLATE SARTORIA SARA):
+```bash
+python3 costruisci_catalogo.py --catalogo "TEMPLATE <CLIENTE>"
+```
+Un catalogo ha **ogni pezzo una volta sola**, uno dopo l'altro, e il ruolo si riconosce dal tipo, non
+dal tempo:
+- **TITOLO**: la clip composta che parte a 0 s (righe nel colore del cliente, riga bianca sotto,
+  emoji dietro al testo, animazione di gruppo tipo Zoom 1);
+- **SOTTOTITOLO**: il preset dei sottotitoli (uno solo);
+- **PAROLA**: il testo grande semplice (es. «125M») con la sua animazione d'entrata (Showing Up);
+- **DATO**: clip composta con un numero o un prezzo (es. «€479.000», Zoom 2 + Karaoke 3);
+- **EMOJI**: clip composte con solo emoji, **ognuna con un'animazione diversa** (Sway In, Fall
+  Right, Bend-Zoom);
+- **TRANSIZIONI**: le clip composte con scritto «TRANSITION»: valgono solo le transizioni attaccate
+  (es. Hot Flash, Glare II), le clip no;
+- **FILTRI**: tutti, per tutta la durata;
+- **MUSICHE**: più tracce = lo **stile musicale del cliente**: in ogni video ne usi **una**, bassa
+  sotto la voce al volume del profilo (`music_db`, es. −21 dB per Sara; senza, 0,15), e nel video dopo
+  un'altra;
+- **SUONI**: la traccia dei suoni, ognuno col **suo volume** del template.
+**Regola del catalogo: gli effetti non si ripetono di fila.** Transizioni, animazioni delle emoji,
+dati e suoni girano: mai due volte di fila lo stesso. Il suono «che sale» solo all'apertura.
+Con un catalogo il progetto si costruisce con **`costruisci_catalogo.py`** (non con
+`costruisci_draft.py`): prende da solo dal template i file giusti (clip composte, preset, font,
+transizioni, musica, suoni e filtri con i loro id della libreria CapCut) e li monta. Nella regia del
+config usi `titolo("RIGA\nRIGA", "riga bianca", inizio, fine)`, `parola(...)`, `dato(...)`,
+`emoji("📱", inizio, secondi)`, `elenco([...], fine, "etichetta")` e `cta(inizio)`; `musica` sceglie la
+traccia (inizio del nome). Se il catalogo stampa «MANCANO», dillo e usa il template classico.
+
+**Template classico** (non a catalogo). Ricava il kit: titolo (spesso una **clip composta** con parola grande, riga piccola, emoji e
 animazione di gruppo), sottotitoli (stile, max caratteri, maiuscolo), suoni e a cosa sono
 abbinati, musica, filtri, transizione, **volumi**. Annota testo di esempio, caratteri, scala e
 posizione di ogni testo. I nomi del kit vanno nel config (`kit`, vedi sotto).
 
 **Un template non ha mai clip.** È un insieme di testi, animazioni, preset, filtri, suoni e musica
-da cui prendi stile, font e suoni. Tutti i template hanno **gli stessi pezzi, agli stessi tempi e con gli
-stessi suoni di «TEMPLATE SOLUZIONI IMMOBILIARE»**: sottotitoli, numeri e dati grandi, titoletti e prezzo
+da cui prendi stile, font e suoni. **I template nuovi l'app li fa a catalogo** (pezzi di TEMPLATE
+SARTORIA SARA, grafica e colore del cliente: `template_maker.crea` e «Usa come template»); parole, emoji
+e musica lì sono segnaposto, le musiche dello stile del cliente le mette Gabriele o Nicola. I template
+più vecchi hanno **gli stessi pezzi, agli stessi tempi e con gli stessi suoni di «TEMPLATE SOLUZIONI
+IMMOBILIARE»**: sottotitoli, numeri e dati grandi, titoletti e prezzo
 in clip composte con la loro animazione (Zoom 1, Zoom 2…), emoji che entrano (Sway In, Fall Right,
 Bend-Zoom). Cambia solo la **grafica del cliente**: preset dei sottotitoli, box e font di titoli e
 dati, filtri, musica, presi da un video montato per quel cliente (`template_maker.con_stile`, pulsante
@@ -168,6 +218,7 @@ per i sottotitoli. Risolvi ogni «!» prima di andare avanti e rilancia finché 
 ## 6. Costruisci il progetto
 ```bash
 python3 costruisci_draft.py "<lavoro>/<video>/out" "NOME PROGETTO" config.json
+# template a catalogo: python3 costruisci_catalogo.py "<lavoro>/<video>/out" "NOME PROGETTO" config.json
 mkdir "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/NOME PROGETTO"
 cp "<lavoro>/<video>/out/draft_info.json" "<lavoro>/<video>/out/draft_meta_info.json" \
    "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/NOME PROGETTO/"

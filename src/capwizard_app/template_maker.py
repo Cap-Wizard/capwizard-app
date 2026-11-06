@@ -280,12 +280,57 @@ def _register(dst: Path, nome: str, draft_id: str, duration: int) -> str:
     return "È il primo in alto nella home di CapCut."
 
 
+def colora(template: str, colore: str) -> int:
+    """The client's colour on a template: every coloured text (not the white ones, not emojis) and the subtitle
+    preset's box. Returns how many texts changed."""
+    dst = CAPCUT_PROJECTS_DIR / template
+    D = json.load(open(dst / "draft_info.json"))
+    col, n = rgb(colore), 0
+
+    def paint(dd: dict) -> int:
+        k = 0
+        boxes = {tir["text_material_id"] for tt in dd.get("materials", {}).get("text_templates", [])
+                 for tir in tt.get("text_info_resources", [])}
+        for m in dd.get("materials", {}).get("texts", []):
+            shown = _shown_text(m)
+            if _is_emoji(shown) or shown.strip().upper() == "TRANSITION":
+                continue
+            if m["id"] in boxes and m.get("background_color"):
+                m["background_color"] = colore.upper()
+                k += 1
+            elif not _is_white(_fill(m)):
+                _set_fill(m, col)
+                k += 1
+        for sub in dd.get("materials", {}).get("drafts", []):
+            if isinstance(sub.get("draft"), dict):
+                k += paint(sub["draft"])
+        return k
+    n = paint(D)
+    for f in [dst / "draft_info.json", dst / "draft_info.json.bak", dst / "template.tmp", dst / "template-2.tmp",
+              *dst.glob("Timelines/*/draft_info.json")]:
+        if f.exists():
+            json.dump(D, open(f, "w"), ensure_ascii=False)
+    return n
+
+
 def crea(cliente: str, colore: str, bases: list[str] = (), emoji: str = "⭐") -> dict:
-    """Create «TEMPLATE <CLIENTE>» in CapCut. Never overwrites an existing project."""
+    """Create «TEMPLATE <CLIENTE>» in CapCut. Never overwrites an existing project. With the catalogue on this
+    Mac the new template is a catalogue too: its pieces, dressed with the master's graphics and the client's
+    colour (the words, the emojis and the music are placeholders to change)."""
     nome = f"TEMPLATE {cliente.strip().upper()}"
     dst = CAPCUT_PROJECTS_DIR / nome
     if dst.exists():
         return {"ok": True, "nome": nome, "msg": f"«{nome}» c'è già in CapCut: lo lascio com'è."}
+    if struttura_default() == CATALOGO:
+        # the look comes from the agency's or client's base project, whatever its kind of subtitles
+        master = next((b for b in bases if b and b != CATALOGO and (CAPCUT_PROJECTS_DIR / b / "draft_info.json").exists()),
+                      None) or pick_master([b for b in bases if b])
+        out = con_stile(master, nome, CATALOGO)
+        n = colora(nome, colore)
+        out.update(master=master, msg=f"Creato in CapCut «{nome}» a catalogo (pezzi di «{CATALOGO}», grafica di "
+                                      f"«{master}», colore {colore} su {n} testi). Parole, emoji e musica sono "
+                                      f"segnaposto: metti le musiche dello stile del cliente.")
+        return out
     master = pick_master([b for b in bases if b])
     D = build(master, colore, emoji)
     meta = json.load(open(CAPCUT_PROJECTS_DIR / master / "draft_meta_info.json"))
@@ -352,7 +397,37 @@ def da_video(video: str, template: str) -> dict:
 # Same pieces, the client's graphics
 # ---------------------------------------------------------------------------
 
-STRUTTURA = "TEMPLATE SOLUZIONI IMMOBILIARE"     # the reference layout: what a template holds and when
+STRUTTURA = "TEMPLATE SOLUZIONI IMMOBILIARE"     # the old reference layout: what a template holds and when
+# The catalogue (Gabriele, November 2026): every piece once, one after the other, its role told by its kind:
+# title compound at 0 s (coloured lines, a white line, emojis behind), one subtitle preset, one big word,
+# a data compound, emoji compounds each with its own animation, «TRANSITION» compounds carrying the
+# transitions, the filters, the client's music style (several tracks, one per video) and the sounds with
+# their volumes. Effects never repeat in a row. The skill builds from it with costruisci_catalogo.py.
+CATALOGO = os.environ.get("CAPWIZARD_TEMPLATE_CATALOGO", "TEMPLATE SARTORIA SARA")
+
+
+def struttura_default() -> str:
+    """The layout new templates copy: the catalogue when it is on this Mac, else the old structure."""
+    return CATALOGO if (CAPCUT_PROJECTS_DIR / CATALOGO / "draft_info.json").exists() else STRUTTURA
+
+
+def _is_white(colour) -> bool:
+    return isinstance(colour, list) and len(colour) >= 3 and all(float(c) >= 0.95 for c in colour[:3])
+
+
+def _fill(m: dict):
+    try:
+        return json.loads(m["content"])["styles"][0]["fill"]["content"]["solid"]["color"]
+    except (KeyError, IndexError, ValueError, TypeError):
+        return None
+
+
+def _set_fill(m: dict, colour: list[float]) -> None:
+    c = json.loads(m["content"])
+    for st in c.get("styles", []):
+        st.setdefault("fill", {}).setdefault("content", {})["solid"] = {"color": colour}
+        st["fill"]["content"]["render_type"] = "solid"
+    m["content"] = json.dumps(c, ensure_ascii=False)
 _LOOK_KEYS = ("background_alpha", "background_color", "background_fill", "background_height",
               "background_horizontal_offset", "background_round_radius", "background_style",
               "background_vertical_offset", "background_width", "border_alpha", "border_color", "border_width",
@@ -386,10 +461,13 @@ def _dress(m: dict, look: dict) -> None:
     m["content"] = json.dumps(c, ensure_ascii=False)
 
 
-def con_stile(stile: str, template: str, struttura: str = STRUTTURA) -> dict:
+def con_stile(stile: str, template: str, struttura: str | None = None) -> dict:
     """«template» = every piece of «struttura» at its time (texts, compound clips and their motion, sounds),
     dressed with the graphics of «stile», a video or template of the client: its subtitle preset, the look of
-    its titles and labels, its filters and its music. Emojis and the structure's sounds stay as they are."""
+    its titles and labels, its filters and its music. Emojis and the structure's sounds stay as they are.
+    The structure is the catalogue when there is one (struttura_default): white lines stay white, the
+    «TRANSITION» placeholders are left alone and only one music track is kept (the client's)."""
+    struttura = struttura or struttura_default()
     src, sty, dst = (CAPCUT_PROJECTS_DIR / n for n in (struttura, stile, template))
     from capwizard_app import vault
     for p in (src, sty, dst):
@@ -402,7 +480,8 @@ def con_stile(stile: str, template: str, struttura: str = STRUTTURA) -> dict:
     look_label = six[labels[0]["material_id"]][1] if labels else None
     drafts = [d for d in S["materials"].get("drafts", []) if isinstance(d.get("draft"), dict)]
     look_title = next((m for d in drafts for m in d["draft"]["materials"].get("texts", [])
-                       if not _is_emoji(json.loads(m["content"]).get("text", ""))), None) or look_label
+                       if not _is_emoji(json.loads(m["content"]).get("text", ""))
+                       and json.loads(m["content"]).get("text", "").strip().upper() != "TRANSITION"), None) or look_label
     music = next((s for t in S["tracks"] if t["type"] == "audio" for s in t["segments"]
                   if six[s["material_id"]][1].get("type") == "music"
                   and s["target_timerange"]["duration"] >= 6e6), None)
@@ -439,7 +518,9 @@ def con_stile(stile: str, template: str, struttura: str = STRUTTURA) -> dict:
 
     changed = {"sottotitoli": 0, "testi": 0}
     text_tracks = [t for t in D["tracks"] if t["type"] == "text"]
-    cap_track = max(text_tracks, key=lambda t: len(t["segments"]), default=None)   # the subtitles: the busiest text track
+    cap_track = next((t for t in text_tracks if any(ix.get(s["material_id"], ("",))[0] == "text_templates"
+                                                    for s in t["segments"])), None) \
+        or max(text_tracks, key=lambda t: len(t["segments"]), default=None)   # the subtitles: the preset's track
     label_scale = (labels[0].get("clip") or {}).get("scale") if labels else None
     for t in text_tracks:
         new = []
@@ -494,8 +575,15 @@ def con_stile(stile: str, template: str, struttura: str = STRUTTURA) -> dict:
     def dress_draft(dd: dict) -> int:
         n = 0
         for m in dd.get("materials", {}).get("texts", []):
-            if look_title is not None and not _is_emoji(_shown_text(m)):
+            shown = _shown_text(m)
+            if look_title is not None and not _is_emoji(shown) and shown.strip().upper() != "TRANSITION":
+                before = _fill(m)
+                white = _is_white(before)
                 _dress(m, look_title)
+                if white:                          # the white line under the title stays white
+                    _set_fill(m, list(WHITE))
+                elif before and _is_white(_fill(m)):   # a coloured line stays coloured (colora() gives the client's)
+                    _set_fill(m, before)
                 n += 1
         for sub in dd.get("materials", {}).get("drafts", []):
             if isinstance(sub.get("draft"), dict):
@@ -522,6 +610,10 @@ def con_stile(stile: str, template: str, struttura: str = STRUTTURA) -> dict:
                                 "flag": 0, "attribute": 0, "name": "", "is_default_name": True,
                                 "segments": [clone_seg(s, 0, total)]})
         at += 1
+    musics = [t for t in D["tracks"] if t["type"] == "audio" and any(
+        ix.get(s["material_id"], ("", {}))[1].get("type") == "music" for s in t["segments"])]
+    if len(musics) > 1:      # a catalogue: the structure's music style is not the client's; one track stays
+        D["tracks"] = [t for t in D["tracks"] if t not in musics[1:]]
     if music is not None:
         for t in D["tracks"]:
             if t["type"] == "audio" and any(ix.get(s["material_id"], ("", {}))[1].get("type") == "music"

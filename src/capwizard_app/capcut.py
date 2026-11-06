@@ -419,8 +419,19 @@ def template_kit(template_name: str, projects_dir: Path = CAPCUT_PROJECTS_DIR) -
                     looks.append(name)
     captions = sum(1 for t in info["tracks"] if t["type"] == "text"
                    for s in t["segments"] if _is_caption_seg(index, s))
+    transitions = []
+    for tr in info["tracks"]:
+        for s in tr["segments"]:
+            for r in s.get("extra_material_refs") or []:
+                if index.get(r, ("",))[0] == "transitions" and index[r][1].get("name") not in transitions:
+                    transitions.append(index[r][1].get("name"))
+    combos = _combos(info, index)
+    # a catalogue (every piece once, see template_maker.CATALOGO): «TRANSITION» compounds carrying the transitions
+    catalogo = any(c["texts"] and all(t.strip().upper() == "TRANSITION" for t in c["texts"]) for c in combos)
     return {
-        "name": template_name, "groups": groups, "captions": captions, "combos": _combos(info, index),
+        "name": template_name, "groups": groups, "captions": captions, "combos": combos,
+        "transitions": transitions, "catalogo": catalogo,
+        "emoji_anims": [c["animation"] for c in combos if c["texts"] and all(_is_emoji_like(t) for t in c["texts"])],
         "sounds": sorted({n for _, _, n, kind in sounds if kind != "musica"}),
         "music": sorted({n for _, _, n, kind in sounds if kind == "musica"}),
         "looks": looks,

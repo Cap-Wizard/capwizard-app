@@ -290,7 +290,17 @@ def template_kit_summary(name: str, projects_dir: str | None = None) -> dict:
          "hint": "Aggiungi dall'inizio la regolazione colore o i filtri del cliente: "
                  "vengono estesi a tutto il video."},
     ]
-    return {"ok": True, "name": name, "checks": checks,
+    if kit.get("catalogo"):     # every piece once: no list or labels, but transitions and animated emojis instead
+        checks = [c for c in checks if c["key"] not in ("labels", "list")]
+        checks[1:1] = [
+            {"key": "emoji", "label": "Emoji animate", "ok": bool(kit.get("emoji_anims")),
+             "detail": ", ".join(kit.get("emoji_anims") or []),
+             "hint": "Aggiungi le emoji in clip composte, ognuna con un'animazione diversa."},
+            {"key": "transitions", "label": "Transizioni", "ok": bool(kit.get("transitions")),
+             "detail": ", ".join(kit.get("transitions") or []),
+             "hint": "Aggiungi due clip composte «TRANSITION» con la transizione tra loro, una per tipo."},
+        ]
+    return {"ok": True, "name": name, "checks": checks, "catalogo": bool(kit.get("catalogo")),
             "found": sum(c["ok"] for c in checks), "total": len(checks)}
 
 
@@ -1775,7 +1785,7 @@ def project_as_template(project_id: str) -> dict:
     if video == template or video.upper().startswith("TEMPLATE"):
         return {"ok": False, "msg": "Questo progetto è già un template."}
     try:
-        if (CAPCUT_PROJECTS_DIR / template_maker.STRUTTURA / "draft_info.json").exists():
+        if (CAPCUT_PROJECTS_DIR / template_maker.struttura_default() / "draft_info.json").exists():
             out = template_maker.con_stile(video, template)
         else:
             out = template_maker.da_video(video, template)
