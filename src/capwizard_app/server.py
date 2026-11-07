@@ -42,7 +42,7 @@ from pydantic import BaseModel
 from capwizard_app import registry
 from capwizard_app.capcut import CAPCUT_PROJECTS_DIR, ai_ping, ai_status, find_claude_cli, is_video, template_kit
 
-from capwizard_app import agent, ai_prompt, ai_render, aiservices, board, brain, comfy_ai, scarico, teamboard, teamshare, template_file, vault
+from capwizard_app import agent, ai_prompt, ai_render, aiservices, board, brain, comfy_ai, scarico, shorty, teamboard, teamshare, template_file, vault
 
 
 # ---------------------------------------------------------------------------
@@ -1093,6 +1093,36 @@ class TodoRequest(BaseModel):
 
 class ServiceToggle(BaseModel):
     attivo: bool
+
+
+# ---------------------------------------------------------------------------
+# Edits of the renders with ShortyEdit: the app prepares the work, a Claude chat runs it (see shorty.py)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/shorty")
+def shorty_status() -> dict:
+    return shorty.status()
+
+
+class ShortyRequest(BaseModel):
+    modo: str = "video"            # video | broll
+    cliente: str = ""
+    cartella: str
+    uscita: str = ""
+    dati: str = ""
+    durata: float = 0
+    clip: int = 0
+    note: str = ""
+
+
+@app.post("/api/shorty/prompt")
+def shorty_prompt(req: ShortyRequest) -> dict:
+    out = req.uscita.strip() or str(Path(req.cartella) / ("SHORTY" if req.modo == "video" else "BROLL SHORTY"))
+    res = shorty.prompt(req.modo, req.cliente, req.cartella, out, req.dati, req.durata, req.clip, req.note)
+    if res.get("ok"):
+        Path(out).mkdir(parents=True, exist_ok=True)     # ready for the MP4s, and for the b-roll box of Nuovo video
+        res["uscita"] = out
+    return res
 
 
 @app.get("/api/ai-services")

@@ -349,6 +349,7 @@
       <button class="ai-tab" data-tab="img"><b>Immagini da prompt</b><span>Crea un'immagine</span></button>
       <button class="ai-tab on" data-tab="trans"><b>Transizioni A, B to Z</b><span>Da un fotogramma all'altro, con le tappe</span></button>
       <button class="ai-tab" data-tab="amb"><b>Ambientazione personaggio</b><span>Chi parla in un video, in un altro posto</span></button>
+      <button class="ai-tab" data-tab="shorty"><b>Render con ShortyEdit</b><span>Video o b-roll dai render di un immobile</span></button>
     </div>
     <p class="ai-desc" id="ai-desc"></p>
     <div class="ai-warn" id="ai-warn" hidden></div>
@@ -413,6 +414,35 @@
       <div class="ai-l">Modello</div>
       <div class="ai-models" id="im-models"></div>
       <div class="ai-go"><div class="ai-cost" id="im-cost"></div><button class="send" id="im-generate" disabled>Genera</button></div>
+    </section>
+
+    <section class="ai-pane" id="ai-shorty" hidden>
+      <div class="am-refmode sh-mode" id="sh-mode">
+        <button class="on" data-m="video" title="Un video verticale fatto solo con i render, da pubblicare così">Video intero dai render</button>
+        <button data-m="broll" title="Clip brevi dai render, da mettere sotto il parlato di un reel montato in CapCut">B-roll per i reel</button>
+      </div>
+      <div class="am-row">
+        <div class="am-col">
+          <label class="ai-l">Cliente<select id="sh-client"></select></label>
+          <div class="ai-l">I render</div>
+          <div class="drop am-box sh-box" id="sh-folder"><b>Scegli la cartella dei render</b>immagini o video dell'immobile</div>
+        </div>
+        <div class="am-col am-mid">
+          <label class="ai-l">L'immobile<textarea id="sh-dati" rows="5" placeholder="es. Treviolo, attico A9: 140 m² + 100 m² di terrazzo, box 65 m², 729.000 €, classe A4"></textarea></label>
+          <label class="ai-l">Note<textarea id="sh-note" rows="3" placeholder="Facoltative e vincolanti: ordine dei render, cosa non mostrare, riferimenti…"></textarea></label>
+        </div>
+        <div class="am-col">
+          <label class="ai-l" id="sh-dur-l">Durata (s)<input type="number" id="sh-dur" min="10" max="120" step="5" value="30" /></label>
+          <label class="ai-l" id="sh-clip-l" hidden>Quante clip<input type="number" id="sh-clip" min="1" max="20" value="4" /></label>
+          <div class="ai-l">Dove salvare gli MP4</div>
+          <div class="row2"><input type="text" id="sh-out" placeholder="Nella cartella dei render" readonly /><button class="btn2" id="sh-out-pick">Scegli…</button></div>
+        </div>
+      </div>
+      <div class="ai-go">
+        <div class="ai-cost" id="sh-state"></div>
+        <button class="send" id="sh-go" disabled>Prepara e apri in Claude</button>
+      </div>
+      <div class="sh-done" id="sh-done" hidden></div>
     </section>
 
     <div class="ai-run" id="ai-run" hidden><div class="ai-bar"><i></i></div><pre id="ai-log"></pre></div>

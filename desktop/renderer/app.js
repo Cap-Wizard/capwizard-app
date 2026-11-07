@@ -3999,6 +3999,7 @@ function fpvAnim(canvas, opt) {
 const AI_DESC = {
   img: "Crea un'immagine: parti da una tua immagine (o anche da nessuna), scrivi cosa vuoi e aggiungi tutte le reference che ti servono. Il risultato è un'immagine.",
   amb: "Metti in un altro posto una persona che parla in un video: è lì dal primo fotogramma, oppure ci arriva poco alla volta ed è lì alla fine della clip. Voce e labiale restano quelli originali.",
+  shorty: "Il montaggio dei render di un immobile con ShortyEdit, il connettore del tuo Claude: un video intero da pubblicare, oppure clip di b-roll per i reel parlati. ShortyEdit lavora nel suo pannello dentro la chat di Claude: qui CapWizard prepara tutto (stile del cliente, dati, elenco dei render) e apre la chat già pronta.",
   trans: "Un video che va da un fotogramma all'altro: A, B e tutte le tappe che vuoi in mezzo, ognuna con la sua durata. Serve anche per far entrare qualcuno in un posto durante il video. Se metti un video, la transizione parte dalla sua fine (o arriva al suo inizio) e il risultato li unisce.",
 };
 function showAIDesc() { $("ai-desc").textContent = AI_DESC[GEN.tab] || ""; }
@@ -4010,6 +4011,7 @@ function wireAI() {
   $("ai-generate").onclick = generateAI;
   wireAmb();
   wireImg();
+  wireShorty();
   showAIDesc();
   $("ai-prov-btn").onclick = (e) => {
     e.stopPropagation();
@@ -4020,12 +4022,92 @@ function wireAI() {
   $("ai-tabs").querySelectorAll(".ai-tab").forEach((b) => {
     b.onclick = () => {
       $("ai-tabs").querySelectorAll(".ai-tab").forEach((x) => x.classList.toggle("on", x === b));
-      for (const [k, id] of [["trans", "ai-trans"], ["amb", "ai-amb"], ["img", "ai-img"]]) $(id).hidden = b.dataset.tab !== k;
+      for (const [k, id] of [["trans", "ai-trans"], ["amb", "ai-amb"], ["img", "ai-img"], ["shorty", "ai-shorty"]]) $(id).hidden = b.dataset.tab !== k;
       GEN.tab = b.dataset.tab;
-      loadAIResults();
+      const sh = GEN.tab === "shorty";        // ShortyEdit runs in a Claude chat: none of Comfy's provider, warnings or results
+      $("view-ai").classList.toggle("sh-tab", sh);
+      if (sh) renderShorty(true); else loadAIResults();
       showAIDesc();
     };
   });
+}
+
+
+// ---- AI · Render con ShortyEdit: the app prepares the work, a Claude chat (where Shorty's panel opens) runs it ----
+
+const SHORTY = { mode: "video", folder: "", files: 0, out: "", status: null };
+
+async function renderShorty(refresh = false) {
+  const sel = $("sh-client");
+  if (!sel.options.length || refresh) {
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">— nessun cliente —</option>'
+      + state.clients.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.nome)}</option>`).join("");
+    if (keep) sel.value = keep;
+  }
+  if (refresh || !SHORTY.status) {
+    try { SHORTY.status = await (await fetch(`${BACKEND}/api/shorty`)).json(); } catch (_) { SHORTY.status = {}; }
+  }
+  const st = SHORTY.status || {};
+  $("sh-folder").innerHTML = SHORTY.folder
+    ? `<b>${escapeHtml(SHORTY.folder.split("/").pop())}</b><span class="path">${escapeHtml(SHORTY.folder)}</span>`
+    : "<b>Scegli la cartella dei render</b>immagini o video dell'immobile";
+  $("sh-out").value = SHORTY.out;
+  $("sh-out").placeholder = SHORTY.folder ? `${SHORTY.folder}/${SHORTY.mode === "video" ? "SHORTY" : "BROLL SHORTY"}` : "Nella cartella dei render";
+  $("sh-dur-l").hidden = SHORTY.mode !== "video";
+  $("sh-clip-l").hidden = SHORTY.mode === "video";
+  $("sh-mode").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.m === SHORTY.mode));
+  $("sh-state").innerHTML = st.collegato ? "✓ ShortyEdit è collegato al tuo Claude. Montaggio e render nel suo pannello non costano crediti."
+    : `ShortyEdit non è collegato al tuo Claude: aggiungilo in <a href="#" id="sh-conn">claude.ai → Impostazioni → Connettori</a>.`;
+  const conn = $("sh-conn");
+  if (conn) conn.onclick = (e) => { e.preventDefault(); window.api && window.api.openExternal(st.connettori); };
+  $("sh-go").disabled = !SHORTY.folder || !st.collegato;
+}
+
+async function goShorty() {
+  const btn = $("sh-go");
+  btn.disabled = true;
+  const body = { modo: SHORTY.mode, cliente: $("sh-client").value, cartella: SHORTY.folder, uscita: SHORTY.out,
+    dati: $("sh-dati").value, note: $("sh-note").value, durata: +$("sh-dur").value || 0, clip: +$("sh-clip").value || 0 };
+  let r;
+  try {
+    r = await (await fetch(`${BACKEND}/api/shorty/prompt`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body) })).json();
+  } catch (e) { r = { ok: false, msg: String(e) }; }
+  btn.disabled = false;
+  if (!r.ok) return notify(r.msg || "Non riesco a preparare il lavoro.", "err");
+  let copied = false;
+  try { await navigator.clipboard.writeText(r.prompt); copied = true; } catch (_) {}
+  window.api && window.api.openExternal(r.url);
+  const done = $("sh-done");
+  done.hidden = false;
+  done.innerHTML = `<b>Fatto: si apre una chat di Claude.</b>
+    <ol>
+      <li>${r.nel_link ? "Le istruzioni sono già nella chat: premi Invio." : "Incolla le istruzioni nella chat (⌘V) e premi Invio."}${copied ? " Sono anche negli appunti." : ""}</li>
+      <li>Quando Claude apre il pannello di ShortyEdit, trascinaci i ${r.render} render (te li mostro nel Finder).</li>
+      <li>Salva gli MP4 che renderizza in <code>${escapeHtml(r.uscita)}</code>${SHORTY.mode === "broll"
+        ? ": poi in «Nuovo video» scegli quella cartella come b-roll." : "."}</li>
+    </ol>
+    <div class="row2 pair"><button class="btn2" id="sh-reveal">Mostra i render nel Finder</button>
+      <button class="btn2" id="sh-copy">Copia di nuovo le istruzioni</button></div>`;
+  $("sh-reveal").onclick = () => window.api && window.api.openPath(SHORTY.folder);
+  $("sh-copy").onclick = async () => {
+    try { await navigator.clipboard.writeText(r.prompt); notify("Istruzioni copiate.", "ok"); } catch (_) { notify("Non riesco a copiarle.", "err"); }
+  };
+  window.api && window.api.openPath(SHORTY.folder);
+}
+
+function wireShorty() {
+  $("sh-mode").querySelectorAll("button").forEach((b) => { b.onclick = () => { SHORTY.mode = b.dataset.m; renderShorty(); }; });
+  $("sh-folder").onclick = async () => {
+    const f = window.api && await window.api.selectFolder();
+    if (f) { SHORTY.folder = f; $("sh-done").hidden = true; renderShorty(); }
+  };
+  $("sh-out-pick").onclick = async () => {
+    const f = window.api && await window.api.selectFolder();
+    if (f) { SHORTY.out = f; renderShorty(); }
+  };
+  $("sh-go").onclick = goShorty;
 }
 
 
