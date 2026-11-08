@@ -1,10 +1,11 @@
-"""Word-by-word transcription of every clip of a folder (mlx-whisper on the Apple chip).
+"""Word-by-word transcription of every clip of a folder (Voz by Desert Ant on the Apple chip, since 07/11/2026;
+mlx-whisper only as a fallback on a Mac without Voz).
 usage: python trascrivi.py <clip folder> <out words.json> [file with the clips to skip, one path per line]
 Writes {clip name: [[word, start, end], ...]} and prints the text with start times.
-Run with a Python that has mlx_whisper (vault.tools_python())."""
+Run with vault.tools_python()."""
 import glob, json, os, shutil, subprocess, sys
 
-import mlx_whisper
+import voz
 
 FF = os.environ.get("CAPWIZARD_FFMPEG") or shutil.which("ffmpeg")
 os.environ["PATH"] = os.path.dirname(FF) + os.pathsep + os.environ.get("PATH", "")   # whisper calls "ffmpeg"
@@ -19,7 +20,11 @@ def main(folder, out, skip=None):
     for f in clips:
         w = out + "." + os.path.basename(f) + ".wav"
         subprocess.run([FF, "-v", "error", "-y", "-i", f, "-ac", "1", "-ar", "16000", w], check=True)
-        r = mlx_whisper.transcribe(w, path_or_hf_repo=MODEL, language="it", word_timestamps=True)
+        if voz.disponibile():
+            r = voz.trascrivi(w)
+        else:
+            import mlx_whisper
+            r = mlx_whisper.transcribe(w, path_or_hf_repo=MODEL, language="it", word_timestamps=True)
         res[os.path.relpath(f, folder).rsplit(".", 1)[0]] = [(x["word"].strip(), round(float(x["start"]), 2), round(float(x["end"]), 2))
                                                              for s in r["segments"] for x in s.get("words", [])]
         os.remove(w)

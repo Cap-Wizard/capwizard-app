@@ -255,6 +255,29 @@ def _slug(s: str) -> str:
     return re.sub(r"[^\w\- ]", "_", s).strip() or "video"
 
 
+def _desert_ant_text() -> str:
+    """Only on a Mac with Desert Ant (Gabriele's): the local AIs Claude may use by itself, without being asked."""
+    da = Path.home() / ".local/bin/desertant"
+    if not da.exists():
+        return ""
+    ant = vault.TOOLS / "voz.py"
+    py = vault.tools_python()
+    return f"""
+
+## AI locali di Desert Ant (su questo Mac, gratis, l'audio resta qui)
+Usale da solo quando servono, senza chiedere e senza aspettare che te le nominino.
+Comando: `"{py}" "{ant}" --ant <modello> <file|testo> [opzioni]` (prepara da solo l'audio dei video, anche Sony).
+- voz: trascrizione parola per parola (`"{py}" "{ant}" <file> --formato json`).
+- uhm: pensate («eee», «ehm», «mmm») con i tempi: tagliale quando accorci il parlato.
+- clips (`--count N`): i pezzi migliori di un parlato lungo, utile per scegliere le frasi di un reel da intervista.
+- clear (`--output file.wav`): pulisce la voce sporca (rumore, eco, volume); usala solo se la voce è davvero sporca e
+  scrivi nel resoconto che l'hai usata, perché Gabriele la deve ascoltare.
+- who (`--names "A,B"`): chi parla e quando; è in prova e tende a contare più persone: verifica.
+- ear: lingua parlata. eye <foto o cartella> (`--sort cover`, `--sort sharpness`, `--duplicates`): copertina,
+  fotogrammi nitidi, doppioni. title / gist / emo "<testo>": titolo, argomento, emoji per una didascalia (proposte da rivedere).
+Non usare i risultati di queste AI per addestrare altri modelli (licenza)."""
+
+
 def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcript: list[str], step_of=None,
                 ai_media: bool = False) -> str | None:
     """Run Claude Code on `prompt`, streaming its messages into the job's log.
@@ -263,6 +286,7 @@ def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcr
     extra, env, note = claude_launch()
     if note:
         job.log(f"⚠ {note}")
+    prompt += _desert_ant_text()
     ai_tools: list[str] = []
     if ai_media:
         from capwizard_app import aiservices
@@ -347,7 +371,7 @@ def _real(path: str | Path) -> Path:
 
 
 def _pre_step(job, cmd: list[str], cwd: Path, label: str, done: Path, save: Path | None = None) -> bool:
-    """A step of the montage that needs no judgement, run by the app before Claude starts (Whisper on
+    """A step of the montage that needs no judgement, run by the app before Claude starts (Voz on
     the clips): the very command the skill would have Claude run, so the files are where it expects
     them. Its progress goes to the job's log. False if it didn't produce `done` (Claude then runs it)."""
     job.log(label)
@@ -378,7 +402,7 @@ def _analyse_first(job, scripts: Path, clips: str, out: Path) -> str:
     out.mkdir(parents=True, exist_ok=True)
     job.set_step(2)
     if not _pre_step(job, [vault.tools_python(), str(scripts / "analizza.py"), clips, str(out), "--mosaico"], scripts,
-                     "🎧 Analizzo le clip con Whisper prima di avviare Claude…", out / "res", out / "analisi.txt"):
+                     "🎧 Analizzo le clip con Voz prima di avviare Claude…", out / "res", out / "analisi.txt"):
         return ""
     return (f"- **Analisi delle clip già fatta dall'app** (passo 2, non rilanciarla): `<lavoro>/<video>` = `{out}`; "
             f"riassunto `{out}/analisi.txt`, dati per clip `{out}/res/`, mosaico `{out}/mosaico.jpg`.")
@@ -566,7 +590,7 @@ def attachments_text(paths: list[str]) -> str:
         ff = vault.ffmpeg() or "ffmpeg"
         out.append("Video allegati (una registrazione del cliente, un vocale filmato, un esempio da imitare): guardali TUTTI. "
                    f"Fotogrammi ogni 0,5 s in un mosaico (`{ff} -i <video> -vf fps=2,scale=270:-1,tile=8x4 <cartella di lavoro>/allegato_<n>_%d.jpg`) "
-                   "da leggere con Read; se si parla, trascrivi l'audio con Whisper. Usa quello che vedi e senti come richiesta di modifica:\n"
+                   f"da leggere con Read; se si parla, trascrivi l'audio con Voz (`\"{vault.tools_python()}\" \"{vault.TOOLS / 'voz.py'}\" <file> --formato txt`). Usa quello che vedi e senti come richiesta di modifica:\n"
                    + "\n".join(f"- {p}" for p in vids))
     return "\n\n".join(out)
 
@@ -722,7 +746,7 @@ decidi tu seguendo le regole. Qui sotto c'è il BRIEF del lavoro con le clip e T
 VIDEO EDIT BRAIN (`{vault}`): regole generali → stile dell'agenzia → regole del cliente (vince la più specifica).
 Il "progetto base" «{base}» è solo una base tecnica da clonare (font, preset, formati): NON copiarne contenuti o scelte.
 VELOCITÀ: un reel deve essere pronto in ~10 minuti. NON installare pacchetti e NON scaricare modelli o librerie
-(niente pip install, torchaudio, transformers, allineamenti forzati): usa solo gli strumenti già pronti (Whisper, ffmpeg,
+(niente pip install, torchaudio, transformers, allineamenti forzati): usa solo gli strumenti già pronti (Voz, ffmpeg,
 gli script della skill). Se una precisione in più richiederebbe strumenti nuovi, accontentati e segnalalo nel report.
 
 {brief}
@@ -737,7 +761,7 @@ Procedura:
 3. Controlla il risultato (JSON valido, nessun riferimento rotto, durata giusta) e in particolare:
    - tagli STRETTI ma con la PAROLA FINITA: niente spazi tra le frasi, però la clip finisce 0,10–0,12 s dopo la fine VERA della voce, misurata
      sull'energia con una soglia bassa (rumore di fondo + 10 dB: con picco −32 dB si mangia la coda di vocali e "s", i clienti lo sentono),
-     mai oltre l'attacco della frase dopo; e INIZIA 0,04 s prima del primo suono sopra rumore + 10 dB, non sull'inizio della parola di Whisper,
+     mai oltre l'attacco della frase dopo; e INIZIA 0,04 s prima del primo suono sopra rumore + 10 dB, non sull'inizio della parola trascritta,
      che dopo il "vai!" è 0,2–0,4 s in anticipo; tagli allineati ai fotogrammi;
    - clip senza parlato vero nella cartella delle clip (trascrizione vuota, assurda o "Grazie a tutti"): spesso sono B-ROLL del posto,
      guarda i fotogrammi prima di scartarle; quando si nomina il posto mettine uno (esterno poi interno); b-roll solo pertinenti e leggibili;

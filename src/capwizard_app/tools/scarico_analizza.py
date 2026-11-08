@@ -2,7 +2,7 @@
 usage: python scarico_analizza.py <out dir> <inputs json: ["file or folder", ...]>
 Writes <out>/inventario.json: [{"n", "path", "nome", "camera", "durata", "yavg", "bit10", "nera", "testo"}, ...]
 and <out>/tx/<n>.txt (one per clip, so a stopped run resumes where it was).
-Run with a Python that has mlx_whisper (vault.tools_python())."""
+Run with vault.tools_python(); transcription with Voz (Desert Ant), mlx_whisper only as a fallback."""
 import glob, json, os, re, shutil, subprocess, sys
 
 FF = os.environ.get("CAPWIZARD_FFMPEG") or shutil.which("ffmpeg") or os.path.expanduser("~/Desktop/VIDEO CLAUDE/720 STUDI0/tools/ffmpeg")
@@ -71,23 +71,32 @@ def main(out, inputs):
     nere = [r["nome"] for r in rows if r["nera"]]
     print(f"Clip nere separatrici: {len(nere)} ({', '.join(nere[:12])}{'…' if len(nere) > 12 else ''})", flush=True)
 
-    try:
-        import mlx_whisper
-        model = whisper_model()
-        print(f"Trascrivo con {model.split('/')[-1]}…", flush=True)
-    except ImportError:
-        mlx_whisper = None
-        print("⚠ mlx_whisper non c'è su questo Mac: niente trascrizione, divido solo con le clip nere", flush=True)
+    import voz
+    mlx_whisper = None
+    model = None
+    if voz.disponibile():
+        model = "voz"
+        print("Trascrivo con Voz…", flush=True)
+    else:
+        try:
+            import mlx_whisper
+            model = whisper_model()
+            print(f"Trascrivo con {model.split('/')[-1]}…", flush=True)
+        except ImportError:
+            print("⚠ né Voz né mlx_whisper su questo Mac: niente trascrizione, divido solo con le clip nere", flush=True)
     for r in rows:
         tx = os.path.join(out, "tx", f"{r['n']:04d}.txt")
-        if r["nera"] or r["durata"] < 1.2 or (not mlx_whisper and not os.path.exists(tx)):
+        if r["nera"] or r["durata"] < 1.2 or (model != "voz" and not mlx_whisper and not os.path.exists(tx)):
             r["testo"] = ""
             continue
         if not os.path.exists(tx):
             wav = os.path.join(out, f"{r['n']:04d}.wav")
             subprocess.run([FF, "-v", "error", "-y", "-i", r["path"], "-vn", "-ac", "1", "-ar", "16000", wav], check=True)
             try:
-                res = mlx_whisper.transcribe(wav, path_or_hf_repo=model, language="it", condition_on_previous_text=False)
+                if model == "voz":
+                    res = voz.trascrivi(wav)
+                else:
+                    res = mlx_whisper.transcribe(wav, path_or_hf_repo=model, language="it", condition_on_previous_text=False)
                 text = (res.get("text") or "").strip()
             finally:
                 os.remove(wav)
