@@ -1,8 +1,8 @@
 ---
 name: reel-capcut-mac
 metadata:
-  version: "0.2.0-alpha.9"
-description: Monta reel verticali (Instagram/TikTok) in CapCut direttamente sul Mac di Nicola con Claude Code - analisi delle clip con Whisper sul chip Apple, tagli secondo le sue regole, progetto CapCut generato dal template del cliente, b-roll Magnific, profilo del cliente e lezioni. Usala quando Nicola chiede di montare reel da una cartella di clip o di correggere un reel già montato (anche da screenshot della chat del cliente).
+  version: "0.2.0-alpha.10"
+description: Monta reel verticali (Instagram/TikTok) in CapCut direttamente sul Mac di Nicola con Claude Code - analisi delle clip con Voz (Desert Ant) sul chip Apple, tagli secondo le sue regole, progetto CapCut generato dal template del cliente, b-roll Magnific, profilo del cliente e lezioni. Usala quando Nicola chiede di montare reel da una cartella di clip o di correggere un reel già montato (anche da screenshot della chat del cliente).
 ---
 
 # Reel verticali in CapCut, da Claude Code sul Mac
@@ -28,10 +28,11 @@ Claude Code indica quando carica la skill (di solito `~/.claude/skills/reel-capc
 
 ## 0. Preparazione (una volta sola)
 ```bash
-bash "$SKILL_DIR/scripts/installa.sh"     # ffmpeg (Homebrew), mlx-whisper, modello medium
+bash "$SKILL_DIR/scripts/installa.sh"     # ffmpeg (Homebrew), numpy, Voz di Desert Ant
 ```
-- Whisper gira sul chip Apple con `mlx-whisper` (modello `mlx-community/whisper-medium-mlx`,
-  cambiabile con la variabile `REEL_WHISPER`); se manca usa `faster-whisper` su CPU.
+- La trascrizione usa Voz di Desert Ant sul chip Apple (dal 07/11/2026, `scripts/voz.py`: 10-17 volte più veloce di
+  Whisper, stessa precisione in italiano nella prova del 07/11/2026). Su un Mac senza Voz ripiega su `mlx-whisper`
+  o `faster-whisper` se ci sono. Voz sbaglia ancora qualche nome proprio: le correzioni `fix` restano.
 - L'audio di ogni clip viene estratto una volta e tenuto in cache (`~/.cache/reel-capcut`).
 - Cartelle: clip dove dice Nicola; progetti CapCut in
   `~/Movies/CapCut/User Data/Projects/com.lveditor.draft`.
@@ -121,7 +122,7 @@ python3 scomponi.py "<clip>" "<lavoro>/<video>/<clip>-inquadrature"
 - Nel report scrivi «premontato riscomposto: N inquadrature, M spezzoni».
 
 ### Voce di chi parla e suggeritore
-Dietro la camera spesso c'è chi **suggerisce la battuta** prima che venga detta, e Whisper la
+Dietro la camera spesso c'è chi **suggerisce la battuta** prima che venga detta, e la trascrizione la
 trascrive: la frase c'è ma chi è in camera ha la bocca chiusa.
 - Chi parla ha il microfono addosso: voce **forte** (circa −13…−28 dB); suggeritore e «3, 2, 1»
   più bassi (−30…−45). Usa solo i **tratti forti**.
@@ -350,7 +351,7 @@ tutti con Read. Si corregge **lo stesso progetto** (niente copie «v2»).
 - `clipdur`: facoltativo (lo script legge la durata reale dei file).
 - `words`: parole per spezzone (le scrive `controlla_tagli.py --parole`), servono a
   `auto_subs` per generare i sottotitoli (righe ≤ `sub_ch`, bilanciate, mai sopra titoli ed
-  elenchi). `fix`: correzioni delle parole storpiate da Whisper (anche più parole → più parole).
+  elenchi). `fix`: correzioni delle parole storpiate dalla trascrizione (anche più parole → più parole).
   `gap_words: "shift"` sposta le parole cadute in una pausa tolta all'inizio del pezzo dopo
   (default `drop` le scarta).
 - `emoji`: `[emoji, spezzone, secondo nella clip, lato]`: emoji libere centrate sopra i
@@ -503,4 +504,4 @@ Fatti, cosa hai verificato, cosa va guardato, cosa resta da fare, un giudizio on
 - Testo fuori schermo: riga più lunga dell'esempio alla stessa scala.
 - File «._C0867.MP4»: nascosti di macOS, da saltare.
 - Silenzi rimasti nel video: tagli riusati da un montaggio precedente senza rifare il controllo, o
-  pause misurate sui tempi di Whisper (allunga le parole sopra i silenzi): misurale sul volume dell'audio.
+  pause misurate sui tempi della trascrizione (Whisper allungava le parole sopra i silenzi): misurale sul volume dell'audio.

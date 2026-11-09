@@ -1904,6 +1904,7 @@ def run() -> None:
         print(agent.install_editor_skill(Path(args.skill_dir) if args.skill_dir else None), flush=True)
     except OSError as e:
         print(f"skill non installata: {e}", flush=True)
+    vault.ensure_voz(Path(args.skill_dir) if args.skill_dir else None, log=lambda m: print(m, flush=True))
     # the shared client brain: read the vault from it (decided now, from disk), then in the
     # background pull it, link its client skills and switch to it if it gained clients
     chosen = brain.choose_vault(vault.enabled())

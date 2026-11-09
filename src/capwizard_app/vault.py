@@ -47,7 +47,7 @@ def enabled() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Tools: ffmpeg and a Python with mlx-whisper / Vision
+# Tools: ffmpeg and a Python with numpy / Vision (transcription: Voz, a separate program, since 07/11/2026)
 # ---------------------------------------------------------------------------
 
 def ffmpeg() -> str | None:
@@ -95,8 +95,43 @@ def audio_check(folder: str, fix: bool = False, timeout: int = 600) -> dict | No
 _TOOLS_PY: str | None = None
 
 
+def voz_installed() -> bool:
+    """Voz (Desert Ant) is a program of its own, not a Python package: the same places tools/voz.py looks in."""
+    cands = [os.environ.get("VOZ_BIN", ""), str(HOME / ".local/bin/desertant"),
+             str(HOME / ".local/share/desertant/desertant"), "/opt/homebrew/bin/desertant"]
+    return any(c and os.path.exists(c) for c in cands) or bool(shutil.which("desertant"))
+
+
+def ensure_voz(skill_dir: Path | None, log=print) -> None:
+    """At start, in the background: a Mac with an Apple chip and no Voz gets it from the official release (checksum
+    checked, model ~320 MB) with the skill's installa_voz.sh. Until then, and if it fails, transcription stays on
+    Whisper. CAPWIZARD_NO_VOZ_INSTALL=1 turns this off."""
+    import platform
+    import threading
+    if voz_installed() or os.environ.get("CAPWIZARD_NO_VOZ_INSTALL") or platform.machine() != "arm64":
+        return
+    script = next((s for s in [skill_dir / "scripts/installa_voz.sh" if skill_dir else None,
+                               HOME / ".claude/skills/reel-capcut-mac/scripts/installa_voz.sh"] if s and s.exists()), None)
+    if not script:
+        return
+
+    def run() -> None:
+        global _TOOLS_PY
+        log("[voz] installo Voz di Desert Ant (la trascrizione resta su Whisper finché non è pronto)…")
+        try:
+            r = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=1800)
+            out = (r.stdout + r.stderr).strip().splitlines()
+            log(f"[voz] {out[-1] if out else 'finito'}" if r.returncode == 0 else
+                f"[voz] non installato, resto su Whisper: {(out or ['errore'])[-1]}")
+        except (OSError, subprocess.TimeoutExpired) as e:
+            log(f"[voz] non installato, resto su Whisper: {e}")
+        _TOOLS_PY = None          # choose the interpreter again (with Voz, Whisper is no longer needed)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def tools_python() -> str:
-    """An interpreter that has mlx_whisper (transcription) and pyobjc Vision (cut-out)."""
+    """An interpreter that has numpy and, if possible, pyobjc Vision (cut-out). Transcription runs Voz, not Python;
+    on a Mac without Voz the tools fall back to mlx_whisper, so then the interpreter must have it."""
     global _TOOLS_PY
     if _TOOLS_PY:
         return _TOOLS_PY
@@ -107,7 +142,10 @@ def tools_python() -> str:
              str(HOME / "video-editor-mcp/work/tools/venv/bin/python"), str(HOME / "video-editor-mcp/.venv/bin/python"),
              own, *_system_pythons()]
     cands = [c for c in dict.fromkeys(cands) if c and os.path.exists(c)]
-    for need in ("import mlx_whisper, Vision", "import mlx_whisper"):   # the cut-out also needs Vision
+    needs = ("import numpy, Vision", "import numpy")       # the cut-out also needs Vision
+    if not voz_installed():                                 # no Voz: the transcription falls back to mlx_whisper
+        needs = ("import mlx_whisper, numpy, Vision", "import mlx_whisper, numpy") + needs
+    for need in needs:
         for c in cands:
             if subprocess.run([c, "-c", need], capture_output=True).returncode == 0:
                 _TOOLS_PY = c

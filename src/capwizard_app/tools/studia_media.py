@@ -3,7 +3,7 @@ For every video (dropped files/folders, or Instagram/TikTok links downloaded wit
 duration, cut times (scene changes), speech transcript with word timings, loudness, a contact sheet
 (1 frame every 0.5 s) and a few big frames of the first seconds (where the title is).
 usage: python studia_media.py <out dir> <inputs json: {"file": [...], "link": [...]}>
-Run with a Python that has mlx_whisper and yt-dlp (vault.tools_python())."""
+Run with vault.tools_python() (yt-dlp; transcription with Voz, mlx_whisper as fallback)."""
 import glob, json, os, re, shutil, subprocess, sys
 
 FF = os.environ.get("CAPWIZARD_FFMPEG") or shutil.which("ffmpeg") or os.path.expanduser("~/Desktop/VIDEO CLAUDE/720 STUDI0/tools/ffmpeg")
@@ -50,8 +50,12 @@ def loudness(p):
 
 def trascrivi(p):
     try:
-        import mlx_whisper
-        r = mlx_whisper.transcribe(p, path_or_hf_repo="mlx-community/whisper-large-v3-turbo", word_timestamps=True, language="it")
+        import voz
+        if voz.disponibile():
+            r = voz.trascrivi(p)
+        else:
+            import mlx_whisper
+            r = mlx_whisper.transcribe(p, path_or_hf_repo="mlx-community/whisper-large-v3-turbo", word_timestamps=True, language="it")
         words = [{"w": w["word"].strip(), "s": round(w["start"], 2), "e": round(w["end"], 2)} for s in r["segments"] for w in s.get("words", [])]
         return r.get("text", "").strip(), words
     except Exception as e:

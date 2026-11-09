@@ -13,7 +13,7 @@ screenshot della chat del cliente) vengono fatte sullo stesso progetto, e la lez
 finisce nel profilo del cliente. Vedi [agent.py](src/capwizard_app/agent.py).
 
 - **Skill `reel-capcut-mac`** (`~/.claude/skills/reel-capcut-mac`): regole di montaggio,
-  script (analisi con Whisper, controllo dei tagli, costruzione e verifica del draft),
+  script (analisi con Voz di Desert Ant, controllo dei tagli, costruzione e verifica del draft),
   procedura delle correzioni.
 - **Profilo cliente**: una skill `reel-<cliente>` (es. `reel-chirone`) con
   `metadata: capwizard-template: …` oppure che nomina il suo `TEMPLATE …`. Kit, volumi,
@@ -39,7 +39,7 @@ python3 -m venv .venv
 ```
 
 Servono Claude Code con il login fatto (`claude` → `/login`) e la skill
-`reel-capcut-mac` installata (vedi il suo `LEGGIMI.md`: ffmpeg, mlx-whisper).
+`reel-capcut-mac` installata (vedi il suo `LEGGIMI.md`: ffmpeg, numpy, Voz).
 
 ## App desktop (Electron) — nuova UI
 

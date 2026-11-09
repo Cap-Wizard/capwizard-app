@@ -1,5 +1,5 @@
-"""Funzioni comuni: audio in cache, livelli di voce, trascrizione (mlx-whisper sul chip Apple,
-con faster-whisper come riserva). Importato dagli altri script."""
+"""Funzioni comuni: audio in cache, livelli di voce, trascrizione (Voz di Desert Ant sul chip Apple dal 07/11/2026;
+mlx-whisper e faster-whisper restano solo come riserva su un Mac senza Voz). Importato dagli altri script."""
 from __future__ import annotations
 
 import json
@@ -94,7 +94,12 @@ def trascrivi(clip: str, a: float | None = None, b: float | None = None) -> list
     if len(seg) < SR * 0.15:
         return []
     off = s0 / SR
-    try:
+    import voz
+    if voz.disponibile():
+        r = voz.trascrivi_array(seg, SR)
+        return [[w["word"].strip(), round(off + w["start"], 2), round(off + w["end"], 2)]
+                for s in r["segments"] for w in s.get("words", [])]
+    try:  # riserva: Mac senza Voz
         import mlx_whisper
         r = mlx_whisper.transcribe(seg, path_or_hf_repo=MODELLO_MLX, language="it", word_timestamps=True,
                                    condition_on_previous_text=False, verbose=None)
