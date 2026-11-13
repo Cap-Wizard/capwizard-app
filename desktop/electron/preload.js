@@ -33,4 +33,6 @@ contextBridge.exposeInMainWorld("api", {
   updateInstall: () => ipcRenderer.invoke("update-install"),
   updateMode: (modo) => ipcRenderer.invoke("update-mode", modo),
   onUpdateState: (cb) => ipcRenderer.on("update-state", (_e, st) => cb(st)),
+  // a click on a «video finished» notification
+  onNoticeClick: (cb) => ipcRenderer.on("notice-click", (_e, n) => cb(n)),
 });

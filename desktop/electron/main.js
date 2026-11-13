@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, Notification } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -163,6 +163,45 @@ function createWindow() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Notifications: a video edited or changed (the backend lists them in /api/notices). They come from
+// CapWizard, with its icon; a click brings the window forward and opens the project.
+// ---------------------------------------------------------------------------
+
+const shownNotices = new Set();   // a notification must not vanish before it's clicked (GC)
+
+function watchNotices() {
+  let after = -1;                 // the first read only says where the list is: old ones aren't shown
+  const read = async () => {
+    try {
+      const r = await fetch(`${BACKEND_URL}/api/notices?after=${after}`, { headers: { "x-capwizard-token": BACKEND_TOKEN } });
+      const data = await r.json();
+      if (data.last < after) { after = 0; return; }   // the backend restarted: its list starts again
+      for (const n of data.notices || []) showNotice(n);
+      after = data.last;
+    } catch (_) { /* backend restarting */ }
+  };
+  read();
+  setInterval(read, 3000);
+}
+
+function showNotice(n) {
+  if (!Notification.isSupported()) return;
+  const note = new Notification({ title: n.title, body: n.body, silent: true, icon: APP_ICON });   // the backend plays the sound
+  shownNotices.add(note);
+  note.on("click", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      if (n.name) mainWindow.webContents.send("notice-click", n);
+    }
+    shownNotices.delete(note);
+  });
+  note.on("close", () => shownNotices.delete(note));
+  note.show();
+}
+
 function openWebLink(url) {
   try {
     if (["https:", "http:", "mailto:"].includes(new URL(url).protocol)) shell.openExternal(url);
@@ -183,6 +222,7 @@ app.whenReady().then(async () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("backend-ready", { ok, url: BACKEND_URL });
   }
+  watchNotices();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

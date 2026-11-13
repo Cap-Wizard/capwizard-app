@@ -70,6 +70,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
   bootBackend();          // sidecar readiness (pills + editing), runs regardless
   initUpdates();
+  if (window.api && window.api.onNoticeClick) window.api.onNoticeClick(openFromNotice);
 
   if (LOCAL_MODE) {
     showView("dash");     // private use: skip the login/subscription gate
@@ -2160,6 +2161,16 @@ function teamFoot(label, action) {
   go.hidden = !label;
   go.textContent = label;
   go.onclick = action;
+}
+
+// A click on the «video finished» notification: the project's page.
+async function openFromNotice(n) {
+  showView("home");
+  await loadProjects();
+  const p = state.projects.find((x) => x.id === n.project_id)
+    || state.projects.find((x) => n.path && x.result_path === n.path)
+    || state.projects.find((x) => x.name === n.name);
+  if (p) openProject(p);
 }
 
 async function openFromBoard(it) {

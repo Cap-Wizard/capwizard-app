@@ -30,6 +30,7 @@ import secrets
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -318,6 +319,7 @@ def _run_job(job: Job, req: GenerateRequest) -> None:
         job.error = str(e)
         job.status = "error"
         job.log(f"ERRORE: {e}")
+    _notify_job("monta", req.name, job)
     brain.push_soon(f"Lezioni dal reel «{req.name}»")
 
 
@@ -377,9 +379,11 @@ def _run_batch(job: Job, req: BatchRequest) -> None:
                 one = GenerateRequest(**{**base, "input_path": str(sub), "name": name})
                 out, report = _do_generate(job, one)
                 job.results.append({"name": name, "path": out, "report": report, "ok": True})
+                _notify_job("monta", name, Job(id="", status="done", result_path=out, stopped=job.stopped))
             except Exception as e:  # one folder failing must not abort the batch
                 job.log(f"ERRORE su «{name}»: {e}")
                 job.results.append({"name": name, "path": None, "ok": False, "error": str(e)})
+                _notify_job("monta", name, Job(id="", status="error", error=str(e), stopped=job.stopped))
 
         ok = sum(1 for r in job.results if r["ok"])
         job.log(f"\n✓ Blocco completato: {ok}/{len(subs)} progetti creati")
@@ -785,8 +789,8 @@ class QueueItem:
 
 class Queue:
     """Videos to edit, CAPWIZARD_PARALLEL at a time (default 2): most of a montage is Claude working in
-    the cloud, so two run side by side without slowing each other much. The sound and the
-    notification come once, when the whole queue is done."""
+    the cloud, so two run side by side without slowing each other much. Each video has its own
+    notification when it ends, and a summary when the whole queue is done (if it was more than one)."""
 
     def __init__(self) -> None:
         self.items: list[QueueItem] = []
@@ -869,13 +873,65 @@ queue = Queue()
 
 
 def _all_done(ok: list, failed: list) -> None:
-    """The queue has emptied: a sound and a notification, so the user knows without watching the app."""
+    """The queue has emptied. Each video already had its own notification: the summary comes only
+    after more than one, with the longer sound."""
+    if len(ok) + len(failed) < 2:
+        return
     msg = f"{len(ok)} video pront{'o' if len(ok) == 1 else 'i'}" + (f" · {len(failed)} con errore" if failed else "")
+    _notify("Coda finita", msg, ok=not failed, sound=("Glass", "Hero"))
+
+
+# ---------------------------------------------------------------------------
+# Notifications: a video edited or changed, so the user knows without watching the app
+#
+# The backend keeps them in a list that the Electron window reads (GET /api/notices) and shows as
+# macOS notifications from CapWizard: a click opens the project. With no window reading them
+# (the backend started on its own) it shows them itself with osascript.
+# ---------------------------------------------------------------------------
+
+_notices: list[dict] = []
+_notices_lock = threading.Lock()
+_notices_read = 0.0             # when a window last read them
+
+
+def _notify(title: str, body: str, ok: bool = True, sound: tuple = ("Glass",), **extra) -> None:
+    global _notices
+    with _notices_lock:
+        seq = (_notices[-1]["seq"] + 1) if _notices else 1
+        _notices = [*_notices[-49:], {"seq": seq, "title": title, "body": body, "ok": ok, **extra}]
+        window = time.time() - _notices_read < 20
     try:
-        subprocess.Popen(["/bin/sh", "-c", "afplay /System/Library/Sounds/Glass.aiff; afplay /System/Library/Sounds/Hero.aiff"])
-        subprocess.Popen(["osascript", "-e", f'display notification "{msg}" with title "CapWizard" subtitle "Coda finita" sound name "Glass"'])
+        subprocess.Popen(["/bin/sh", "-c", "; ".join(f"afplay /System/Library/Sounds/{n}.aiff" for n in sound)])
+        if not window:
+            esc = lambda t: t.replace("\\", "").replace('"', "'")
+            subprocess.Popen(["osascript", "-e", f'display notification "{esc(body)}" with title "CapWizard" subtitle "{esc(title)}"'])
     except OSError:
         pass
+
+
+def _notify_job(kind: str, name: str, job: Job, project_id: str | None = None) -> None:
+    """A montage («monta») or a change («modifica») has ended: one notification with the video's name."""
+    if job.stopped:                      # stopped by the user: they know
+        return
+    ok = job.status == "done"
+    if ok:
+        title, body = ("Montaggio finito" if kind == "monta" else "Modifiche fatte"), f"«{name}» è pronto in CapCut"
+    else:
+        title = "Montaggio non riuscito" if kind == "monta" else "Modifiche non riuscite"
+        err = (job.error or "").strip().splitlines()
+        body = f"«{name}»" + (f": {err[-1][:120]}" if err else "")
+    _notify(title, body, ok=ok, sound=("Glass",) if ok else ("Basso",),
+            name=name, project_id=project_id, path=job.result_path)
+
+
+@app.get("/api/notices")
+def notices(after: int = -1) -> dict:
+    """The notifications after `after` (-1: none, only where the list is up to)."""
+    global _notices_read
+    with _notices_lock:
+        _notices_read = time.time()
+        last = _notices[-1]["seq"] if _notices else 0
+        return {"last": last, "notices": [n for n in _notices if n["seq"] > after] if after >= 0 else []}
 
 
 @app.post("/api/queue")
@@ -1782,6 +1838,7 @@ def _run_modify(job: Job, project: dict, req: ModifyRequest) -> None:
         job.error = str(e)
         job.status = "error"
         job.log(f"ERRORE: {e}")
+    _notify_job("modifica", project.get("name", "progetto"), job, project.get("id"))
     brain.push_soon(f"Lezione dalla modifica di «{project.get('name', 'progetto')}»")
 
 
