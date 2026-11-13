@@ -1,6 +1,6 @@
 """Analisi completa di una cartella di clip, in un solo passaggio.
 
-uso: python3 analizza.py CARTELLA_CLIP CARTELLA_LAVORO [--soglia -30] [--mosaico]
+uso: python3 analizza.py CARTELLA_CLIP CARTELLA_LAVORO [--soglia -30] [--mosaico] [--escludi FILE]
 
 Per ogni clip scrive CARTELLA_LAVORO/res/<clip>.json con: durata reale (fotogrammi), fps,
 rotazione e come metterla in CapCut, livelli, parole con tempi e livello (forte = voce di chi
@@ -54,9 +54,13 @@ def main():
     ap.add_argument("out", type=Path)
     ap.add_argument("--soglia", type=float, default=None, help="dB sopra cui una parola e' 'forte' (default: relativa alla clip)")
     ap.add_argument("--mosaico", action="store_true")
+    ap.add_argument("--escludi", type=Path, default=None,
+                    help="file con un percorso per riga: clip tolte nell'app, da non analizzare")
     a = ap.parse_args()
     (a.out / "res").mkdir(parents=True, exist_ok=True)
-    files = sorted(f for f in a.clips.iterdir() if f.suffix.lower() in EXT and not f.name.startswith("._"))
+    fuori = {str(Path(x.strip())) for x in a.escludi.read_text().splitlines() if x.strip()} if a.escludi else set()
+    files = sorted(f for f in a.clips.iterdir() if f.suffix.lower() in EXT and not f.name.startswith("._")
+                   and str(f) not in fuori)
     for f in files:
         dest = a.out / "res" / f"{f.stem}.json"
         if dest.exists():

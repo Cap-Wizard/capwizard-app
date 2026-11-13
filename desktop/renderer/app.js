@@ -455,10 +455,10 @@ async function loadKit() {
 // Step 2: clips
 // ---------------------------------------------------------------------------
 
-async function setBroll(path, exclude = []) {
+async function setBroll(path, exclude = [], only = null) {
   $("broll-path").value = path;
   $("broll-label").textContent = path;
-  await loadStrip(strips.broll, path, exclude);
+  await loadStrip(strips.broll, path, exclude, only);
 }
 
 // Reference videos: one box per video plus an empty one to add more. Dropped on a full box, a video replaces it.
@@ -491,14 +491,16 @@ function renderRefs() {
   $("ref-info").textContent = state.refs.length ? `${state.refs.length} video` : "facoltativo";
 }
 
-async function setFolder(path, exclude = []) {
+// only = the videos dropped one by one: just those, every other clip of their folder stays out.
+async function setFolder(path, exclude = [], only = null) {
   $("input-path").value = path;
-  $("input-path-label").textContent = path;
+  $("input-path-label").textContent = only ? (only.length === 1 ? only[0] : `${only.length} video in ${path}`) : path;
+  if (only && state.batch) { state.batch = false; updateBatchUI(); }
   suggestName();
   check();
   if (path && state.batch) previewBatch();
-  if (path && !state.batch) detectShooting(path);
-  await loadStrip(strips.clips, path, exclude);
+  if (path && !state.batch && !only) detectShooting(path);
+  await loadStrip(strips.clips, path, exclude, only);
 }
 
 // A folder with no clips of its own but several video folders inside (VIDEO → VIDEO 1, VIDEO 2…): that's a whole shooting.
@@ -524,18 +526,23 @@ const strips = {
            empty: () => setBroll(""), items: [], excluded: new Set(), tok: 0 },
 };
 
-async function loadStrip(s, path, exclude = []) {
+async function loadStrip(s, path, exclude = [], only = null) {
   const tok = ++s.tok;
   $(s.thumbs).innerHTML = "";
   $(s.clear).hidden = !path;
   $(s.info).textContent = path ? "carico…" : "";
   s.items = [];
   s.excluded = new Set();
+  s.hidden = new Set();      // clips of the folder that were not dropped: out, but not counted as «tolte»
   if (!path) return;
   try {
     const i = await (await fetch(`${BACKEND}/api/folder-info?path=${encodeURIComponent(path)}`)).json();
     if (tok !== s.tok) return;
     const tolte = new Set(exclude);
+    if (only) {
+      const keep = new Set(only);
+      for (const c of i.clips || []) if (!keep.has(c.path)) { tolte.add(c.path); s.hidden.add(c.path); }
+    }
     s.items = (i.clips || []).filter((c) => !tolte.has(c.path));
     s.excluded = new Set((i.clips || []).filter((c) => tolte.has(c.path)).map((c) => c.path));   // only this folder's
     if (!i.ok || !s.items.length) { $(s.info).textContent = s.none; return; }
@@ -580,7 +587,7 @@ function renderStrip(s) {
 
 function stripInfo(s) {
   const n = s.items.length, dur = Math.round(s.items.reduce((a, c) => a + (c.durata || 0), 0));
-  const lenti = s.items.filter((c) => c.lento).length, tolte = s.excluded.size;
+  const lenti = s.items.filter((c) => c.lento).length, tolte = s.excluded.size - (s.hidden ? s.hidden.size : 0);
   $(s.info).textContent = `${n} ${s.unit} · ${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, "0")} min`
     + (lenti ? ` · 🐢 ${lenti} slow-mo` : "") + (tolte ? ` · ${tolte} ${s.tolto[tolte === 1 ? 0 : 1]}` : "");
 }
@@ -782,11 +789,14 @@ function wireEditor() {
     if (!dropZone && /\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(
       (e.dataTransfer.files[0] && window.api && window.api.pathForFile ? window.api.pathForFile(e.dataTransfer.files[0]) : ""))
       && e.dataTransfer.files.length === 1 && $("input-path").value) return;   // a stray video outside the boxes: ignore
-    const f = e.dataTransfer.files[0];
-    const p = f && window.api && window.api.pathForFile ? window.api.pathForFile(f) : "";
+    const all = [...e.dataTransfer.files].map((f) => (window.api && window.api.pathForFile ? window.api.pathForFile(f) : "")).filter(Boolean);
+    const p = all[0];
     if (!p) return;
-    const dir = /\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(p) ? p.replace(/\/[^/]+$/, "") : p;
-    if (dropZone === "drop-broll") setBroll(dir); else setFolder(dir);
+    const isVid = (x) => /\.(mp4|mov|m4v|mkv|webm|mts)$/i.test(x);
+    const dir = isVid(p) ? p.replace(/\/[^/]+$/, "") : p;
+    // videos dropped by themselves: only those (not the whole folder they sit in, nor its subfolders)
+    const only = isVid(p) ? all.filter((x) => isVid(x) && x.replace(/\/[^/]+$/, "") === dir) : null;
+    if (dropZone === "drop-broll") setBroll(dir, [], only); else setFolder(dir, [], only);
   });
 
   $("template").onchange = () => { loadKit(); check(); };

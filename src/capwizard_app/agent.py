@@ -397,11 +397,16 @@ def _pre_step(job, cmd: list[str], cwd: Path, label: str, done: Path, save: Path
     return True
 
 
-def _analyse_first(job, scripts: Path, clips: str, out: Path) -> str:
-    """Step 2 of the skill done by the app: the prompt line that tells Claude it's done ("" if not)."""
+def _analyse_first(job, scripts: Path, clips: str, out: Path, exclude: list[str] = ()) -> str:
+    """Step 2 of the skill done by the app: the prompt line that tells Claude it's done ("" if not).
+    The clips taken out in the app are not even analysed."""
     out.mkdir(parents=True, exist_ok=True)
     job.set_step(2)
-    if not _pre_step(job, [vault.tools_python(), str(scripts / "analizza.py"), clips, str(out), "--mosaico"], scripts,
+    cmd = [vault.tools_python(), str(scripts / "analizza.py"), clips, str(out), "--mosaico"]
+    if exclude:
+        (out / "escluse.txt").write_text("\n".join(exclude) + "\n")
+        cmd += ["--escludi", str(out / "escluse.txt")]
+    if not _pre_step(job, cmd, scripts,
                      "🎧 Analizzo le clip con Voz prima di avviare Claude…", out / "res", out / "analisi.txt"):
         return ""
     return (f"- **Analisi delle clip già fatta dall'app** (passo 2, non rilanciarla): `<lavoro>/<video>` = `{out}`; "
@@ -443,13 +448,23 @@ def run_agent(job, req) -> tuple[str, str]:
     if getattr(req, "notes", None):
         extra.append(f"- Note di Nicola (vincolanti): {req.notes}")
     if getattr(req, "exclude", None):
-        extra.append("- Clip tolte da Nicola nell'app: NON usarle e non trascriverle: "
-                     + ", ".join(str(Path(p).relative_to(req.input_path)) if Path(p).is_relative_to(req.input_path) else p for p in req.exclude))
+        rel = lambda p: str(Path(p).relative_to(req.input_path)) if Path(p).is_relative_to(req.input_path) else p  # noqa: E731
+        base = Path(req.input_path)
+        tutte = [str(c) for c in list(base.iterdir()) + [q for d in base.iterdir() if d.is_dir() and not d.name.startswith(".")
+                                                         for q in d.iterdir()]
+                 if c.is_file() and c.suffix.lower() in VIDEO_EXT and not c.name.startswith("._")] if base.is_dir() else []
+        tenute = [c for c in tutte if c not in set(req.exclude)]
+        if tenute and len(tenute) < len(req.exclude):      # a few videos dropped from a big folder: say which to use
+            extra.append("- Nicola ha scelto nell'app SOLO queste clip: usa e trascrivi soltanto queste, nient'altro della "
+                         "cartella: " + ", ".join(rel(c) for c in sorted(tenute)))
+        else:
+            extra.append("- Clip tolte da Nicola nell'app: NON usarle e non trascriverle: " + ", ".join(rel(p) for p in req.exclude))
     if getattr(req, "reference", None):
         extra.append(reference_section(req.reference, work))
     if _builder_line(client):
         extra.append(_builder_line(client))
-    analysed = _analyse_first(job, skill_md.parent / "scripts", req.input_path, work / "video")
+    analysed = _analyse_first(job, skill_md.parent / "scripts", req.input_path, work / "video",
+                              list(getattr(req, "exclude", None) or []))
     if analysed:
         extra.append(analysed)
     prompt = PROMPT.format(
