@@ -196,12 +196,49 @@ def client_rules(client_id: str) -> str:
 # The editing run
 # ---------------------------------------------------------------------------
 
+# The reel rules as an Obsidian vault read by roads (like Gabriele's Editing 1.0): in the shared client repo,
+# so Nicola gets it too. A client with a note in its «Clienti/» is edited from the vault, not from the long skill.
+REEL_VAULT = "Reel 1.0"
+
+
+def reel_vault() -> Path | None:
+    from capwizard_app import brain
+    d = brain.BRAIN / REEL_VAULT
+    return None if brain.disabled() or not (d / "00 Strade.md").exists() else d
+
+
+def _fields(note: Path) -> dict:
+    """The top-level «key: value» lines of a note's frontmatter."""
+    m = re.match(r"\A---\n(.*?)\n---\n", note.read_text(), re.S)
+    return {k.strip(): v.strip().strip('"') for k, v in re.findall(r"^([A-Za-z_]+):(.*)$", m.group(1), re.M)} if m else {}
+
+
+def reel_vault_note(client: dict | None) -> Path | None:
+    """The client's note in the reel vault: same template, or same name."""
+    v = reel_vault()
+    if not v or not client:
+        return None
+    norm = lambda x: re.sub(r"[^a-z0-9]", "", (x or "").lower())  # noqa: E731
+    for f in sorted((v / "Clienti").glob("*.md")):
+        fm = _fields(f)
+        if (client.get("template") and fm.get("template") == client["template"]) or \
+                norm(fm.get("cliente") or f.stem) == norm(client.get("nome")):
+            return f
+    return None
+
+
+VAULT_RULES = """1. Le regole stanno nel vault a strade `{vault}` (Obsidian): parti da `00 Strade.md` e `CLAUDE.md` e leggi
+   SOLO le note che indicano per questo video: `1 Sempre/`, la strada del girato, la strada del template, la nota del
+   cliente, le mosse elencate, `5 Procedura/Procedura e comandi.md` per i comandi. Il resto non si apre.
+   Gli script sono in `{skill_dir}/scripts`. Per questo cliente NON leggere la skill {skill} (SKILL.md) né il suo
+   profilo in `skills/`: vale il vault.
+2. Nota del cliente **{nome}**: `{note}`. Quando il progetto è fatto aggiorna lì `ultima_musica` col brano usato.
+"""
+
 PROMPT = """Monta un reel verticale in CapCut. Lavori in automatico dall'app CapWizard: NON fare domande,
 decidi tu seguendo le regole. Se manca qualcosa di indispensabile, fermati e spiegalo nel risultato.
 
-1. Usa la skill **{skill}** e seguila passo per passo: {skill_md}
-   Gli script sono in `{skill_dir}/scripts` (SKILL_DIR = `{skill_dir}`).
-{client}
+{rules}
 Dati del lavoro:
 - Cartella delle clip: `{clips}`
 - Nome del progetto CapCut: «{name}» (non esiste ancora: crealo con questo nome esatto)
@@ -467,10 +504,17 @@ def run_agent(job, req) -> tuple[str, str]:
                               list(getattr(req, "exclude", None) or []))
     if analysed:
         extra.append(analysed)
+    note = reel_vault_note(client)
+    if note:
+        rules = VAULT_RULES.format(vault=note.parent.parent, skill_dir=skill_md.parent, skill=EDITOR_SKILL,
+                                   nome=client["nome"], note=note)
+    else:
+        rules = (f"1. Usa la skill **{EDITOR_SKILL}** e seguila passo per passo: {skill_md}\n"
+                 f"   Gli script sono in `{skill_md.parent}/scripts` (SKILL_DIR = `{skill_md.parent}`).\n"
+                 + (f"2. Profilo del cliente **{client['nome']}**: leggi `{_real(client['path'])}`. Prevale sulla skill "
+                    f"generale dove è più preciso.\n" if client else ""))
     prompt = PROMPT.format(
-        skill=EDITOR_SKILL, skill_md=skill_md, skill_dir=skill_md.parent,
-        client=(f"2. Profilo del cliente **{client['nome']}**: leggi `{_real(client['path'])}`. Prevale sulla skill "
-                f"generale dove è più preciso.\n") if client else "",
+        rules=rules,
         clips=req.input_path, name=req.name, template=req.template,
         script=f"`{req.script_path}` (indicazioni vincolanti)" if req.script_path else "nessuno",
         duration=f"{req.ai_target_duration:g} s" if req.ai_target_duration else "la decidi tu",
@@ -479,12 +523,15 @@ def run_agent(job, req) -> tuple[str, str]:
     )
 
     dirs = {str(Path(req.input_path)), str(CAPCUT_PROJECTS_DIR), str(skill_md.parent), str(work)}
-    if client:
+    if note:
+        dirs.add(str(note.parent.parent))
+    elif client:
         dirs.add(str(_real(client["path"]).parent))
     if req.script_path:
         dirs.add(str(Path(req.script_path).parent))
     dirs.update(str(Path(p).parent) for p in getattr(req, "reference", None) or [] if Path(p).is_file())
-    job.log(f"🎬 Avvio Claude Code ({req.ai_model}) con la skill {EDITOR_SKILL}"
+    job.log(f"🎬 Avvio Claude Code ({req.ai_model}) con il vault «{REEL_VAULT}» a strade e la nota di {client['nome']}"
+            if note else f"🎬 Avvio Claude Code ({req.ai_model}) con la skill {EDITOR_SKILL}"
             + (f" e il profilo di {client['nome']}" if client else ""))
     job.set_step(1)
     transcript = [f"# {req.name}\n"]
@@ -543,14 +590,17 @@ Modifiche già fatte in passato su questo video:
 MODIFICHE RICHIESTE ORA (da Nicola o dal cliente):
 {text}
 {images}
-Procedura: segui la skill **{skill}** ({skill_md}), sezione «8. Dopo che Nicola l'ha aperto: correzioni».
-La copia di sicurezza l'ha già fatta l'app e lo storico lo aggiorna lei: salta il passo 4 e non usare `registra.py`.
+{procedure}
+La copia di sicurezza l'ha già fatta l'app e lo storico lo aggiorna lei: non rifarla e non usare `registra.py`.
 {lesson}
 Alla fine scrivi il file `{result}` con: {{"riassunto": "<cosa hai cambiato, in italiano, 2-5 righe>",
    "lezione": "<la lezione per i prossimi video, una riga, o null>"}}.
 Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
 
 LESSON = "La lezione va nel profilo del cliente `{profile}` (passo 8 della skill), con la data {day}."
+VAULT_LESSON = ("La correzione diventa una REGOLA nella nota giusta del vault `{vault}` (vedi `CLAUDE.md`, «Dopo una correzione»: "
+                "1 Sempre, strada, mossa o nota del cliente `{profile}`), correggendo quella vecchia che contraddice, più una "
+                "riga nel `8 Per Gabriele/Registro versioni.md` con la data {day}.")
 
 
 def _mods_file(project_id: str) -> Path:
@@ -682,7 +732,8 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
     client = client_for(settings)
     if client and client.get("source") == "vault":
         return run_vault_modify(job, project, client, text, images, model)
-    profile = writable_profile(client) if client else None
+    note = reel_vault_note(client)
+    profile = note or (writable_profile(client) if client else None)
     before = profile.read_text() if profile and profile.exists() else None
     skill_md = editor_skill()
 
@@ -708,19 +759,25 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
         summary = "—"
     prompt = MOD_PROMPT.format(
         name=project["name"], folder=folder, backup=backup,
-        client=(f"{client['nome']} — profilo `{profile}` (leggilo: prevale sulla skill generale)" if client else "nessun profilo"),
+        client=(f"{client['nome']} — nota del cliente nel vault `{profile}`" if note
+                else f"{client['nome']} — profilo `{profile}` (leggilo: prevale sulla skill generale)" if client else "nessun profilo"),
         template=settings.get("template") or "—", clips=settings.get("input_path") or "—",
         work=f"`{old_work}`" if old_work else "non disponibile", summary=summary, history=history,
         text=text or "(vedi gli screenshot)",
         images=attachments_text(images),
-        skill=EDITOR_SKILL, skill_md=skill_md,
-        lesson=LESSON.format(profile=profile, day=time.strftime("%d/%m/%Y")) if profile
+        procedure=(f"Regole e procedura: il vault a strade `{note.parent.parent}`. Leggi `00 Strade.md`, `CLAUDE.md`, "
+                   f"`1 Sempre/`, le strade e le mosse di questo video e la nota del cliente; i comandi sono in "
+                   f"`5 Procedura/Procedura e comandi.md`, «Correzioni dopo l'apertura». Gli script sono in "
+                   f"`{skill_md.parent}/scripts`. Non leggere la skill {EDITOR_SKILL} né il profilo in `skills/`.") if note
+        else f"Procedura: segui la skill **{EDITOR_SKILL}** ({skill_md}), sezione «8. Dopo che Nicola l'ha aperto: correzioni».",
+        lesson=VAULT_LESSON.format(vault=note.parent.parent, profile=note, day=time.strftime("%d/%m/%Y")) if note
+        else LESSON.format(profile=profile, day=time.strftime("%d/%m/%Y")) if profile
         else "Non c'è un profilo cliente: scrivi la lezione solo nel risultato.",
         result=result,
     )
     dirs = {str(folder), str(CAPCUT_PROJECTS_DIR), str(skill_md.parent), str(work), str(backup), str(ATTACH_DIR)}
     dirs |= {str(Path(p).parent) for p in images if p.lower().endswith(VIDEO_EXT)}     # attached videos stay in their folder
-    for d in (old_work, profile.parent if profile else None, settings.get("input_path")):
+    for d in (old_work, note.parent.parent if note else profile.parent if profile else None, settings.get("input_path")):
         if d:
             dirs.add(str(d))
 
