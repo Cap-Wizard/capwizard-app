@@ -618,6 +618,16 @@ def norm_tokens(words):
     return [t for t in out if t[0]]
 
 
+APPESE = set("""il lo la i gli le l un uno una un' di a da in con su per tra fra del dello della dei degli delle al allo alla ai
+agli alle dal dallo dalla dai dagli dalle nel nello nella nei negli nelle sul sullo sulla sui sugli sulle col coi e ed o od ma
+che se né ne mio mia miei mie tuo tua tuoi tue suo sua suoi sue nostro nostra vostro vostra non più molto""".split())
+
+
+def appesa(parola):
+    """Parola che regge quella dopo: una riga di sottotitolo non finisce con lei."""
+    return re.sub(r"[^\w']", "", parola.lower()) in APPESE or parola.endswith("'")
+
+
 def overlap(a, b, c, d):
     return max(0, min(b, d) - max(a, c))
 
@@ -638,7 +648,8 @@ if CFG.get("auto_subs"):
             for j in range(i + 1, N + 1):
                 if Lc(i, j) > SUB_CH:
                     break
-                cost = (Lc(i, j) - 16) ** 2 + (0 if j == N or toks[j - 1][3] else 40) + (300 if j - i == 1 and Lc(i, j) < 6 else 0)
+                cost = (Lc(i, j) - 16) ** 2 + (0 if j == N or toks[j - 1][3] else 40) + (300 if j - i == 1 and Lc(i, j) < 6 else 0) \
+                    + (400 if j < N and appesa(toks[j - 1][0]) else 0)   # mai «TUO FIGLIO O TUA / FIGLIA» (15/11/2026)
                 cand.append((cost + best[j][0], [(i, j)] + best[j][1]))
             best[i] = min(cand) if cand else (10 ** 9, [(i, i + 1)] + best[i + 1][1])
         chunks = [toks[i:j] for i, j in best[0][1]] if N else []
@@ -688,9 +699,12 @@ def audio_seg(proto, start, dur):
     return s
 
 
-for st, role in moments:
-    if st - last < 900_000 and role not in ("apertura", "transizione"):   # ogni transizione ha il suo woosh
-        continue
+FORTI = ("parola", "cta")         # parola forte, dato e call to action hanno sempre il loro suono (15/11/2026)
+last_role = None
+for st, role in sorted(moments):
+    vicino = st - last < 900_000
+    if vicino and role not in ("apertura", "transizione") and not (role in FORTI and last_role == "transizione"):
+        continue                      # un woosh non toglie il suono a una parola forte o alla CTA: suonano entrambi
     words = ROLE_WORDS.get(role, ())
     if role == "apertura" and riser:          # il suono che sale solo sull'apertura
         p = riser[0]
@@ -709,7 +723,7 @@ for st, role in moments:
         continue
     sound_segs.append(audio_seg(p, st, dur))
     sound_report.append((round(st / 1e6, 2), role, TIX[p["material_id"]][1].get("name")))
-    last = st
+    last, last_role = st, role
 
 # ---------------- musica: una sola, dallo stile del cliente ----------------
 mus = CAT["musiche"]

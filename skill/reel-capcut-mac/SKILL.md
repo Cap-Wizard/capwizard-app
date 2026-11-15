@@ -1,7 +1,7 @@
 ---
 name: reel-capcut-mac
 metadata:
-  version: "0.2.0-alpha.15"
+  version: "0.2.0-alpha.17"
 description: Monta reel verticali (Instagram/TikTok) in CapCut direttamente sul Mac di Nicola con Claude Code - analisi delle clip con Voz (Desert Ant) sul chip Apple, tagli secondo le sue regole, progetto CapCut generato dal template del cliente, b-roll Magnific, profilo del cliente e lezioni. Usala quando Nicola chiede di montare reel da una cartella di clip o di correggere un reel già montato (anche da screenshot della chat del cliente).
 ---
 
@@ -255,7 +255,8 @@ python3 anteprima.py "<cartella del progetto>" "<lavoro>/anteprima_1.mp4"
 (720x1280 con tagli, voce, LUT, testi, sovrapposizioni, musica e suoni; accanto il `.json` con cosa manca,
 buchi, transizioni ed elementi nascosti, e `.voce.wav` con la sola voce; se stampa BUCHI correggili subito). Passa l'anteprima all'agente **critico-video**; se dice
 DA RIFARE correggi, rifai l'anteprima (`anteprima_2.mp4`…) e richiamalo, finché dice PASSA (massimo 4 giri, poi
-quello che resta va in cima al «DA FARE A MANO»). Il video va all'export solo dopo.
+quello che resta va in cima al «DA FARE A MANO»). Il video va all'export solo dopo. Finito il giro, chiama l'agente
+**insegnante-montaggio** con i resoconti del critico e le correzioni: scrive le lezioni perché non si ripetano.
 
 ## 7. Report, registro e messaggio a Nicola
 - Scrivi `<lavoro>/report.md` con queste sezioni (l'app le legge):

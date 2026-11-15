@@ -231,8 +231,12 @@ progetto è costruito e verificato:
    che ha una prova (tempo, misura, fotogramma); se un errore viene da una regola che non vale per questo video,
    scrivilo e non contarlo.
 4. Ti fermi quando risponde PASSA, al massimo dopo 4 giri: allora quello che resta va in cima a «da_fare_a_mano».
+5. Appena il critico ha finito (PASSA o 4 giri), chiama l'agente `insegnante-montaggio` (strumento Agent,
+   subagent_type "insegnante-montaggio") con: i resoconti del critico di tutti i giri, cosa hai corretto e come, l'esito,
+   il cliente e il suo profilo, la cartella di lavoro. Scrive le lezioni perché gli stessi errori non si ripetano.
 Il video passa all'export di Gabriele SOLO quando il critico non ha più niente da dire. Nel risultato metti
-"critico": {{"giri": <n>, "esito": "PASSA" | "DA RIFARE", "restano": ["<errore ancora aperto>", ...]}}.
+"critico": {{"giri": <n>, "esito": "PASSA" | "DA RIFARE", "restano": ["<errore ancora aperto>", ...],
+ "lezioni": ["<lezione scritta dall'insegnante, con dove>", ...], "codice": ["<da correggere nel codice>", ...]}}.
 """
 
 CRITIC_AGENT = Path.home() / ".claude/agents/critico-video.md"
@@ -249,8 +253,12 @@ def critic_line(res: dict) -> str:
     if not c:
         return ""
     restano = [x for x in c.get("restano") or [] if x]
+    lezioni = [x for x in c.get("lezioni") or [] if x]
+    codice = [x for x in c.get("codice") or [] if x]
     return (f"Critico: {c.get('esito', '?')} dopo {c.get('giri', '?')} giri"
-            + (f"; restano: {'; '.join(restano)}" if restano else "; pronto per l'export"))
+            + (f"; restano: {'; '.join(restano)}" if restano else "; pronto per l'export")
+            + (f". Insegnante: {len(lezioni)} lezioni ({'; '.join(lezioni)})" if lezioni else "")
+            + (f". Da correggere nel codice: {'; '.join(codice)}" if codice else ""))
 
 
 PROMPT = """Monta un reel verticale in CapCut. Lavori in automatico dall'app CapWizard: NON fare domande,

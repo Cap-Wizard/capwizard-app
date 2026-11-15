@@ -139,10 +139,10 @@ def main() -> None:
         segs = sorted(main_tr["segments"], key=lambda s: s["target_timerange"]["start"]) if main_tr else []
 
         def black(dur_us: int) -> None:
-            p = tmp / f"p{len(pieces):03d}.mp4"
+            p = tmp / f"p{len(pieces):03d}.mkv"
             run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=black:s={W}x{H}:r={FPS}",
                  "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", f"{dur_us / 1e6:.4f}",
-                 "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(p)])
+                 "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-shortest", str(p)])
             pieces.append(p)
 
         for s in segs:
@@ -175,18 +175,18 @@ def main() -> None:
             vf.append(f"fps={FPS},format=yuv420p")
             chain = ",".join(vf) + colore(s, ix, rep, f"m{len(pieces)}")
             vol = float(s.get("volume", 1.0))
-            p = tmp / f"p{len(pieces):03d}.mp4"
+            p = tmp / f"p{len(pieces):03d}.mkv"
             cmd = ["ffmpeg", "-v", "error", "-y", "-ss", f"{src['start'] / 1e6:.4f}", "-t",
                    f"{src['duration'] / 1e6:.4f}", "-i", path]
             if has_audio(path):
                 af = f"volume={vol:.3f},atempo={speed}" if speed != 1.0 else f"volume={vol:.3f}"
-                af += ",aresample=48000,aformat=channel_layouts=stereo"
+                af += ",aresample=48000,aformat=channel_layouts=stereo,apad"   # audio lungo esatto come il video
                 cmd += ["-filter_complex", f"[0:v]{chain}[v];[0:a]{af}[a]", "-map", "[v]", "-map", "[a]"]
             else:
                 cmd += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
                         "-filter_complex", f"[0:v]{chain}[v]", "-map", "[v]", "-map", "1:a", "-shortest"]
             cmd += ["-t", f"{dur / 1e6:.4f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-                    "-c:a", "aac", "-ar", "48000", str(p)]
+                    "-c:a", "pcm_s16le", "-ar", "48000", str(p)]
             run(cmd)
             pieces.append(p)
             rep["spezzoni"].append({"da": round(t0 / 1e6, 2), "a": round((t0 + dur) / 1e6, 2),
@@ -229,7 +229,7 @@ def main() -> None:
             rep["buchi_traccia_principale"].append({"da": round(edge / 1e6, 3), "a": round(total / 1e6, 3)})
         lst = tmp / "lista.txt"
         lst.write_text("".join(f"file '{p}'\n" for p in pieces))
-        base = tmp / "base.mp4"
+        base = tmp / "base.mkv"
         run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(base)])
 
         # ---------------- sovrapposizioni, testi, audio ----------------
@@ -356,6 +356,7 @@ def main() -> None:
                 f = ImageFont.truetype(default_font, int(size))
             probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
             box = probe.multiline_textbbox((0, 0), txt, font=f, align="center", stroke_width=2, spacing=4)
+            box = [int(round(v)) for v in box]          # Pillow 12 dà misure decimali
             tw, th = box[2] - box[0] + 4, box[3] - box[1] + 4
             img = Image.new("RGBA", (max(2, tw), max(2, th)), (0, 0, 0, 0))
             rgb = tuple(int(col[i:i + 2], 16) for i in (2, 4, 6))

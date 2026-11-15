@@ -7,7 +7,7 @@ uso: python3 monta.py CARTELLA_VIDEO "NOME PROGETTO" config.json [--profilo CART
                      [--costruttore SCRIPT] [--rifai]
 
 Costruttore: --costruttore, se no `costruisci.py` nella cartella del profilo del cliente (quello
-scritto per il suo template), se no costruisci_draft.py. --rifai sostituisce il progetto costruito
+scritto per il suo template), se no costruisci_catalogo.py se il template è a catalogo, se no costruisci_draft.py. --rifai sostituisce il progetto costruito
 da un giro precedente (solo se CapCut non lo ha aperto).
 """
 from __future__ import annotations
@@ -32,6 +32,24 @@ def run(title: str, args: list) -> tuple[int, str]:
     out = (r.stdout + r.stderr).rstrip()
     print(out, flush=True)
     return r.returncode, out
+
+
+def catalogo(config: Path) -> bool:
+    """Il template del config è a catalogo (ogni pezzo una volta sola): allora si costruisce con
+    costruisci_catalogo.py. Segni: le clip composte «TRANSITION», oppure pochi testi in timeline (il preset dei
+    sottotitoli UNA volta e al massimo la parola grande), come TEMPLATE ETOILE ridotto da Gabriele (15/11/2026).
+    I template classici (Soluzioni, Chirone, Lisa Gorla, Bonati) hanno più sottotitoli e titoletti a tempo."""
+    import json
+    tpl = json.loads(config.read_text()).get("template")
+    f = PROJECTS / str(tpl) / "draft_info.json"
+    if not tpl or not f.is_file():
+        return False
+    D = json.loads(f.read_text())
+    if "\"text\":\"TRANSITION\"" in f.read_text().replace(" ", "").replace("\\", ""):
+        return True
+    preset = {m["id"] for m in D["materials"].get("text_templates", [])}
+    testi = [s for t in D["tracks"] if t["type"] == "text" for s in t["segments"]]
+    return len(testi) <= 3 and sum(s["material_id"] in preset for s in testi) == 1
 
 
 def main() -> int:
@@ -71,7 +89,7 @@ def main() -> int:
             cut = " ".join(l.split()[:2])
 
     builder = a.costruttore or (a.profilo / "costruisci.py" if a.profilo and (a.profilo / "costruisci.py").is_file() else None) \
-        or HERE / "costruisci_draft.py"
+        or (HERE / "costruisci_catalogo.py" if catalogo(config) else HERE / "costruisci_draft.py")
     code, _ = run(f"costruisco con {builder.name}", [builder, outdir, a.nome, config])
     if code or not (outdir / "draft_info.json").is_file():
         print(f"\n✗ {builder.name} non ha costruito il progetto.")

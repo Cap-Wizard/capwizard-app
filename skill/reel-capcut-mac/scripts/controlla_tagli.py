@@ -5,9 +5,9 @@ uso: python3 controlla_tagli.py config.json [--applica] [--parole]
 Per ogni spezzone [clip, da, a, testo, pause]:
   - ATTACCO: primo punto di voce piena; segnala se in testa c'e' piu' di 0,15s di altro
     (respiro, suggeritore, "vai"). Non sposta mai l'attacco da solo.
-  - CODA: non taglia mai la fine della frase. Fine = max(fine dell'ultima parola trascritta su una
-    finestra allungata di 0,5s, voce sopra il rumore di fondo) + 0,08s; ci si ferma alla prima
-    pausa vera (>= 0,2s), cosi' suggeritore e conti alla rovescia che seguono restano fuori.
+  - CODA: non taglia mai la fine della frase. Fine = max(fine dell'ultima parola trascritta, al massimo
+    +0,25s, voce sopra il rumore di fondo) + 0,08s; ci si ferma alla prima pausa vera (>= 0,2s) o
+    quando la voce, scesa al fondo, risale: e' un'altra voce (suggeritore), la coda si chiude prima.
   - PAUSE TOLTE: ritrascrive ogni pezzo e controlla che le parole della finestra intera ci
     siano tutte (una parola detta piano dentro la "pausa" verrebbe persa).
   - SUGGERITORE: tratti di voce 9-24 dB piu' bassi del resto dello spezzone per >= 0,6s.
@@ -35,21 +35,33 @@ def pezzi(a, b, gaps):
 
 
 def coda(clip, b, d, fondo):
-    """Nuova fine dello spezzone che termina a b."""
+    """Nuova fine dello spezzone che termina a b. La coda può solo calare: se dopo essere scesa al
+    fondo la voce risale (+6 dB), è un'altra voce (suggeritore, conto alla rovescia) e ci si ferma prima
+    che attacchi. Mai più di 0,35 s oltre la fine dell'ultima parola (13/11/2026, IMG_5072: «elettricista»
+    allungato da 7,04 a 7,72 s dentro la voce della suggeritrice)."""
     parole = audio.trascrivi(clip, max(0, b - 1.2), b + 0.5)
-    fine_parola = max([w[2] for w in parole if w[1] < b - 0.02] or [b])
+    fine_parola = min(max([w[2] for w in parole if w[1] < b - 0.02] or [b]), b + 0.25)
     soglia = fondo + 8
-    k = int(max(b, fine_parola) * 100) - 5
-    ultimo, silenzio = k, 0
-    while k < len(d) and k < int(b * 100) + 60:
-        if d[k] > soglia:
+    base = max(b, fine_parola)
+    k = int(b * 100) - 5                     # dal taglio: la fine parola di Voz può già essere nella voce dopo
+    ultimo, silenzio, minimo, attacco = k, 0, None, None
+    while k < len(d) and k < int(base * 100) + 35:
+        x = d[k]
+        if minimo is not None and x > soglia and x > minimo + 6:
+            attacco = k                      # risale: un'altra voce
+            break
+        if x > soglia and minimo is None:
             ultimo, silenzio = k, 0
         else:
+            minimo = x if minimo is None else min(minimo, x)
             silenzio += 1
-            if silenzio >= 20:          # pausa vera: 0,2s
+            if silenzio >= 20:              # pausa vera: 0,2s
                 break
         k += 1
-    return round(max(b, fine_parola, (ultimo + 1) / 100) + 0.08, 2)
+    fine = max(base, (ultimo + 1) / 100) + 0.08
+    if attacco is not None:
+        fine = min(fine, attacco / 100 - 0.03)
+    return round(max(b, fine), 2)
 
 
 def norm(t):
