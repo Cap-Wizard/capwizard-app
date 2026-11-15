@@ -1,7 +1,7 @@
 ---
 name: reel-capcut-mac
 metadata:
-  version: "0.2.0-alpha.11"
+  version: "0.2.0-alpha.15"
 description: Monta reel verticali (Instagram/TikTok) in CapCut direttamente sul Mac di Nicola con Claude Code - analisi delle clip con Voz (Desert Ant) sul chip Apple, tagli secondo le sue regole, progetto CapCut generato dal template del cliente, b-roll Magnific, profilo del cliente e lezioni. Usala quando Nicola chiede di montare reel da una cartella di clip o di correggere un reel già montato (anche da screenshot della chat del cliente).
 ---
 
@@ -100,6 +100,12 @@ tratti di voce piena con trascrizione. Nel riassunto le parole **deboli** sono t
 suggeritore, conti alla rovescia, voci lontane. Apri `mosaico.jpg` con Read.
 **Dall'app l'analisi è già fatta** prima che tu parta (te lo dice il prompt): non rilanciarla,
 leggi il riassunto in `<lavoro>/<video>/analisi.txt` e il mosaico.
+**Clip in S-Log3** (Sony, girato log): `analizza.py` le riconosce dal file (gamma `s-log3-cine` scritto dalla
+camera) e scrive accanto alla clip «S-Log3, luce 0.17, LUT 40%». Il costruttore ci mette da solo la LUT
+**SLog3SGamut3.CineToCine+709** (Regola > LUT) con quell'intensità: **40%** al buio (discoteca, locale, sera:
+recupera un po' di sfondo), **100%** all'esterno con luce. Prova a mano: `python3 colore.py CLIP… [--contesto discoteca]`.
+Vale **solo per i social parlati in CapCut** (non DaVinci, aftermovie, matrimoni). Se la LUT non è importata in
+CapCut il costruttore lo dice: va messa a mano.
 
 ### Video già montato da altri: si riscompone e si ritaglia sempre
 Se una clip è già un montaggio (un file lungo con tagli dentro, voce continua, a volte musica o
@@ -241,6 +247,16 @@ python3 verifica.py "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/N
 - Se il progetto non compare nella home di CapCut: Nicola deve chiudere CapCut (Cmd+Q) e
   riaprirlo. Non toccare `root_meta_info.json`.
 
+## 6b. Giro del critico, prima dell'export (solo dove c'è l'agente critico-video)
+Regola di Gabriele (15/11/2026), per ogni montaggio: quando il progetto è costruito e verificato,
+```bash
+python3 anteprima.py "<cartella del progetto>" "<lavoro>/anteprima_1.mp4"
+```
+(720x1280 con tagli, voce, LUT, testi, sovrapposizioni, musica e suoni; accanto il `.json` con cosa manca,
+buchi, transizioni ed elementi nascosti, e `.voce.wav` con la sola voce; se stampa BUCHI correggili subito). Passa l'anteprima all'agente **critico-video**; se dice
+DA RIFARE correggi, rifai l'anteprima (`anteprima_2.mp4`…) e richiamalo, finché dice PASSA (massimo 4 giri, poi
+quello che resta va in cima al «DA FARE A MANO»). Il video va all'export solo dopo.
+
 ## 7. Report, registro e messaggio a Nicola
 - Scrivi `<lavoro>/report.md` con queste sezioni (l'app le legge):
   ```markdown
@@ -318,6 +334,7 @@ tutti con Read. Si corregge **lo stesso progetto** (niente copie «v2»).
 {
  "projects_root": "~/Movies/CapCut/User Data/Projects/com.lveditor.draft",
  "template": "TEMPLATE MARIO ROSSI",
+ "contesto": "discoteca",
  "modello": "Un progetto vero con parlato e Bagliore II",
  "clipdir": "~/Downloads/VIDEO/3/CLIP",
  "brolldir": "~/Downloads/VIDEO/3/BROLL",
@@ -425,6 +442,8 @@ mai mentre c'è un titolo o un elenco.
   segmenti uguali con una parola colorata ciascuno.
 
 ### 7. Testi a schermo
+- **Discoteche, club, serate: niente emoji**, né nel template né nel video (Gabriele, 15/11/2026: «sono
+  cringe»). Config `"contesto": "discoteca"`: `emoji()` non mette niente e lo scrive nel report.
 - Titolo d'apertura sempre: dice subito di cosa si parla e cosa lo rende speciale.
 - **Titolo in più clip composte** una dopo l'altra (es. prima il nome dell'attività, poi il gancio
   con un'emoji per lato), ognuna con la sua animazione di gruppo (Zoom 1, Shake 3…): rifai la
@@ -460,6 +479,10 @@ dell'agenzia è anche nella nota «Stile …» del vault. I brani della libreria
 `music_id` e file nella cache di CapCut). Mai mp3 scaricati (Download, Spotimate, YouTube) né brani
 commerciali. Per cambiarla copia il materiale audio da un altro progetto che usa quel brano della libreria.
 
+- **Volume dell'export: −14 LUFS, picco −1,5 dBTP** (Gabriele, 15/11/2026: «sui social si deve sentire bene»).
+  CapCut non lo fa: CapWizard scrive da solo accanto a ogni export di un suo progetto «<nome> (-14 LUFS).mp4»
+  (Desktop, Filmati, Download). Nel report ricorda che si pubblica quella.
+
 ### 9. Zoom e transizioni
 Se il template ha le sue transizioni (es. **Hot Flash**) usa quelle, solo sui cambi forti (fine del
 titolo, prima della CTA), ognuna con il suo woosh; le regole qui sotto valgono quando non ne ha.
@@ -468,7 +491,10 @@ frase zoom 100→115% nell'ultimo secondo + transizione (Bagliore II) + woosh; m
 almeno 2,5s tra due transizioni.
 
 ### 10. Colore ed effetti
-Filtri ed effetti del template su tutto il video (le clip IA non sono in log).
+Filtri ed effetti del template su tutto il video. Clip in S-Log3: LUT per clip, 40% al buio e 100% con luce
+(vedi «Analizza le clip»); config `"contesto": "discoteca"` la tiene sempre al 40%, `"lut": 0.35` la impone,
+`"lut": false` la toglie. **Nelle correzioni la LUT si rimette**: in «ETOILE - 2» la ricostruzione l'aveva
+persa su tutte le clip e Gabriele l'ha dovuta rimettere a mano (15/11/2026).
 
 ### 11. Comunicazione
 Fatti, cosa hai verificato, cosa va guardato, cosa resta da fare, un giudizio onesto.

@@ -316,6 +316,20 @@ for n, c, sa, sb, ts, d, is_last in subs_v:
     s["uniform_scale"] = {"on": True, "value": 1.0}
     vsegs.append(s)
 
+# ---------------- colore: LUT sulle clip in S-Log3 (social parlati, regola 15/11/2026) ----------------
+# config «contesto» ("discoteca" = sempre 40 %), «lut» (numero 0-1 = forza l'intensità, false = mai)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import colore
+LUT_USATE = {}
+for c, m in vmat.items():
+    f = CFG.get("lut")
+    LUT_USATE[c] = (None if f is False else float(f)) if f is not None else colore.intensita(m["path"], CFG.get("contesto"))
+for s in vsegs:
+    c = next(k for k, m in vmat.items() if m["id"] == s["material_id"])
+    colore.applica(s, M, vmat[c]["path"], forza=LUT_USATE[c] if LUT_USATE[c] is not None else False)
+if any(v is not None for v in LUT_USATE.values()) and not colore.cube():
+    print("ATTENZIONE: clip in S-Log3 ma la LUT", colore.LUT_NOME, "non è importata in CapCut: mettila a mano")
+
 # ---------------- testi e clip composte ----------------
 
 
@@ -526,6 +540,9 @@ emoji_giro = Giro(CAT["emoji"], key=lambda s: tuple(anims(TIX, s)))
 
 def emoji(ch, start, secondi=1.4):
     """emoji in una clip composta del catalogo; l'animazione cambia ogni volta"""
+    if str(CFG.get("contesto", "")).lower() in ("discoteca", "club", "locale", "serata"):
+        report.append(f"| Emoji | {ch} | non messa: contesto discoteca (regola 15/11/2026, sono cringe) |")
+        return
     proto = emoji_giro.next()
     if proto is None:
         return
@@ -769,10 +786,22 @@ for i, tr in enumerate(tracks):
             s["render_index"] = 10000
         elif tr["type"] == "video" and tr["flag"] == 2:
             s["render_index"] = 2
-D["tracks"], D["duration"], D["id"], D["name"] = tracks, TOTAL, nid(), ""
+# un progetto già aperto in CapCut ha la sua timeline (Timelines/<id>, Timelines/project.json): CapCut lo apre
+# solo se l'id del draft è quello della timeline, e il draft_id del meta resta quello di prima
+_esist = os.path.join(ROOT, NAME)
+_tl_id = _did_old = None
+try:
+    _tl_id = json.load(open(os.path.join(_esist, "Timelines", "project.json"))).get("main_timeline_id")
+except (OSError, ValueError):
+    pass
+try:
+    _did_old = json.load(open(os.path.join(_esist, "draft_meta_info.json"))).get("draft_id")
+except (OSError, ValueError):
+    pass
+D["tracks"], D["duration"], D["id"], D["name"] = tracks, TOTAL, _tl_id or nid(), ""
 
 meta = copy.deepcopy(TM)
-did, now = nid(), int(time.time() * 1e6)
+did, now = _did_old or nid(), int(time.time() * 1e6)
 meta.update(draft_name=NAME, draft_fold_path=f"{ROOT}/{NAME}", draft_root_path=ROOT, draft_id=did,
             tm_duration=TOTAL, tm_draft_create=now, tm_draft_modified=now, draft_timeline_materials_size_=0)
 proto_entry = [g for g in LM["draft_materials"] if g["type"] == 0][0]["value"][0]
@@ -790,7 +819,7 @@ json.dump(D, open(f"{OUT}/draft_info.json", "w"), ensure_ascii=False)
 json.dump(meta, open(f"{OUT}/draft_meta_info.json", "w"), ensure_ascii=False)
 
 f2 = lambda x: f"{x / 1e6:.2f}"  # noqa: E731
-plan = {"total": TOTAL, "segs": [(n, c, sa / 1e6, sb / 1e6, ts / 1e6, d / 1e6, CUTS[n - 1][3], n in TRANS_AFTER)
+plan = {"lut": {c: v for c, v in LUT_USATE.items() if v is not None}, "total": TOTAL, "segs": [(n, c, sa / 1e6, sb / 1e6, ts / 1e6, d / 1e6, CUTS[n - 1][3], n in TRANS_AFTER)
                                  for n, c, sa, sb, ts, d in segs],
         "report": report, "blocks": [(f2(a), f2(b), lab) for a, b, lab in blocks],
         "subs": [(f2(s["target_timerange"]["start"]), f2(s["target_timerange"]["duration"]),

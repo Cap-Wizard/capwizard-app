@@ -218,6 +218,41 @@ VAULT_RULES = """1. Il MODO DI MONTARE sta nel vault a strade `{vault}` (Obsidia
    `{skill_dir}/scripts`. NON leggere la skill {skill} (SKILL.md): per il modo di montare vale il vault.
 {client}"""
 
+CRITIC = """GIRO DEL CRITICO, PRIMA DELL'EXPORT (regola di Gabriele, 15/11/2026: vale per ogni montaggio). Quando il
+progetto è costruito e verificato:
+1. Fai l'anteprima: `python3 {skill_dir}/scripts/anteprima.py "<cartella del progetto>" "{work}/anteprima_<N>.mp4"`
+   (N = numero del giro). Accanto scrive `anteprima_<N>.mp4.json` (cosa c'è, cosa non mostra, buchi, transizioni,
+   elementi nascosti) e `anteprima_<N>.voce.wav` (la sola voce). Se stampa BUCHI, correggili prima del critico.
+2. Chiama l'agente `critico-video` (strumento Agent, subagent_type "critico-video") con: il percorso dell'anteprima e
+   del suo .json, «è un'ANTEPRIMA del progetto CapCut, non l'export: transizioni, animazioni, filtri e grafica dei
+   preset non ci sono, mettili in Non verificato», il cliente e il suo profilo, la cartella delle clip, il testo
+   previsto se c'è, e gli errori dei giri prima.
+3. Se risponde DA RIFARE, correggi (config e ricostruzione, o il progetto) e rifai dal punto 1. Correggi solo quello
+   che ha una prova (tempo, misura, fotogramma); se un errore viene da una regola che non vale per questo video,
+   scrivilo e non contarlo.
+4. Ti fermi quando risponde PASSA, al massimo dopo 4 giri: allora quello che resta va in cima a «da_fare_a_mano».
+Il video passa all'export di Gabriele SOLO quando il critico non ha più niente da dire. Nel risultato metti
+"critico": {{"giri": <n>, "esito": "PASSA" | "DA RIFARE", "restano": ["<errore ancora aperto>", ...]}}.
+"""
+
+CRITIC_AGENT = Path.home() / ".claude/agents/critico-video.md"
+
+
+def critic_text(skill_dir, work) -> str:
+    """The critic loop, only on a Mac that has the critic agent (Gabriele's)."""
+    return CRITIC.format(skill_dir=skill_dir, work=work) if CRITIC_AGENT.exists() else ""
+
+
+def critic_line(res: dict) -> str:
+    """One line on how the critic judged the preview, '' if it did not run."""
+    c = res.get("critico") if isinstance(res.get("critico"), dict) else None
+    if not c:
+        return ""
+    restano = [x for x in c.get("restano") or [] if x]
+    return (f"Critico: {c.get('esito', '?')} dopo {c.get('giri', '?')} giri"
+            + (f"; restano: {'; '.join(restano)}" if restano else "; pronto per l'export"))
+
+
 PROMPT = """Monta un reel verticale in CapCut. Lavori in automatico dall'app CapWizard: NON fare domande,
 decidi tu seguendo le regole. Se manca qualcosa di indispensabile, fermati e spiegalo nel risultato.
 
@@ -233,10 +268,12 @@ Dati del lavoro:
 Cartella di lavoro (è la tua `<lavoro>`): `{work}`
 Report, registro dei progetti e messaggio a Nicola li fa l'app dal risultato: non usare `registra.py`.
 
+{critic}
 Alla fine scrivi il file `{result}` con questo JSON:
 {{"progetto": "<percorso completo della cartella del progetto in com.lveditor.draft>", "nome": "{name}",
  "durata": <secondi>, "riassunto": "<cosa hai fatto, in italiano, 5-8 righe>",
- "da_fare_a_mano": ["<cosa resta da fare in CapCut>", ...]}}
+ "da_fare_a_mano": ["<cosa resta da fare in CapCut>", ...],
+ "critico": {{"giri": <n>, "esito": "PASSA" | "DA RIFARE", "restano": [...]}}}}
 Se non riesci a creare il progetto scrivi lo stesso il file con "progetto": null e il motivo nel riassunto.
 Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
 
@@ -317,7 +354,7 @@ def _run_claude(job, prompt: str, dirs: set[str], model: str, cwd: Path, transcr
                     + ", ".join(t.removeprefix("mcp__claude_ai_").removeprefix("mcp__") for t in ai_tools))
     cmd = [find_claude_cli(), "-p", "--output-format", "stream-json", "--verbose", *extra,
            "--model", model, "--permission-mode", "acceptEdits",
-           "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill", *ai_tools,
+           "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill", "Agent", *ai_tools,
            "--add-dir", *sorted(dirs)]
     proc = subprocess.Popen(cmd, cwd=cwd, env=env, text=True, bufsize=1,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -506,6 +543,7 @@ def run_agent(job, req) -> tuple[str, str]:
         duration=f"{req.ai_target_duration:g} s" if req.ai_target_duration else "la decidi tu",
         title=f"«{req.intro_title}»" if req.intro_title else "lo decidi tu",
         extra="\n".join(extra), work=work, result=result,
+        critic=critic_text(skill_md.parent, work),
     )
 
     dirs = {str(Path(req.input_path)), str(CAPCUT_PROJECTS_DIR), str(skill_md.parent), str(work)}
@@ -538,10 +576,13 @@ def run_agent(job, req) -> tuple[str, str]:
     report = work / "report.md"
     report.write_text(
         f"# {req.name}\n\nCliente: {client['nome'] if client else '—'} · template «{req.template}» · "
-        f"durata {res.get('durata', '?')} s\n\n## Cosa ha fatto Claude\n{res.get('riassunto', '')}\n\n"
+        f"durata {res.get('durata', '?')} s\n\n## Cosa ha fatto Claude\n{res.get('riassunto', '')}\n\n" +
+        (f"## Critico\n{critic_line(res)}\n\n" if critic_line(res) else "") +
         "## DA FARE A MANO IN CAPCUT\n" + ("\n".join(f"- {t}" for t in todo) or "- niente") +
         "\n\n## Messaggi di Claude\n\n" + "\n\n".join(transcript[1:]) + "\n")
     job.log("✓ " + res.get("riassunto", "Progetto creato.").replace("\n", " "))
+    if critic_line(res):
+        job.log("🔎 " + critic_line(res))
     for t in todo:
         job.log(f"☐ {t}")
     try:
@@ -580,8 +621,10 @@ MODIFICHE RICHIESTE ORA (da Nicola o dal cliente):
 {procedure}
 La copia di sicurezza l'ha già fatta l'app e lo storico lo aggiorna lei: non rifarla e non usare `registra.py`.
 {lesson}
+{critic}
 Alla fine scrivi il file `{result}` con: {{"riassunto": "<cosa hai cambiato, in italiano, 2-5 righe>",
-   "lezione": "<la lezione per i prossimi video, una riga, o null>"}}.
+   "lezione": "<la lezione per i prossimi video, una riga, o null>",
+   "critico": {{"giri": <n>, "esito": "PASSA" | "DA RIFARE", "restano": [...]}}}}.
 Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
 
 LESSON = "La lezione va nel profilo del cliente `{profile}` (passo 8 della skill), con la data {day}."
@@ -763,7 +806,7 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
                                    day=time.strftime("%d/%m/%Y")) if vault_dir
         else LESSON.format(profile=profile, day=time.strftime("%d/%m/%Y")) if profile
         else "Non c'è un profilo cliente: scrivi la lezione solo nel risultato.",
-        result=result,
+        critic=critic_text(skill_md.parent, work), result=result,
     )
     dirs = {str(folder), str(CAPCUT_PROJECTS_DIR), str(skill_md.parent), str(work), str(backup), str(ATTACH_DIR)}
     dirs |= {str(Path(p).parent) for p in images if p.lower().endswith(VIDEO_EXT)}     # attached videos stay in their folder
@@ -789,6 +832,8 @@ def run_modify(job, project: dict, text: str, images: list[str], model: str = "o
                  profilo=client["nome"] if client else "")
     _save_mods(project["id"], mods)
     job.log("✓ " + (res.get("riassunto") or "Modifiche fatte.").replace("\n", " "))
+    if critic_line(res):
+        job.log("🔎 " + critic_line(res))
     if res.get("lezione"):
         log = vault_dir / "8 Per Gabriele/Registro versioni.md" if vault_dir else None
         in_vault = bool(log and log.exists() and log.stat().st_mtime > started)       # written as a rule of the method

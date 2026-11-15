@@ -170,6 +170,20 @@ for n, c, sa, sb, ts, d, is_last in subs_v:
     s["uniform_scale"] = {"on": True, "value": 1.0}
     vsegs.append(s)
 
+# ---------------- colore: LUT sulle clip in S-Log3 (social parlati, regola 15/11/2026) ----------------
+# config «contesto» ("discoteca" = sempre 40 %), «lut» (numero 0-1 = forza l'intensità, false = mai)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import colore
+LUT_USATE = {}
+for c, m in vmat.items():
+    f = CFG.get("lut")
+    LUT_USATE[c] = (None if f is False else float(f)) if f is not None else colore.intensita(m["path"], CFG.get("contesto"))
+for s in vsegs:
+    c = next(k for k, m in vmat.items() if m["id"] == s["material_id"])
+    colore.applica(s, M, vmat[c]["path"], forza=LUT_USATE[c] if LUT_USATE[c] is not None else False)
+if any(v is not None for v in LUT_USATE.values()) and not colore.cube():
+    print("ATTENZIONE: clip in S-Log3 ma la LUT", colore.LUT_NOME, "non è importata in CapCut: mettila a mano")
+
 # ---------------- coperture b-roll ----------------
 cover_segs, cover_report = [], []
 def copertura(fname, start, end, bin_s=0.0):
@@ -536,7 +550,7 @@ def stxt(s):
     m = TX.get(mid) or TX[TT[mid]["text_info_resources"][0]["text_material_id"]]
     return json.loads(m["content"])["text"]
 f = lambda x: f"{x/1e6:.2f}"
-plan = {"total": TOTAL, "segs": [(n, c, sa/1e6, sb/1e6, ts/1e6, d/1e6, CUTS[n-1][3], n in CLOSE, n in TRANS_AFTER, ROT.get(c, 0))
+plan = {"lut": {c: v for c, v in LUT_USATE.items() if v is not None}, "total": TOTAL, "segs": [(n, c, sa/1e6, sb/1e6, ts/1e6, d/1e6, CUTS[n-1][3], n in CLOSE, n in TRANS_AFTER, ROT.get(c, 0))
                                 for n, c, sa, sb, ts, d in segs],
         "report": report, "blocks": [(f(a), f(b), l) for a, b, l in blocks],
         "subs": [(f(s["target_timerange"]["start"]), f(s["target_timerange"]["duration"]), stxt(s)) for s in subs],

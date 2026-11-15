@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 import audio
+import colore
 
 EXT = {".mp4", ".mov", ".m4v", ".mts", ".mxf"}
 
@@ -68,6 +69,10 @@ def main():
         else:
             info = audio.probe(str(f))
             r = {"file": f.name, "percorso": str(f), **info, "capcut": audio.rotazione_capcut(info)}
+            r["gamma"] = colore.gamma(str(f))
+            if "s-log3" in r["gamma"].lower():       # S-Log3: LUT in CapCut, 40 % al buio, 100 % con luce
+                r["luce"] = colore.luce(str(f))
+                r["lut"] = colore.LUT_BUIO if (r["luce"] or 0) < colore.BUIO else colore.LUT_LUCE
             if info["audio"]:
                 d = audio.db(str(f))
                 forte = float(np.percentile(d[d > -60], 95)) if (d > -60).any() else -20
@@ -82,7 +87,8 @@ def main():
                                      for s, e in audio.tratti_forti(str(f), 0, info["durata"], soglia)]
             dest.write_text(json.dumps(r, ensure_ascii=False))
         rot = r["capcut"]["nota"]
-        print(f"\n## {f.stem}  {r['durata']:.2f}s  {rot}")
+        lut = f"  S-Log3, luce {r.get('luce')}, LUT {r['lut']:.0%}" if r.get("lut") else ""
+        print(f"\n## {f.stem}  {r['durata']:.2f}s  {rot}{lut}")
         if r.get("parole"):
             print("   " + " ".join(w[0] if w[4] else f"[{w[0]}]" for w in r["parole"]))
             for t in r["tratti_forti"]:

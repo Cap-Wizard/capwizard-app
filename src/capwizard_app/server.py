@@ -1962,6 +1962,9 @@ def run() -> None:
     except OSError as e:
         print(f"skill non installata: {e}", flush=True)
     vault.ensure_voz(Path(args.skill_dir) if args.skill_dir else None, log=lambda m: print(m, flush=True))
+    # social exports at -14 LUFS: a copy next to each CapCut export (volume_social)
+    from capwizard_app import volume_social
+    volume_social.avvia(notify=lambda t, b, ok: _notify(t, b, ok), log=lambda m: print(m, flush=True))
     # the shared client brain: read the vault from it (decided now, from disk), then in the
     # background pull it, link its client skills and switch to it if it gained clients
     chosen = brain.choose_vault(vault.enabled())

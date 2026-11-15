@@ -29,6 +29,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import shutil
 import time
 import uuid
@@ -313,10 +314,58 @@ def colora(template: str, colore: str) -> int:
     return n
 
 
-def crea(cliente: str, colore: str, bases: list[str] = (), emoji: str = "⭐") -> dict:
+NOTTE = ("discoteca", "club", "locale", "serata")    # contesti dove le emoji sono cringe (Gabriele, 15/11/2026)
+_NOTTE_RE = re.compile(r"discotec|\bclub\b|serat[ae]|locale notturno|nightlife|dj set", re.I)
+
+
+def contesto_da_testo(testo: str) -> str:
+    """«discoteca» se il testo (nota o profilo del cliente) parla di club e serate, altrimenti ''."""
+    return "discoteca" if _NOTTE_RE.search(testo or "") else ""
+
+
+def togli_emoji(template: str) -> int:
+    """Discoteche e club: niente emoji nel template. Toglie le clip composte fatte solo di emoji e le emoji
+    dentro le altre composte (dietro al titolo). Ritorna quanti pezzi ha tolto."""
+    dst = CAPCUT_PROJECTS_DIR / template
+    D = json.load(open(dst / "draft_info.json"))
+    ix = _materials_index(D)
+    tolti = 0
+
+    def emoji_seg(dd: dict, seg: dict) -> bool:
+        m = _materials_index(dd).get(seg["material_id"], ("", {}))[1]
+        return "content" in m and _is_emoji(_shown_text(m)) and _shown_text(m).strip() != ""
+
+    for t in D["tracks"]:
+        keep = []
+        for seg in t["segments"]:
+            dr = next((ix[r][1] for r in seg.get("extra_material_refs") or [] if ix.get(r, ("",))[0] == "drafts"), None)
+            sub = dr.get("draft") if dr else None
+            if isinstance(sub, dict):
+                segs = [x for tt in sub["tracks"] for x in tt["segments"]]
+                if segs and all(emoji_seg(sub, x) for x in segs):
+                    tolti += 1
+                    continue
+                for tt in sub["tracks"]:
+                    n = len(tt["segments"])
+                    tt["segments"] = [x for x in tt["segments"] if not emoji_seg(sub, x)]
+                    tolti += n - len(tt["segments"])
+                sub["tracks"] = [tt for tt in sub["tracks"] if tt["segments"] or tt["type"] == "video"]
+            keep.append(seg)
+        t["segments"] = keep
+    D["tracks"] = [t for t in D["tracks"] if t["segments"] or t.get("flag", 0) == 0]
+    for f in [dst / "draft_info.json", dst / "draft_info.json.bak", dst / "template.tmp", dst / "template-2.tmp",
+              *dst.glob("Timelines/*/draft_info.json"), *dst.glob("Timelines/*/draft_info.json.bak"),
+              *dst.glob("Timelines/*/template.tmp"), *dst.glob("Timelines/*/template-2.tmp")]:
+        if f.exists():
+            json.dump(D, open(f, "w"), ensure_ascii=False)
+    return tolti
+
+
+def crea(cliente: str, colore: str, bases: list[str] = (), emoji: str = "⭐", contesto: str = "") -> dict:
     """Create «TEMPLATE <CLIENTE>» in CapCut. Never overwrites an existing project. With the catalogue on this
     Mac the new template is a catalogue too: its pieces, dressed with the master's graphics and the client's
-    colour (the words, the emojis and the music are placeholders to change)."""
+    colour (the words, the emojis and the music are placeholders to change). contesto «discoteca» (club,
+    serate): no emojis at all (togli_emoji)."""
     nome = f"TEMPLATE {cliente.strip().upper()}"
     dst = CAPCUT_PROJECTS_DIR / nome
     if dst.exists():
@@ -327,9 +376,13 @@ def crea(cliente: str, colore: str, bases: list[str] = (), emoji: str = "⭐") -
                       None) or pick_master([b for b in bases if b])
         out = con_stile(master, nome, CATALOGO)
         n = colora(nome, colore)
+        notte = (contesto or "").lower() in NOTTE
+        senza = togli_emoji(nome) if notte else 0
         out.update(master=master, msg=f"Creato in CapCut «{nome}» a catalogo (pezzi di «{CATALOGO}», grafica di "
-                                      f"«{master}», colore {colore} su {n} testi). Parole, emoji e musica sono "
-                                      f"segnaposto: metti le musiche dello stile del cliente.")
+                                      f"«{master}», colore {colore} su {n} testi). "
+                                      + (f"Contesto discoteca: {senza} emoji tolte. Parole e musica sono segnaposto."
+                                         if notte else "Parole, emoji e musica sono segnaposto: ")
+                                      + " metti le musiche dello stile del cliente.")
         return out
     master = pick_master([b for b in bases if b])
     D = build(master, colore, emoji)
@@ -459,6 +512,23 @@ def _dress(m: dict, look: dict) -> None:
     st["range"] = [0, utf16len(c["text"])]
     c["styles"] = [st]
     m["content"] = json.dumps(c, ensure_ascii=False)
+
+
+def _retime(project: Path, old: str | None, new: str) -> None:
+    """CapCut opens a project only when its draft id is also the id of its timeline (the folder
+    Timelines/<id> and the ids in Timelines/project.json). A copy gets a new draft id, so its timeline
+    must follow, or CapCut shows the project in the list and never opens it."""
+    tl = project / "Timelines"
+    if not old or old == new or not tl.is_dir():
+        return
+    if (tl / old).is_dir():
+        (tl / old).rename(tl / new)
+    for f in [*tl.glob("project.json*"), project / "timeline_layout.json", project / "draft_biz_config.json",
+              *(tl / new).rglob("*.json")]:
+        if f.is_file():
+            txt = f.read_text(errors="ignore")
+            if old in txt:
+                f.write_text(txt.replace(old, new))
 
 
 def con_stile(stile: str, template: str, struttura: str | None = None) -> dict:
@@ -622,14 +692,16 @@ def con_stile(stile: str, template: str, struttura: str | None = None) -> dict:
                 t["segments"][0]["volume"] = music.get("volume", 0.14)
                 break
 
-    D["id"] = nid()
+    src_id, D["id"] = D.get("id"), nid()
+    _retime(tmp, src_id, D["id"])
     meta = json.load(open(tmp / "draft_meta_info.json"))
     meta.update(draft_name=template, draft_fold_path=str(dst), draft_root_path=str(CAPCUT_PROJECTS_DIR),
                 draft_id=old_id or nid())
     for g in meta.get("draft_materials") or []:   # the structure's own imported files: not ours ("Link media")
         g["value"] = []
     for f in [tmp / "draft_info.json", tmp / "draft_info.json.bak", tmp / "template.tmp", tmp / "template-2.tmp",
-              *tmp.glob("Timelines/*/draft_info.json")]:
+              *tmp.glob("Timelines/*/draft_info.json"), *tmp.glob("Timelines/*/draft_info.json.bak"),
+              *tmp.glob("Timelines/*/template.tmp"), *tmp.glob("Timelines/*/template-2.tmp")]:
         if f.exists():
             json.dump(D, open(f, "w"), ensure_ascii=False)
     json.dump(meta, open(tmp / "draft_meta_info.json", "w"), ensure_ascii=False)

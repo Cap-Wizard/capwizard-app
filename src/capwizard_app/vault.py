@@ -749,7 +749,9 @@ def assicura_template(ag: str, cl: str, log=print) -> str:
     if not f:
         return ""
     try:
-        out = template_maker.crea(cl, colore(cl), bases=[base_for(ag)])
+        testo = open(f).read() + (open(note(ag)).read() if note(ag) else "")
+        out = template_maker.crea(cl, colore(cl), bases=[base_for(ag)],
+                                  contesto=template_maker.contesto_da_testo(testo))
     except Exception as e:  # noqa: BLE001  (the client exists anyway; the template can be made later)
         log(f"⚠ Template CapCut non creato: {e}")
         return f"Template CapCut non creato: {e}"
