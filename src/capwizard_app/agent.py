@@ -197,10 +197,11 @@ def client_rules(client_id: str) -> str:
 # The editing run
 # ---------------------------------------------------------------------------
 
-# Gabriele's way of editing reels as an Obsidian vault read by roads, in his own vault «Me» (Editing 1.0). Only on a Mac
+# Gabriele's way of editing reels as an Obsidian vault read by roads, in his own vault «Me» (Editing/Reel, renamed from
+# Editing 1.0/Reel 1.0 on 2026-11-16, split into «1 Parlati» and «2 Cine» the same day). Only on a Mac
 # that has it (his): there the method comes from the vault and the client (template, graphics, sounds, music, names,
 # lessons) from its CapWizard profile as always. Everywhere else CapWizard works as before, with the skill.
-REEL_VAULT = Path(os.environ.get("CAPWIZARD_REEL_VAULT") or Path.home() / "Desktop/Me/Editing 1.0/Reel 1.0")
+REEL_VAULT = Path(os.environ.get("CAPWIZARD_REEL_VAULT") or Path.home() / "Desktop/Me/Editing/Reel")
 
 
 def reel_vault() -> Path | None:
@@ -212,10 +213,13 @@ def _reel_cartello(v: Path) -> str:
     return "00 Strade Reel.md" if (v / "00 Strade Reel.md").exists() else "00 Strade.md"
 
 
-VAULT_RULES = """1. Il MODO DI MONTARE sta nel vault a strade `{vault}` (Obsidian): parti da `{cartello}` e `CLAUDE.md` e leggi
-   SOLO le note che indicano per questo video: `1 Sempre/`, la strada del girato, la strada del template, le mosse
-   elencate, `5 Procedura/Procedura e comandi.md` per i comandi. Il resto non si apre. Gli script sono in
-   `{skill_dir}/scripts`. NON leggere la skill {skill} (SKILL.md): per il modo di montare vale il vault.
+VAULT_RULES = """1. Il MODO DI MONTARE sta nel vault a strade `{vault}` (Obsidian): parti da `{cartello}` e `CLAUDE.md`, che
+   scelgono il percorso del reel: `1 Parlati/` (una persona parla e la voce guida i tagli) o `2 Cine/` (nessuno parla).
+   Dentro il percorso leggi il suo `CLAUDE.md` e il suo cartello e SOLO le note che indicano per questo video (per i
+   parlati: `1 Sempre/`, la strada del girato, la strada del template, le mosse elencate, `5 Procedura/Procedura e
+   comandi.md` per i comandi). L'altro percorso non si apre. Gli script sono in `{skill_dir}/scripts`. NON leggere la
+   skill {skill} (SKILL.md): per il modo di montare vale il vault, tranne finché il percorso scelto non ha regole
+   (`2 Cine/` da scrivere): allora segui la skill e scrivilo nel report.
 {client}"""
 
 CRITIC = """GIRO DEL CRITICO, PRIMA DELL'EXPORT (regola di Gabriele, 15/11/2026: vale per ogni montaggio). Quando il
@@ -637,8 +641,9 @@ Scrivi messaggi brevi in italiano su cosa stai facendo, passo per passo."""
 
 LESSON = "La lezione va nel profilo del cliente `{profile}` (passo 8 della skill), con la data {day}."
 VAULT_LESSON = ("Se la correzione riguarda IL MODO DI MONTARE (vale per ogni cliente) diventa una REGOLA nella nota giusta del "
-                "vault `{vault}` (vedi `CLAUDE.md`, «Dopo una correzione»), correggendo quella vecchia che contraddice, più una "
-                "riga nel `8 Per Gabriele/Registro versioni.md` con la data {day}. Se riguarda IL CLIENTE (suoi suoni, volumi, "
+                "vault `{vault}`, nella cartella del percorso del video (`1 Parlati/` o `2 Cine/`, vedi il suo `CLAUDE.md`, «Dopo "
+                "una correzione»), correggendo quella vecchia che contraddice, più una voce nel Registro versioni del percorso "
+                "con la data {day}. Se riguarda IL CLIENTE (suoi suoni, volumi, "
                 "musica, nomi, grafica) va nel suo profilo {profile}, con la data {day}.")
 
 
