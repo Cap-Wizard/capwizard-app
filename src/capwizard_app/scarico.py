@@ -39,14 +39,34 @@ def skill_md() -> Path | None:
     return next((p for p in cands if p.exists()), None)
 
 
+# Gabriele's way of sorting clips as an Obsidian section read by roads, in his own vault «Me» (Editing/Smistamento clip,
+# 2026-11-16). Only on a Mac that has it (his): there Claude follows those notes and the client codes come from its
+# «Codici cliente» note. Everywhere else the scarico skill as before.
+SORT_VAULT = Path(os.environ.get("CAPWIZARD_SORT_VAULT") or Path.home() / "Desktop/Me/Editing/Smistamento clip")
+SORT_CARTELLO = "00 Strade Smistamento.md"
+
+
+def sort_vault() -> Path | None:
+    return SORT_VAULT if (SORT_VAULT / SORT_CARTELLO).is_file() else None
+
+
+def _codes_table(md: Path) -> list[dict]:
+    return [{"codice": c, "cliente": n.strip()} for c, n in re.findall(r"^\|\s*([A-Z0-9]{2,6})\s*\|\s*([^|]+?)\s*\|", md.read_text(), re.M)
+            if c != "Codice"]
+
+
 def client_codes() -> list[dict]:
-    """The «Codici cliente» table of the skill; on a Mac that keeps its clients to itself, its own vault clients."""
+    """The «Codici cliente» table: on a Mac that keeps its clients to itself its own vault clients; on Gabriele's Mac
+    the note in his sorting section; else the skill's."""
     if brain.disabled() and vault.enabled():
         return own_codes()
+    v = sort_vault()
+    if v and (codes := next((_codes_table(f) for f in v.rglob("Codici cliente.md")), [])):
+        return codes
     md = skill_md()
     if not md:
         return []
-    return [{"codice": c, "cliente": n.strip()} for c, n in re.findall(r"^\|\s*([A-Z]{4})\s*\|\s*([^|]+?)\s*\|", md.read_text(), re.M)]
+    return _codes_table(md)
 
 
 def own_codes() -> list[dict]:
@@ -69,8 +89,7 @@ def own_codes() -> list[dict]:
 PROMPT = """Smistamento del girato di uno shooting per {agenzia}. Lavori in automatico dall'app CapWizard: NON fare domande
 e NON toccare le clip (niente rinomina, niente spostamenti): l'app mostra il tuo piano a {chi} e lo esegue lei dopo il suo ok.
 
-Segui la skill **{skill}**: {skill_md}
-Fai solo la parte di analisi del passo 3 (smistamento per PDP) e prepara quello che servirebbe per la tabella del passo 4.
+{regole}
 L'inventario, la ricerca delle clip nere e la trascrizione li ha già fatti l'app: sono in `{inventario}`
 (una riga per clip in ordine di numero camera: "n", "nome", "durata", "yavg", "nera", "mano" = forse obiettivo coperto con la mano, "testo").
 
@@ -104,8 +123,8 @@ def _check_output(output: str) -> Path:
 def analyse(job, d: dict) -> dict:
     if not find_claude_cli():
         raise RuntimeError("Non trovo Claude Code sul Mac.")
-    md = skill_md()
-    if not md:
+    md, sv = skill_md(), sort_vault()
+    if not md and not sv:
         raise RuntimeError("Manca la skill scarico.")
     codice = (d.get("codice") or "").strip().upper()
     if codice and not re.fullmatch(r"[A-Z0-9]{2,6}", codice):
@@ -145,13 +164,22 @@ def analyse(job, d: dict) -> dict:
         (work / "pdp.txt").write_text(pdp)
     result = work / "piano.json"
     own = {c["codice"]: c["cliente"] for c in own_codes()} if brain.disabled() and vault.enabled() else {}
+    if sv:
+        regole = (f"Il MODO DI SMISTARE sta nella cartella a strade `{sv}` (Obsidian): parti da `{SORT_CARTELLO}` e "
+                  f"`CLAUDE.md` e segui le sue note (`1 Regole/` tutte, `5 Procedura/` per i passi). NON leggere la skill "
+                  f"{SKILL}: vale la cartella. Fai solo la parte di analisi (dividere le clip nei video e abbinarli al PDP).")
+        job.log(f"Smisto col tuo modo di smistare (Obsidian «{sv.name}»)")
+    else:
+        regole = (f"Segui la skill **{SKILL}**: {md}\nFai solo la parte di analisi del passo 3 (smistamento per PDP) e "
+                  "prepara quello che servirebbe per la tabella del passo 4.")
+    chi = "Daniel" if own else "Gabriele" if sv else "Nicola"
     prompt = PROMPT.format(agenzia=f"il cliente {own[codice]}" if codice in own else "l'agenzia Kora",
-                           chi="Daniel" if own else "Nicola", skill=SKILL, skill_md=md, inventario=inv_path,
+                           chi=chi, regole=regole, inventario=inv_path,
                            codice=f"{codice} — {own[codice]}" if codice in own else codice or "non indicato",
                            pdp=f"in `{work / 'pdp.txt'}`" if pdp else "nessuno",
                            note=(d.get("note") or "").strip() or "nessuna", ffmpeg=vault.ffmpeg() or "ffmpeg",
                            work=work, result=result)
-    dirs = {str(work), str(md.parent)} | {str(Path(p) if Path(p).is_dir() else Path(p).parent) for p in d["clip"]}
+    dirs = {str(work), str(sv or md.parent)} | {str(Path(p) if Path(p).is_dir() else Path(p).parent) for p in d["clip"]}
     error = _run_claude(job, prompt, dirs, d.get("ai_model") or "sonnet", work, [],
                         step_of=lambda t, i: 2)
     if job.stopped:
